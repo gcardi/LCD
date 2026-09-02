@@ -1,0 +1,32 @@
+# Gowin IDE: per-user settings and generated implementation results
+*.gprj.user
+/impl/
+
+# Gowin IP Generator: keep .ipc files and generated synthesis wrappers,
+# discard regeneration reports, templates and simulation netlists.
+**/temp/
+*.mod
+*.vo
+*_tmp.v
+
+# Open-source Gowin flow (Yosys, nextpnr-gowin and Apicula/Lushay Labs)
+/build/
+/build-*/
+/out/
+*.synth.json
+*.pnr.json
+*.timing.json
+*.fs
+*.bin
+*.binx
+
+# Simulation and waveform output
+*.vvp
+*.fst
+*.vcd
+
+# Operating-system and editor files
+.DS_Store
+Thumbs.db
+*~
+

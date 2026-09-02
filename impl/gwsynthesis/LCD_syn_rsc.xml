@@ -1,9 +1,0 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<Module name="TOP" T_Register="596(0)" T_Alu="60(0)" T_Lut="1009(0)" T_Bsram="3(0)">
- <SubModule name="Gowin_rPLL_9Mhz"/>
- <SubModule name="psram_pll_inst"/>
- <SubModule name="psram_inst" Register="409" Alu="30" Lut="640" Bsram="2" T_Register="409(409)" T_Alu="30(30)" T_Lut="640(640)" T_Bsram="2(2)"/>
- <SubModule name="framebuffer_controller_inst" Register="67" Lut="151" T_Register="67(67)" T_Lut="151(151)"/>
- <SubModule name="framebuffer_fifo_inst" Register="86" Alu="30" Lut="96" Bsram="1" T_Register="86(86)" T_Alu="30(30)" T_Lut="96(96)" T_Bsram="1(1)"/>
- <SubModule name="VGA_timing_inst" Register="34" Lut="122" T_Register="34(34)" T_Lut="122(122)"/>
-</Module>
