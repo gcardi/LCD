@@ -13,5 +13,6 @@
         <File path="src/gowin_rpll/gowin_rpll.v" type="file.verilog" enable="1"/>
         <File path="src/psram_memory_interface_hs/psram_memory_interface_hs.v" type="file.verilog" enable="1"/>
         <File path="src/LCD.cst" type="file.cst" enable="1"/>
+        <File path="src/LCD.sdc" type="file.sdc" enable="1"/>
     </FileList>
 </Project>
