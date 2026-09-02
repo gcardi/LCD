@@ -71,6 +71,7 @@ module tb_frame_resync;
 
     wire [4:0] lcd_r, lcd_b;
     wire [5:0] lcd_g;
+    wire       lcd_de, lcd_hsync, lcd_vsync;
 
     VGA_Timing vga (
         .PixelClk(lcd_clk), .nRST(lcd_rst_n),
@@ -79,7 +80,7 @@ module tb_frame_resync;
 `ifndef LEGACY
         .FrameRestart(frame_restart_lcd),
 `endif
-        .LCD_DE(), .LCD_HSYNC(), .LCD_VSYNC(),
+        .LCD_DE(lcd_de), .LCD_HSYNC(lcd_hsync), .LCD_VSYNC(lcd_vsync),
         .LCD_R(lcd_r), .LCD_G(lcd_g), .LCD_B(lcd_b));
 
     // ------------------------------------------------------------------
@@ -97,6 +98,23 @@ module tb_frame_resync;
     integer bad_after_fault = 0;
     integer frames_after_fault = 0;
 
+    // VSYNC measured as a host interrupt source: width and one pulse per frame.
+    integer vs_high = 0, vs_width = 0, vs_pulses = 0;
+    reg     vs_d = 1'b0;
+
+    always @(posedge lcd_clk) begin
+        vs_d <= lcd_vsync;
+        if (lcd_vsync)          vs_high <= vs_high + 1;
+        else if (vs_d) begin
+            vs_width  <= vs_high;
+            vs_pulses <= vs_pulses + 1;
+            vs_high   <= 0;
+        end
+    end
+
+    reg started_d;
+    always @(posedge lcd_clk) started_d <= vga.stream_started;
+
     always @(posedge lcd_clk) begin
         if (frame_mark) begin
             if (frame_no >= 0) begin
@@ -113,8 +131,10 @@ module tb_frame_resync;
             pix_index  <= 0;
             mismatches <= 0;
             blanked    <= 0;
-        end else if (vga.video_active) begin
-            if (!vga.stream_started)          blanked    <= blanked + 1;
+        end else if (lcd_de) begin
+            // Scored on the registered outputs, i.e. what actually leaves the
+            // pins. stream_started is delayed to match that register stage.
+            if (!started_d)                         blanked    <= blanked + 1;
             else if (pixel_out !== pix_index[15:0]) mismatches <= mismatches + 1;
             pix_index <= pix_index + 1;
         end
@@ -206,6 +226,9 @@ module tb_frame_resync;
 
         wait (frames_after_fault >= 4);
 
+        $display("");
+        $display("[vsync] %0d impulsi in %0d frame, larghezza %0d clock = %.0f us",
+                 vs_pulses, frame_no, vs_width, vs_width / 9.0);
         $display("");
         $display("--- esito: %0d frame danneggiati su %0d dopo il guasto ---",
                  bad_after_fault, frames_after_fault);

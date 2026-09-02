@@ -9,9 +9,9 @@ module VGA_Timing
     output                  PixelReadEnable,
     output                  FrameRestart,
 
-    output                  LCD_DE,
-    output                  LCD_HSYNC,
-    output                  LCD_VSYNC,
+    output logic            LCD_DE,
+    output logic            LCD_HSYNC,
+    output logic            LCD_VSYNC,
 
 	output logic    [4:0]   LCD_B,
 	output logic    [5:0]   LCD_G,
@@ -58,9 +58,13 @@ module VGA_Timing
 
     // SYNC-DE MODE
     
-    assign  LCD_HSYNC = H_PixelCount <= (PixelForHS-H_FrontPorch) ? 1'b0 : 1'b1;
+    wire hsync_level = (H_PixelCount <= (PixelForHS - H_FrontPorch)) ? 1'b0 : 1'b1;
     
-	assign  LCD_VSYNC = V_PixelCount  <= (PixelForVS-0)  ? 1'b0 : 1'b1;
+    // Active-high for V_FrontPorch lines at the end of the frame, mirroring
+    // the horizontal convention above. The previous "-0" left this stuck at 0,
+    // because V_PixelCount never exceeds PixelForVS. The rising edge marks the
+    // start of vertical blanking and is the frame interrupt for a host MCU.
+    wire vsync_level = (V_PixelCount <= (PixelForVS - V_FrontPorch)) ? 1'b0 : 1'b1;
 
     wire video_active = ( H_PixelCount >= H_BackPorch ) &&
                         ( H_PixelCount <  H_Pixel_Valid + H_BackPorch ) &&
@@ -84,7 +88,6 @@ module VGA_Timing
     logic pixel_half;
     logic [15:0] pixel_rgb565;
 
-    assign LCD_DE = video_active && PixelClk;
 
     // In FWFT mode PixelWord already contains the current word. Pop it while
     // its second RGB565 pixel is being consumed.
@@ -121,10 +124,33 @@ module VGA_Timing
         end else begin
             pixel_rgb565 = 16'h0000;
         end
+    end
 
-        LCD_R = pixel_rgb565[15:11];
-        LCD_G = pixel_rgb565[10:5];
-        LCD_B = pixel_rgb565[4:0];
+    // Every display output leaves through one register stage on PixelClk.
+    //
+    // This replaces "LCD_DE = video_active && PixelClk", which fed the clock
+    // into the fabric as data: that made DE a half-period pulse whose timing
+    // against the LCD_CLK pin depended on routing, and exposed it to glitches.
+    // Registering instead gives every signal one identical clock-to-out path,
+    // stable for a whole period, and the panel keeps sampling on the falling
+    // edge with half a period of margin. The whole bus shifts by one pixel
+    // clock, sync included, so their relative alignment is unchanged.
+    always_ff @(posedge PixelClk or negedge nRST) begin
+        if (!nRST) begin
+            LCD_DE    <= 1'b0;
+            LCD_HSYNC <= 1'b0;
+            LCD_VSYNC <= 1'b0;
+            LCD_R     <= 5'd0;
+            LCD_G     <= 6'd0;
+            LCD_B     <= 5'd0;
+        end else begin
+            LCD_DE    <= video_active;
+            LCD_HSYNC <= hsync_level;
+            LCD_VSYNC <= vsync_level;
+            LCD_R     <= pixel_rgb565[15:11];
+            LCD_G     <= pixel_rgb565[10:5];
+            LCD_B     <= pixel_rgb565[4:0];
+        end
     end
 
 endmodule
