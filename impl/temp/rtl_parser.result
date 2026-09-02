@@ -1,0 +1,80 @@
+[
+ {
+  "InstFile" : "C:/Users/Giuliano/Documents/Embarcadero/Studio/Projects/TangNano/9K/LCD/src/TOP.sv",
+  "InstLine" : 1,
+  "InstName" : "TOP",
+  "ModuleFile" : "C:/Users/Giuliano/Documents/Embarcadero/Studio/Projects/TangNano/9K/LCD/src/TOP.sv",
+  "ModuleLine" : 1,
+  "ModuleName" : "TOP",
+  "SubInsts" : [
+   {
+    "InstFile" : "C:/Users/Giuliano/Documents/Embarcadero/Studio/Projects/TangNano/9K/LCD/src/TOP.sv",
+    "InstLine" : 49,
+    "InstName" : "Gowin_rPLL_9Mhz",
+    "ModuleFile" : "C:/Users/Giuliano/Documents/Embarcadero/Studio/Projects/TangNano/9K/LCD/src/gowin_rpll/gowin_rpll.v",
+    "ModuleLine" : 9,
+    "ModuleName" : "Gowin_rPLL"
+   },
+   {
+    "InstFile" : "C:/Users/Giuliano/Documents/Embarcadero/Studio/Projects/TangNano/9K/LCD/src/TOP.sv",
+    "InstLine" : 55,
+    "InstName" : "psram_pll_inst",
+    "ModuleFile" : "C:/Users/Giuliano/Documents/Embarcadero/Studio/Projects/TangNano/9K/LCD/src/gowin_rpll/Gowin_rPLL_PSRAM.v",
+    "ModuleLine" : 11,
+    "ModuleName" : "Gowin_rPLL_PSRAM"
+   },
+   {
+    "InstFile" : "C:/Users/Giuliano/Documents/Embarcadero/Studio/Projects/TangNano/9K/LCD/src/TOP.sv",
+    "InstLine" : 61,
+    "InstName" : "psram_inst",
+    "ModuleFile" : "C:/Users/Giuliano/Documents/Embarcadero/Studio/Projects/TangNano/9K/LCD/src/psram_memory_interface_hs/psram_memory_interface_hs.v",
+    "ModuleLine" : 3401,
+    "ModuleName" : "PSRAM_Memory_Interface_HS_Top",
+    "SubInsts" : [
+     {
+      "InstFile" : "C:/Users/Giuliano/Documents/Embarcadero/Studio/Projects/TangNano/9K/LCD/src/psram_memory_interface_hs/psram_memory_interface_hs.v",
+      "InstLine" : 3444,
+      "InstName" : "u_psram_top",
+      "ModuleFile" : "C:/Users/Giuliano/Documents/Embarcadero/Studio/Projects/TangNano/9K/LCD/src/psram_memory_interface_hs/psram_memory_interface_hs.v",
+      "ModuleLine" : 11,
+      "ModuleName" : "~psram_top.PSRAM_Memory_Interface_HS_Top"
+     }
+    ]
+   },
+   {
+    "InstFile" : "C:/Users/Giuliano/Documents/Embarcadero/Studio/Projects/TangNano/9K/LCD/src/TOP.sv",
+    "InstLine" : 88,
+    "InstName" : "framebuffer_controller_inst",
+    "ModuleFile" : "C:/Users/Giuliano/Documents/Embarcadero/Studio/Projects/TangNano/9K/LCD/src/FramebufferController.sv",
+    "ModuleLine" : 1,
+    "ModuleName" : "FramebufferController"
+   },
+   {
+    "InstFile" : "C:/Users/Giuliano/Documents/Embarcadero/Studio/Projects/TangNano/9K/LCD/src/TOP.sv",
+    "InstLine" : 107,
+    "InstName" : "framebuffer_fifo_inst",
+    "ModuleFile" : "C:/Users/Giuliano/Documents/Embarcadero/Studio/Projects/TangNano/9K/LCD/src/framebuffer_fifo/framebuffer_fifo.v",
+    "ModuleLine" : 679,
+    "ModuleName" : "framebuffer_fifo",
+    "SubInsts" : [
+     {
+      "InstFile" : "C:/Users/Giuliano/Documents/Embarcadero/Studio/Projects/TangNano/9K/LCD/src/framebuffer_fifo/framebuffer_fifo.v",
+      "InstLine" : 706,
+      "InstName" : "fifo_inst",
+      "ModuleFile" : "C:/Users/Giuliano/Documents/Embarcadero/Studio/Projects/TangNano/9K/LCD/src/framebuffer_fifo/framebuffer_fifo.v",
+      "ModuleLine" : 14,
+      "ModuleName" : "~fifo.framebuffer_fifo"
+     }
+    ]
+   },
+   {
+    "InstFile" : "C:/Users/Giuliano/Documents/Embarcadero/Studio/Projects/TangNano/9K/LCD/src/TOP.sv",
+    "InstLine" : 121,
+    "InstName" : "VGA_timing_inst",
+    "ModuleFile" : "C:/Users/Giuliano/Documents/Embarcadero/Studio/Projects/TangNano/9K/LCD/src/VGA_Timing.sv",
+    "ModuleLine" : 1,
+    "ModuleName" : "VGA_Timing"
+   }
+  ]
+ }
+]

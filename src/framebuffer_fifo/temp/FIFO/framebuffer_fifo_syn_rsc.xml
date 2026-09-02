@@ -1,0 +1,2 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Module name="framebuffer_fifo" Register="86" Alu="30" Lut="96" Bsram="1" T_Register="86(86)" T_Alu="30(30)" T_Lut="96(96)" T_Bsram="1(1)"/>

@@ -1,0 +1,30 @@
+Reading netlist file: "C:\Users\Giuliano\Documents\Embarcadero\Studio\Projects\TangNano\9K\LCD\impl\gwsynthesis\LCD.vg"
+Parsing netlist file "C:\Users\Giuliano\Documents\Embarcadero\Studio\Projects\TangNano\9K\LCD\impl\gwsynthesis\LCD.vg" completed
+Processing netlist completed
+Reading constraint file: "C:\Users\Giuliano\Documents\Embarcadero\Studio\Projects\TangNano\9K\LCD\src\LCD.cst"
+Physical Constraint parsed completed
+Running placement......
+[10%] Placement Phase 0 completed
+[20%] Placement Phase 1 completed
+[30%] Placement Phase 2 completed
+WARN  (TA1132) :  'psram_inst/u_psram_top/clkdiv/CLKOUT.default_gen_clk' was determined to be a clock but was not created.
+[50%] Placement Phase 3 completed
+Running routing......
+[60%] Routing Phase 0 completed
+[70%] Routing Phase 1 completed
+[80%] Routing Phase 2 completed
+[90%] Routing Phase 3 completed
+Running timing analysis......
+[95%] Timing analysis completed
+Placement and routing completed
+Bitstream generation in progress......
+Bitstream generation completed
+Running power analysis......
+[100%] Power analysis completed
+Generate file "C:\Users\Giuliano\Documents\Embarcadero\Studio\Projects\TangNano\9K\LCD\impl\pnr\LCD.power.html" completed
+Generate file "C:\Users\Giuliano\Documents\Embarcadero\Studio\Projects\TangNano\9K\LCD\impl\pnr\LCD.pin.html" completed
+Generate file "C:\Users\Giuliano\Documents\Embarcadero\Studio\Projects\TangNano\9K\LCD\impl\pnr\LCD.rpt.html" completed
+Generate file "C:\Users\Giuliano\Documents\Embarcadero\Studio\Projects\TangNano\9K\LCD\impl\pnr\LCD.rpt.txt" completed
+Generate file "C:\Users\Giuliano\Documents\Embarcadero\Studio\Projects\TangNano\9K\LCD\impl\pnr\LCD.tr.html" completed
+Wed Sep  2 16:08:41 2026
+

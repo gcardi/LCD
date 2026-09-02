@@ -1,0 +1,33 @@
+-series GW1NR
+-device GW1NR-9
+-device_version C
+-package QFN88P
+-part_number GW1NR-LV9QN88PC6/I5
+
+
+-mod_name Gowin_rPLL_PSRAM
+-file_name Gowin_rPLL_PSRAM
+-path C:/Users/Giuliano/Desktop/Lesso/TangNano-9K-example/lcd_4.3/src/gowin_rpll_PSRAM/
+-type PLL
+-rPll true
+-file_type vlg
+-ip_version 1.0
+-dev_type GW1NR-9C
+-dyn_idiv_sel false
+-idiv_sel 1
+-dyn_fbdiv_sel false
+-fbdiv_sel 6
+-dyn_odiv_sel false
+-odiv_sel 4
+-dyn_da_en false
+-rst_sig false
+-rst_sig_p false
+-fclkin 27
+-clkfb_sel 0
+-en_lock true
+-clkout_bypass false
+-en_clkoutp false
+-clkoutp_bypass false
+-en_clkoutd false
+-clkoutd_bypass false
+-en_clkoutd3 false

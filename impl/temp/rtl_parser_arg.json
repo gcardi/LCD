@@ -1,0 +1,41 @@
+{
+ "Device" : "GW1NR-9C",
+ "Files" : [
+  {
+   "Path" : "C:/Users/Giuliano/Documents/Embarcadero/Studio/Projects/TangNano/9K/LCD/src/TOP.sv",
+   "Type" : "verilog"
+  },
+  {
+   "Path" : "C:/Users/Giuliano/Documents/Embarcadero/Studio/Projects/TangNano/9K/LCD/src/VGA_Timing.sv",
+   "Type" : "verilog"
+  },
+  {
+   "Path" : "C:/Users/Giuliano/Documents/Embarcadero/Studio/Projects/TangNano/9K/LCD/src/FramebufferController.sv",
+   "Type" : "verilog"
+  },
+  {
+   "Path" : "C:/Users/Giuliano/Documents/Embarcadero/Studio/Projects/TangNano/9K/LCD/src/framebuffer_fifo/framebuffer_fifo.v",
+   "Type" : "verilog"
+  },
+  {
+   "Path" : "C:/Users/Giuliano/Documents/Embarcadero/Studio/Projects/TangNano/9K/LCD/src/gowin_rpll/Gowin_rPLL_PSRAM.v",
+   "Type" : "verilog"
+  },
+  {
+   "Path" : "C:/Users/Giuliano/Documents/Embarcadero/Studio/Projects/TangNano/9K/LCD/src/gowin_rpll/gowin_rpll.v",
+   "Type" : "verilog"
+  },
+  {
+   "Path" : "C:/Users/Giuliano/Documents/Embarcadero/Studio/Projects/TangNano/9K/LCD/src/psram_memory_interface_hs/psram_memory_interface_hs.v",
+   "Type" : "verilog"
+  }
+ ],
+ "IncludePath" : [
+
+ ],
+ "LoopLimit" : 2000,
+ "ResultFile" : "C:/Users/Giuliano/Documents/Embarcadero/Studio/Projects/TangNano/9K/LCD/impl/temp/rtl_parser.result",
+ "Top" : "TOP",
+ "VerilogStd" : "sysv",
+ "VhdlStd" : "vhdl_93"
+}
