@@ -24,8 +24,17 @@ module TOP
 
 	logic memory_clk;
 	logic psram_pll_lock;
+	logic lcd_pll_lock;
 	logic psram_clk;       // clk_out = 81 MHz
 	logic init_calib;
+
+	// Reset tree. Reset_Button is asynchronous to every clock here, and both
+	// PLL outputs are meaningless until they lock, so the release is gated on
+	// both locks and then retimed separately into each domain.
+	wire global_rst_n = Reset_Button & psram_pll_lock & lcd_pll_lock;
+
+	wire psram_rst_n;
+	wire lcd_rst_n;
 
 	// PSRAM user interface.
 	logic [31:0] wr_data;
@@ -48,6 +57,7 @@ module TOP
 
     Gowin_rPLL Gowin_rPLL_9Mhz(
         .clkout(LCD_CLK), // 9MHz
+        .lock(lcd_pll_lock),
         .clkin(XTAL_IN)   //27MHz
     );
 
@@ -62,6 +72,8 @@ module TOP
 		.clk            (XTAL_IN),
 		.memory_clk     (memory_clk),
 		.pll_lock       (psram_pll_lock),
+		// Left on the raw button on purpose: the IP takes pll_lock separately
+		// and synchronises rst_n internally, so it is characterised this way.
 		.rst_n          (Reset_Button),
 
 		// Porte interne SiP
@@ -85,9 +97,21 @@ module TOP
 		.clk_out         (psram_clk)
 	);
 
+	ResetSynchronizer psram_reset_sync (
+		.clk         (psram_clk),
+		.async_rst_n (global_rst_n),
+		.sync_rst_n  (psram_rst_n)
+	);
+
+	ResetSynchronizer lcd_reset_sync (
+		.clk         (LCD_CLK),
+		.async_rst_n (global_rst_n),
+		.sync_rst_n  (lcd_rst_n)
+	);
+
 	FramebufferController framebuffer_controller_inst (
 		.clk              (psram_clk),
-		.nRST             (Reset_Button),
+		.nRST             (psram_rst_n),
 		.init_calib       (init_calib),
 
 		.wr_data          (wr_data),
@@ -106,7 +130,9 @@ module TOP
 
 	framebuffer_fifo framebuffer_fifo_inst (
 		.Data         (fifo_write_data),
-		.Reset        (~Reset_Button),
+		// RESET_SYNC is enabled on this IP, so it retimes the release into
+		// each of its own clock domains.
+		.Reset        (~global_rst_n),
 		.WrClk        (psram_clk),
 		.RdClk        (LCD_CLK),
 		.WrEn         (fifo_write_enable),
@@ -120,7 +146,7 @@ module TOP
 
 	VGA_Timing	VGA_timing_inst(
 		.PixelClk	(	LCD_CLK		),
-		.nRST		(	Reset_Button),
+		.nRST		(	lcd_rst_n	),
 		.PixelWord     (	fifo_read_data),
 		.PixelEmpty    (	fifo_empty),
 		.PixelAlmostEmpty(	fifo_almost_empty),

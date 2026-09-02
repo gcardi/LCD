@@ -48,19 +48,37 @@ set_clock_groups -asynchronous -group [get_clocks {lcd_clk_9}] -group [get_clock
 // Notes
 // -----------------------------------------------------------------------
 //
-// Reset_Button is an asynchronous, un-debounced input that feeds the async
-// reset of flops in both domains. It is deliberately NOT declared a false
-// path here: that assertion only becomes true once per-domain reset
-// synchronisers are in place.
+// Reset_Button reaches flops only through the per-domain ResetSynchronizer
+// instances, gated on both PLL locks. Assertion is asynchronous by design;
+// release is retimed onto each domain's own clock, so it shows up in the
+// removal table as an intra-domain path with positive slack rather than as an
+// unconstrained crossing. No set_false_path is declared because the analyzer
+// reports no path that would need one; the constraint would be inert.
+//
+// The button is still un-debounced. A bounce asserts reset again, which is
+// harmless, but it is not a clean single-shot reset.
 //
 // The LCD output bus is source-synchronous and carries ~111 ns of margin per
 // pixel, so no set_output_delay is declared. Add one if the panel's setup and
 // hold figures ever become the limiting factor.
 //
-// Known baseline with these constraints (V1.9.12.01, Slow 1.14V 85C C6/I5):
-// 7 setup-violated endpoints, all of them the single calib_0 register inside
-// the encrypted Gowin PSRAM IP fanning out to the CALIB pins of the eight
-// IDES4 deserializers, worst slack -1.823 ns. That path is not in this
-// project's RTL and cannot be fixed from here; lowering MEMORY_CLK is the
-// available remedy, and there is ample bandwidth headroom to do so.
+// Accepted baseline (V1.9.12.01, setup at Slow 1.14V 85C C6/I5, hold at
+// Fast 1.26V 0C): this project's own RTL closes timing with positive slack at
+// the worst-case corner, and there are no hold violations anywhere.
+//
+// Seven setup-violated endpoints remain, all of them one register: calib_0
+// inside the encrypted Gowin PSRAM IP, fanning out to the CALIB pins of the
+// eight IDES4 deserialisers, worst slack -1.823 ns. This is accepted, not
+// outstanding work:
+//
+//   - it is a calibration control pulse, not a data path, and FramebufferController
+//     refuses to start until the IP raises init_calib, so a failure to
+//     calibrate shows up as a blank display at power-on rather than as silent
+//     corruption during operation;
+//   - 162 MHz is Gowin's own reference configuration for this IP on this device;
+//   - the only remedy is regenerating the IP at a lower MEMORY_CLK, which
+//     re-derives the frequency-dependent SHIFT_DELAY sampling window. That is a
+//     GUI-only operation and it must not be approximated by editing the PLL
+//     alone: the sampling window would stay tuned for 162 MHz.
+//
 // Any violation outside psram_inst is new and belongs to us.
