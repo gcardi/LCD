@@ -7,6 +7,7 @@ module VGA_Timing
     input                   PixelEmpty,
     input                   PixelAlmostEmpty,
     output                  PixelReadEnable,
+    output                  FrameRestart,
 
     output                  LCD_DE,
     output                  LCD_HSYNC,
@@ -66,6 +67,14 @@ module VGA_Timing
                         ( V_PixelCount >= V_BackPorch ) &&
                         ( V_PixelCount <  V_Pixel_Valid + V_BackPorch );
 
+    // One pulse on the first blanked line after the visible area. This is the
+    // frame's synchronisation point: on it the framebuffer controller flushes
+    // the FIFO and rewinds to address zero, so alignment between the read
+    // pointer and the raster is re-established once per frame rather than
+    // being trusted to survive indefinitely from power-on.
+    assign FrameRestart = (V_PixelCount == V_Pixel_Valid + V_BackPorch) &&
+                          (H_PixelCount == 16'd0);
+
     // Arm the stream one clock before the first active pixel. This keeps
     // address zero aligned with the top-left corner of the display.
     wire stream_start_window = (H_PixelCount == H_BackPorch - 1) &&
@@ -84,6 +93,12 @@ module VGA_Timing
 
     always_ff @(posedge PixelClk or negedge nRST) begin
         if (!nRST) begin
+            stream_started <= 1'b0;
+            pixel_half     <= 1'b0;
+        end else if (FrameRestart) begin
+            // The controller is rewinding behind us. Dropping the stream here is
+            // what makes damage self-healing: a frame spoiled by an underrun
+            // costs one frame, not every frame after it.
             stream_started <= 1'b0;
             pixel_half     <= 1'b0;
         end else if (!stream_started) begin

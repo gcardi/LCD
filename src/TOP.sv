@@ -55,6 +55,11 @@ module TOP
 	wire        fifo_empty;
 	wire        fifo_full;
 
+	// Per-frame resynchronisation between the raster and the read pointer.
+	wire fifo_flush;
+	wire frame_restart_lcd;
+	wire frame_restart_psram;
+
     Gowin_rPLL Gowin_rPLL_9Mhz(
         .clkout(LCD_CLK), // 9MHz
         .lock(lcd_pll_lock),
@@ -109,6 +114,16 @@ module TOP
 		.sync_rst_n  (lcd_rst_n)
 	);
 
+	// The vertical blanking pulse is born on LCD_CLK and consumed on psram_clk.
+	PulseSynchronizer frame_restart_sync (
+		.src_clk   (LCD_CLK),
+		.src_rst_n (lcd_rst_n),
+		.src_pulse (frame_restart_lcd),
+		.dst_clk   (psram_clk),
+		.dst_rst_n (psram_rst_n),
+		.dst_pulse (frame_restart_psram)
+	);
+
 	FramebufferController framebuffer_controller_inst (
 		.clk              (psram_clk),
 		.nRST             (psram_rst_n),
@@ -125,14 +140,16 @@ module TOP
 		.fifo_almost_full(fifo_almost_full),
 		.fifo_full       (fifo_full),
 		.fifo_write_data (fifo_write_data),
-		.fifo_write_enable(fifo_write_enable)
+		.fifo_write_enable(fifo_write_enable),
+		.frame_restart    (frame_restart_psram),
+		.fifo_flush       (fifo_flush)
 	);
 
 	framebuffer_fifo framebuffer_fifo_inst (
 		.Data         (fifo_write_data),
 		// RESET_SYNC is enabled on this IP, so it retimes the release into
 		// each of its own clock domains.
-		.Reset        (~global_rst_n),
+		.Reset        (~global_rst_n | fifo_flush),
 		.WrClk        (psram_clk),
 		.RdClk        (LCD_CLK),
 		.WrEn         (fifo_write_enable),
@@ -151,6 +168,7 @@ module TOP
 		.PixelEmpty    (	fifo_empty),
 		.PixelAlmostEmpty(	fifo_almost_empty),
 		.PixelReadEnable(	fifo_read_enable),
+		.FrameRestart	(	frame_restart_lcd),
 
 		.LCD_DE		(	LCD_DEN	 	),
 		.LCD_HSYNC	(	LCD_HYNC 	),

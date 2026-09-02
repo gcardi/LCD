@@ -4,6 +4,10 @@ module FramebufferController
     input  logic        nRST,
     input  logic        init_calib,
 
+    // One-cycle pulse, already synchronised into this domain, marking the
+    // start of vertical blanking on the display side.
+    input  logic        frame_restart,
+
     output logic [31:0] wr_data,
     input  logic [31:0] rd_data,
     input  logic        rd_data_valid,
@@ -15,7 +19,8 @@ module FramebufferController
     input  logic        fifo_almost_full,
     input  logic        fifo_full,
     output logic [31:0] fifo_write_data,
-    output logic        fifo_write_enable
+    output logic        fifo_write_enable,
+    output logic        fifo_flush
 );
 
     localparam int unsigned FRAME_WIDTH     = 480;
@@ -24,6 +29,11 @@ module FramebufferController
     localparam int unsigned BURST_PIXELS    = 16;
     localparam int unsigned LAST_BURST_ADDR = FRAME_PIXELS - BURST_PIXELS;
 
+    // Flush hold, in this domain's cycles. Long enough to cover an in-flight
+    // burst still draining out of the PSRAM controller, and to be seen for
+    // several cycles by the FIFO's read side, which runs nine times slower.
+    localparam int unsigned FLUSH_CYCLES    = 63;
+
     typedef enum logic [2:0] {
         WAIT_CALIBRATION,
         WRITE_COMMAND,
@@ -31,7 +41,8 @@ module FramebufferController
         WRITE_GAP,
         READ_COMMAND,
         READ_DATA,
-        READ_GAP
+        READ_GAP,
+        FRAME_FLUSH
     } state_t;
 
     state_t state;
@@ -41,6 +52,7 @@ module FramebufferController
     logic  [8:0] init_y;
     logic  [2:0] burst_beat;
     logic  [4:0] command_gap;
+    logic  [5:0] flush_count;
 
     // Eight horizontal RGB565 bars. 272 lines divide exactly into eight
     // bands of 34 lines each.
@@ -65,7 +77,9 @@ module FramebufferController
 
     always_comb begin
         fifo_write_data   = rd_data;
-        fifo_write_enable = rd_data_valid && !fifo_full;
+        // Nothing is admitted while the FIFO is being flushed: beats still
+        // draining from an abandoned burst belong to the previous frame.
+        fifo_write_enable = rd_data_valid && !fifo_full && !fifo_flush;
     end
 
     always_ff @(posedge clk or negedge nRST) begin
@@ -81,6 +95,8 @@ module FramebufferController
             cmd            <= 1'b0;
             cmd_en         <= 1'b0;
             data_mask      <= 4'b0000;
+            fifo_flush     <= 1'b0;
+            flush_count    <= 6'd0;
         end else begin
             // Commands are single-cycle pulses. Write data remains valid for
             // all eight cycles of a 32-byte burst.
@@ -179,8 +195,33 @@ module FramebufferController
                         command_gap <= command_gap - 5'd1;
                 end
 
+                FRAME_FLUSH: begin
+                    if (flush_count == 6'd0) begin
+                        fifo_flush  <= 1'b0;
+                        command_gap <= 5'd0;
+                        state       <= READ_COMMAND;
+                    end else begin
+                        flush_count <= flush_count - 6'd1;
+                    end
+                end
+
                 default: state <= WAIT_CALIBRATION;
             endcase
+
+            // A frame restart outranks whatever the read loop was doing, so it
+            // is applied last and overrides the assignments above. The initial
+            // write pass is exempt: it must complete before anything is worth
+            // displaying.
+            if (frame_restart && (state == READ_COMMAND ||
+                                  state == READ_DATA    ||
+                                  state == READ_GAP)) begin
+                fifo_flush     <= 1'b1;
+                flush_count    <= FLUSH_CYCLES[5:0];
+                memory_address <= 21'd0;
+                burst_beat     <= 3'd0;
+                cmd_en         <= 1'b0;
+                state          <= FRAME_FLUSH;
+            end
         end
     end
 
