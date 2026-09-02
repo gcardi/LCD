@@ -6,7 +6,7 @@ La configurazione verificata per questo progetto è:
 - ID JTAG rilevato: `0x1100481B`;
 - cavo per `programmer_cli`: `--cable-index 1`;
 - operazione `2`: programmazione SRAM volatile;
-- bitstream: `impl/pnr/Tang_nano_9K_LCD.fs`.
+- bitstream: `impl/pnr/LCD.fs`.
 
 Da PowerShell, nella directory del progetto:
 

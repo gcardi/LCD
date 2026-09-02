@@ -1,5 +1,5 @@
 param(
-    [string]$Bitstream = (Join-Path $PSScriptRoot "impl\pnr\Tang_nano_9K_LCD.fs")
+    [string]$Bitstream = (Join-Path $PSScriptRoot "impl\pnr\LCD.fs")
 )
 
 $programmer = "C:\Program Files\Gowin\Gowin_V1.9.12.01_x64\IDE\bin\Gowin_V1.9.12.01_x64\Programmer\bin\programmer_cli.exe"
