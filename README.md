@@ -9,6 +9,11 @@ Il pattern corrente è formato da otto barre orizzontali colorate, alte 34 righe
 
 ![Barre orizzontali visualizzate sul pannello LCD](docs/assets/images/HBars.jpg)
 
+Il pattern diagonale viene usato per rendere visibili disallineamenti dei pixel
+e degli accessi a burst nel frame buffer.
+
+![Pattern diagonale di test visualizzato sul pannello LCD](docs/assets/images/TestPattern1.jpg)
+
 ## Struttura
 
 - `src/TOP.sv`: integrazione di clock, PSRAM, frame buffer, FIFO e display;
@@ -23,9 +28,19 @@ Il pattern corrente è formato da otto barre orizzontali colorate, alte 34 righe
 
 ## Build e programmazione
 
-Il flusso attualmente verificato usa Gowin EDA per il dispositivo
-`GW1NR-LV9QN88PC6/I5`. Aprire `LCD.gprj` e avviare sintesi e place-and-route;
-il bitstream risultante è `impl/pnr/LCD.fs`.
+Da PowerShell, senza aprire la GUI:
+
+```powershell
+.\build.ps1              # sintesi, place-and-route, riepilogo di timing
+.\build.ps1 -Program     # e carica il bitstream al termine
+```
+
+Lo script cerca l'installazione di Gowin invece di cablarne il percorso, e
+segnala le violazioni di timing che non stanno nell'IP PSRAM.
+
+Il dispositivo di destinazione è `GW1NR-LV9QN88PC6/I5`; il bitstream prodotto è
+`impl/pnr/LCD.fs`. In alternativa si può aprire `LCD.gprj` nella GUI di Gowin
+EDA e avviare sintesi e place-and-route da lì.
 
 Per caricarlo nella SRAM volatile da PowerShell:
 
@@ -56,3 +71,14 @@ Icarus Verilog (oss-cad-suite):
 Il modello di PSRAM ignora i dati scritti e risponde con un pattern derivato
 dall'indirizzo. È deliberato: le barre orizzontali non possono rivelare un
 disallineamento del frame buffer, una rampa per-pixel sì.
+
+## Licenza e attribuzione
+
+Rilasciato sotto licenza MIT: vedi [LICENSE](LICENSE).
+
+La struttura iniziale del progetto e il timing del pannello derivano
+dall'esempio `lcd_4.3` della raccolta [Sipeed
+TangNano-9K-example](https://github.com/sipeed/TangNano-9K-example). I file
+sotto `src/framebuffer_fifo/`, `src/gowin_rpll/` e
+`src/psram_memory_interface_hs/` sono generati dall'IP Core Generator di Gowin
+EDA e restano soggetti ai termini di Gowin, non a quelli di questo progetto.
