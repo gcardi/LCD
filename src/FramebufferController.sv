@@ -42,22 +42,24 @@ module FramebufferController
     logic  [2:0] burst_beat;
     logic  [4:0] command_gap;
 
-    function automatic logic [15:0] test_pixel(input logic [8:0] x);
+    // Eight horizontal RGB565 bars. 272 lines divide exactly into eight
+    // bands of 34 lines each.
+    function automatic logic [15:0] test_pixel(input logic [8:0] y);
         begin
-            if      (x < 9'd60)  test_pixel = 16'hF800; // red
-            else if (x < 9'd120) test_pixel = 16'h07E0; // green
-            else if (x < 9'd180) test_pixel = 16'h001F; // blue
-            else if (x < 9'd240) test_pixel = 16'hFFFF; // white
-            else if (x < 9'd300) test_pixel = 16'hFFE0; // yellow
-            else if (x < 9'd360) test_pixel = 16'h07FF; // cyan
-            else if (x < 9'd420) test_pixel = 16'hF81F; // magenta
+            if      (y < 9'd34)  test_pixel = 16'hF800; // red
+            else if (y < 9'd68)  test_pixel = 16'h07E0; // green
+            else if (y < 9'd102) test_pixel = 16'h001F; // blue
+            else if (y < 9'd136) test_pixel = 16'hFFFF; // white
+            else if (y < 9'd170) test_pixel = 16'hFFE0; // yellow
+            else if (y < 9'd204) test_pixel = 16'h07FF; // cyan
+            else if (y < 9'd238) test_pixel = 16'hF81F; // magenta
             else                 test_pixel = 16'h0000; // black
         end
     endfunction
 
-    function automatic logic [31:0] test_pixel_pair(input logic [8:0] x);
+    function automatic logic [31:0] test_pixel_pair(input logic [8:0] y);
         begin
-            test_pixel_pair = {test_pixel(x + 9'd1), test_pixel(x)};
+            test_pixel_pair = {test_pixel(y), test_pixel(y)};
         end
     endfunction
 
@@ -99,7 +101,7 @@ module FramebufferController
                     addr       <= memory_address;
                     cmd        <= 1'b1;
                     cmd_en     <= 1'b1;
-                    wr_data    <= test_pixel_pair(init_x);
+                    wr_data    <= test_pixel_pair(init_y);
                     data_mask  <= 4'b0000;
                     burst_beat <= 3'd0;
                     state      <= WRITE_DATA;
@@ -111,7 +113,7 @@ module FramebufferController
                         command_gap <= 5'd10;
 
                         if ((init_y == FRAME_HEIGHT - 1) &&
-                            (init_x == FRAME_WIDTH - 2)) begin
+                            (init_x == FRAME_WIDTH - BURST_PIXELS)) begin
                             // The complete test frame is now stored in PSRAM.
                             memory_address <= 21'd0;
                             init_x         <= 9'd0;
@@ -120,19 +122,17 @@ module FramebufferController
                         end else begin
                             memory_address <= memory_address + 21'd16;
 
-                            if (init_x == FRAME_WIDTH - 2) begin
+                            if (init_x == FRAME_WIDTH - BURST_PIXELS) begin
                                 init_x <= 9'd0;
                                 init_y <= init_y + 9'd1;
                             end else begin
-                                init_x <= init_x + 9'd2;
+                                init_x <= init_x + 9'd16;
                             end
 
                             state <= WRITE_GAP;
                         end
                     end else begin
                         burst_beat <= burst_beat + 3'd1;
-                        wr_data    <= test_pixel_pair(init_x + 9'd2);
-                        init_x     <= init_x + 9'd2;
                     end
                 end
 
