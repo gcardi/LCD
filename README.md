@@ -15,6 +15,8 @@ Il pattern corrente è formato da otto barre orizzontali colorate, alte 34 righe
 - `src/FramebufferController.sv`: scrittura e lettura del frame buffer in PSRAM;
 - `src/VGA_Timing.sv`: timing RGB 480×272 e conversione RGB565;
 - `src/ResetSynchronizer.sv`: reset asincrono in assert, sincrono in rilascio;
+- `src/FramebufferFifo.sv`: FIFO dual-clock con almost-full pipelined;
+- `src/PulseSynchronizer.sv`: trasporto di un impulso fra domini di clock;
 - `src/LCD.cst`: assegnazione dei pin della Tang Nano 9K;
 - `src/LCD.sdc`: vincoli di timing e gruppi di clock asincroni;
 - `LCD.gprj`: progetto Gowin EDA.

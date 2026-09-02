@@ -68,13 +68,18 @@ set_clock_groups -asynchronous -group [get_clocks {lcd_clk_9}] -group [get_clock
 //
 // Seven setup-violated endpoints remain, all of them one register: calib_0
 // inside the encrypted Gowin PSRAM IP, fanning out to the CALIB pins of the
-// eight IDES4 deserialisers, worst slack -1.823 ns. This is accepted, not
+// eight IDES4 deserialisers, worst slack -1.96 ns. This is accepted, not
 // outstanding work:
 //
-//   - it is a calibration control pulse, not a data path, and FramebufferController
-//     refuses to start until the IP raises init_calib, so a failure to
-//     calibrate shows up as a blank display at power-on rather than as silent
-//     corruption during operation;
+//   - the flop is frozen after initialisation. Its clock enable is
+//     ~calib_done, and calib_done latches high (D tied to VCC) when the
+//     calibration sweep completes, so the failing path is dead during normal
+//     operation and only live during the power-on sweep;
+//   - that sweep writes a pattern, reads it back and checks it, adjusting
+//     phase and delay until it converges, and init_calib is latched only in
+//     the INIT_CALIB_DONE state. FramebufferController waits on init_calib, so
+//     a calibration that never converges shows up as a blank display at
+//     power-on, never as silent corruption at runtime;
 //   - 162 MHz is Gowin's own reference configuration for this IP on this device;
 //   - the only remedy is regenerating the IP at a lower MEMORY_CLK, which
 //     re-derives the frequency-dependent SHIFT_DELAY sampling window. That is a

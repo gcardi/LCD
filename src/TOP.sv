@@ -145,7 +145,7 @@ module TOP
 		.fifo_flush       (fifo_flush)
 	);
 
-	framebuffer_fifo framebuffer_fifo_inst (
+	FramebufferFifo framebuffer_fifo_inst (
 		.Data         (fifo_write_data),
 		// RESET_SYNC is enabled on this IP, so it retimes the release into
 		// each of its own clock domains.

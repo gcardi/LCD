@@ -10,7 +10,8 @@
         <File path="src/FramebufferController.sv" type="file.verilog" enable="1"/>
         <File path="src/ResetSynchronizer.sv" type="file.verilog" enable="1"/>
         <File path="src/PulseSynchronizer.sv" type="file.verilog" enable="1"/>
-        <File path="src/framebuffer_fifo/framebuffer_fifo.v" type="file.verilog" enable="1"/>
+        <File path="src/FramebufferFifo.sv" type="file.verilog" enable="1"/>
+        <File path="src/framebuffer_fifo/framebuffer_fifo.v" type="file.verilog" enable="0"/>
         <File path="src/gowin_rpll/Gowin_rPLL_PSRAM.v" type="file.verilog" enable="1"/>
         <File path="src/gowin_rpll/gowin_rpll.v" type="file.verilog" enable="1"/>
         <File path="src/psram_memory_interface_hs/psram_memory_interface_hs.v" type="file.verilog" enable="1"/>
