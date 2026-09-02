@@ -25,10 +25,11 @@ module tb_frame_resync;
     wire        cmd, cmd_en;
     wire        init_calib;
     logic       starve = 1'b0;
+    wire [31:0] wr_data;
 
     psram_model psram (
         .clk(psram_clk), .rst_n(psram_rst_n), .addr(addr), .cmd(cmd),
-        .cmd_en(cmd_en), .rd_data(rd_data), .rd_data_valid(rd_data_valid),
+        .cmd_en(cmd_en), .wr_data(wr_data), .rd_data(rd_data), .rd_data_valid(rd_data_valid),
         .init_calib(init_calib), .starve(starve));
 
     wire [31:0] fifo_wdata, fifo_rdata;
@@ -63,7 +64,7 @@ module tb_frame_resync;
         .frame_restart(frame_restart_psram),
         .fifo_flush(fifo_flush),
 `endif
-        .wr_data(), .rd_data(rd_data), .rd_data_valid(rd_data_valid),
+        .wr_data(wr_data), .rd_data(rd_data), .rd_data_valid(rd_data_valid),
         .addr(addr), .cmd(cmd), .cmd_en(cmd_en), .data_mask(),
         .fifo_almost_full(fifo_afull), .fifo_full(fifo_full),
         .fifo_write_data(fifo_wdata), .fifo_write_enable(fifo_wren));
@@ -119,6 +120,66 @@ module tb_frame_resync;
         end
     end
 
+
+    // ------------------------------------------------------------------
+    // Audit of what the controller actually wrote into PSRAM.
+    //
+    // The reference is recomputed here with plain modulo arithmetic, on
+    // purpose: the RTL walks the diagonals with incremental counters, so an
+    // independent formulation is what makes this a check rather than a
+    // restatement. It also catches beat misalignment inside a burst, which
+    // could not exist while every beat of a burst carried the same word.
+    // ------------------------------------------------------------------
+    localparam int W = 480, H = 272, PITCH = 17;
+
+    function [15:0] ref_bar(input integer y);
+        begin
+            if      (y <  34) ref_bar = 16'hF800;
+            else if (y <  68) ref_bar = 16'h07E0;
+            else if (y < 102) ref_bar = 16'h001F;
+            else if (y < 136) ref_bar = 16'hFFFF;
+            else if (y < 170) ref_bar = 16'hFFE0;
+            else if (y < 204) ref_bar = 16'h07FF;
+            else if (y < 238) ref_bar = 16'hF81F;
+            else              ref_bar = 16'h0000;
+        end
+    endfunction
+
+    // Follows whichever pattern the RTL selected, read from the DUT so the two
+    // cannot drift apart.
+    function [15:0] ref_pixel(input integer x, input integer y);
+        reg border;
+        begin
+            border = (x == 0 || x == W-1 || y == 0 || y == H-1);
+            case (ctrl.PATTERN)
+                2:       ref_pixel = border ? 16'hFFFF : (16'd1 << (y / PITCH));
+                1:       ref_pixel = border ? 16'hFFFF :
+                                     ((((x + y) % PITCH) == 0) ? ref_bar(y) : 16'h0000);
+                default: ref_pixel = ref_bar(y);
+            endcase
+        end
+    endfunction
+
+    task audit_framebuffer;
+        integer x, y, idx, bad, first_x, first_y;
+        begin
+            bad = 0; first_x = -1; first_y = -1;
+            for (y = 0; y < H; y = y + 1)
+                for (x = 0; x < W; x = x + 1) begin
+                    idx = y * W + x;
+                    if (psram.fb[idx] !== ref_pixel(x, y)) begin
+                        if (bad == 0) begin first_x = x; first_y = y; end
+                        bad = bad + 1;
+                    end
+                end
+            if (bad == 0)
+                $display("[audit] frame buffer scritto: %0d pixel, tutti corretti", W*H);
+            else
+                $display("[audit] FALLITO: %0d pixel errati su %0d, primo a (x=%0d,y=%0d) atteso %04h letto %04h",
+                         bad, W*H, first_x, first_y,
+                         ref_pixel(first_x, first_y), psram.fb[first_y*W + first_x]);
+        end
+    endtask
     initial begin
 `ifdef LEGACY
         $display("=== RTL PRE-FIX (senza risincronizzazione) ===");
@@ -128,6 +189,9 @@ module tb_frame_resync;
         global_rst_n = 1'b0;
         repeat (20) @(posedge psram_clk);
         global_rst_n = 1'b1;
+
+        wait (frame_no >= 1);
+        audit_framebuffer;
 
         wait (frame_no >= 3);
 

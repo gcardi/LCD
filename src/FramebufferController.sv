@@ -54,8 +54,32 @@ module FramebufferController
     logic  [4:0] command_gap;
     logic  [5:0] flush_count;
 
+    // Diagonal-walk state, kept incrementally so no divider is needed.
+    // line_diag is y mod DIAG_PITCH for the current line; diag_base is
+    // (x + y) mod DIAG_PITCH at the first pixel of the current burst.
+    logic  [4:0] line_diag;
+    logic  [4:0] diag_base;
+
+    // Which RGB565 bit the bit-walk pattern is lighting. 272 lines divide
+    // exactly into sixteen bands of DIAG_PITCH lines, so it advances on the
+    // same wrap as line_diag and needs no divider of its own.
+    logic  [3:0] bit_band;
+
+    // A constant, so synthesis prunes whichever patterns are not selected.
+    localparam int unsigned PATTERN_BARS     = 0;  // eight horizontal colour bars
+    localparam int unsigned PATTERN_DIAGONAL = 1;  // coloured diagonals, border
+    localparam int unsigned PATTERN_BITWALK  = 2;  // one RGB565 bit per band
+
+    localparam int unsigned PATTERN = PATTERN_DIAGONAL;
+
+    // The pitch must be odd and share no factor with the burst length, or a
+    // shift of exactly one burst would slide the pattern onto itself and stay
+    // invisible - the same trap the colour bars fell into.
+    localparam int unsigned DIAG_PITCH = 17;
+
     // Eight horizontal RGB565 bars. 272 lines divide exactly into eight
-    // bands of 34 lines each.
+    // bands of 34 lines each. Also used to colour the diagonals, so a swapped
+    // bit lane still shows up as a wrong hue.
     function automatic logic [15:0] test_pixel(input logic [8:0] y);
         begin
             if      (y < 9'd34)  test_pixel = 16'hF800; // red
@@ -69,9 +93,71 @@ module FramebufferController
         end
     endfunction
 
-    function automatic logic [31:0] test_pixel_pair(input logic [8:0] y);
+    // A one-pixel white frame proves the visible area really is 480x272 and
+    // starts in the corner; the diagonals turn a horizontal displacement into
+    // a vertical one, so the error can be read off the panel by eye.
+    function automatic logic [15:0] diag_pixel(input logic [8:0] x,
+                                               input logic [8:0] y,
+                                               input logic [4:0] diag);
         begin
-            test_pixel_pair = {test_pixel(y), test_pixel(y)};
+            if (x == 9'd0 || x == FRAME_WIDTH - 1 ||
+                y == 9'd0 || y == FRAME_HEIGHT - 1)
+                diag_pixel = 16'hFFFF;
+            else if (diag == 5'd0)
+                diag_pixel = test_pixel(y);
+            else
+                diag_pixel = 16'h0000;
+        end
+    endfunction
+
+    // One RGB565 bit per band, LSB of blue at the top through MSB of red at
+    // the bottom: three staircases of increasing brightness. A dead lane is a
+    // black band and names its own bit; two swapped lanes put the brightness
+    // steps out of order. The white border stays, as a known reference.
+    function automatic logic [15:0] bitwalk_pixel(input logic [8:0] x,
+                                                  input logic [8:0] y,
+                                                  input logic [3:0] band);
+        begin
+            if (x == 9'd0 || x == FRAME_WIDTH - 1 ||
+                y == 9'd0 || y == FRAME_HEIGHT - 1)
+                bitwalk_pixel = 16'hFFFF;
+            else
+                bitwalk_pixel = 16'd1 << band;
+        end
+    endfunction
+
+    // The two RGB565 pixels carried by one 32-bit beat. Low half is the
+    // earlier pixel, matching how VGA_Timing unpacks the word.
+    function automatic logic [31:0] write_pair(input logic [8:0] x_base,
+                                               input logic [8:0] y,
+                                               input logic [4:0] base,
+                                               input logic [3:0] band,
+                                               input logic [2:0] beat);
+        logic [8:0] x_lo, x_hi;
+        logic [5:0] raw_lo, raw_hi;
+        logic [4:0] d_lo, d_hi;
+        begin
+            x_lo = x_base + {5'd0, beat, 1'b0};
+            x_hi = x_lo + 9'd1;
+
+            case (PATTERN)
+                PATTERN_DIAGONAL: begin
+                    // base <= 16 and 2*beat <= 14, so one conditional subtract
+                    // is enough to bring both back below the pitch.
+                    raw_lo = {1'b0, base} + {2'd0, beat, 1'b0};
+                    raw_hi = raw_lo + 6'd1;
+                    d_lo   = (raw_lo >= DIAG_PITCH) ? raw_lo[4:0] - DIAG_PITCH[4:0] : raw_lo[4:0];
+                    d_hi   = (raw_hi >= DIAG_PITCH) ? raw_hi[4:0] - DIAG_PITCH[4:0] : raw_hi[4:0];
+                    write_pair = {diag_pixel(x_hi, y, d_hi), diag_pixel(x_lo, y, d_lo)};
+                end
+
+                PATTERN_BITWALK:
+                    write_pair = {bitwalk_pixel(x_hi, y, band),
+                                  bitwalk_pixel(x_lo, y, band)};
+
+                default:
+                    write_pair = {test_pixel(y), test_pixel(y)};
+            endcase
         end
     endfunction
 
@@ -97,9 +183,12 @@ module FramebufferController
             data_mask      <= 4'b0000;
             fifo_flush     <= 1'b0;
             flush_count    <= 6'd0;
+            line_diag      <= 5'd0;
+            bit_band       <= 4'd0;
+            diag_base      <= 5'd0;
         end else begin
-            // Commands are single-cycle pulses. Write data remains valid for
-            // all eight cycles of a 32-byte burst.
+            // Commands are single-cycle pulses. Write data is reloaded every
+            // cycle so each beat of the burst carries its own pixels.
             cmd_en <= 1'b0;
 
             case (state)
@@ -108,6 +197,9 @@ module FramebufferController
                         memory_address <= 21'd0;
                         init_x         <= 9'd0;
                         init_y         <= 9'd0;
+                        line_diag      <= 5'd0;
+                        diag_base      <= 5'd0;
+                        bit_band       <= 4'd0;
                         command_gap    <= 5'd0;
                         state          <= WRITE_COMMAND;
                     end
@@ -117,13 +209,19 @@ module FramebufferController
                     addr       <= memory_address;
                     cmd        <= 1'b1;
                     cmd_en     <= 1'b1;
-                    wr_data    <= test_pixel_pair(init_y);
+                    wr_data    <= write_pair(init_x, init_y, diag_base, bit_band, 3'd0);
                     data_mask  <= 4'b0000;
                     burst_beat <= 3'd0;
                     state      <= WRITE_DATA;
                 end
 
                 WRITE_DATA: begin
+                    // Present the next beat's pair. Unlike the colour bars the
+                    // diagonals change inside a burst, so beat alignment on the
+                    // write side now matters.
+                    wr_data <= write_pair(init_x, init_y, diag_base, bit_band,
+                                          burst_beat + 3'd1);
+
                     if (burst_beat == 3'd7) begin
                         // The current word is Data7, the final word in the burst.
                         command_gap <= 5'd10;
@@ -139,10 +237,22 @@ module FramebufferController
                             memory_address <= memory_address + 21'd16;
 
                             if (init_x == FRAME_WIDTH - BURST_PIXELS) begin
-                                init_x <= 9'd0;
+                                init_x    <= 9'd0;
+                                // New line: x returns to 0 and y advances, so
+                                // (x+y) mod pitch becomes (y+1) mod pitch.
+                                line_diag <= (line_diag == DIAG_PITCH - 1) ? 5'd0 : line_diag + 5'd1;
+                                // Sixteen bands of DIAG_PITCH lines each fill
+                                // 272 rows exactly, so the band advances on
+                                // the same wrap.
+                                if (line_diag == DIAG_PITCH - 1)
+                                    bit_band <= bit_band + 4'd1;
+                                diag_base <= (line_diag == DIAG_PITCH - 1) ? 5'd0 : line_diag + 5'd1;
                                 init_y <= init_y + 9'd1;
                             end else begin
                                 init_x <= init_x + 9'd16;
+                                // Advancing x by 16 with pitch 17 is a step of
+                                // -1 in the diagonal index.
+                                diag_base <= (diag_base == 5'd0) ? DIAG_PITCH[4:0] - 5'd1 : diag_base - 5'd1;
                             end
 
                             state <= WRITE_GAP;

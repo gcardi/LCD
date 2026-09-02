@@ -14,11 +14,21 @@ module psram_model
     input        [20:0] addr,
     input               cmd,
     input               cmd_en,
+    input        [31:0] wr_data,
     output logic [31:0] rd_data,
     output logic        rd_data_valid,
     output logic        init_calib,
     input               starve          // fault injection: withhold read data
 );
+
+    // Captured framebuffer. Reads still answer with the address ramp: the
+    // display checker needs a per-pixel-unique value, while this array exists
+    // only so the bench can audit what the controller actually wrote.
+    localparam int FRAME_PIXELS = 480 * 272;
+    logic [15:0] fb [0:FRAME_PIXELS-1];
+    logic [20:0] wbase;
+    integer      wbeat;
+    logic        wbusy;
     localparam int LATENCY = 6;
 
     integer      calib_cnt;
@@ -38,6 +48,23 @@ module psram_model
             calib_cnt <= calib_cnt + 1;
         end else begin
             init_calib <= 1'b1;
+        end
+    end
+
+    // Capture the eight beats of a write burst. wr_data already holds beat 0
+    // on the cycle cmd_en is seen, so capture starts immediately.
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            wbusy <= 1'b0; wbeat <= 0;
+        end else if (cmd_en && cmd) begin
+            fb[addr]     <= wr_data[15:0];
+            fb[addr + 1] <= wr_data[31:16];
+            wbase <= addr; wbeat <= 1; wbusy <= 1'b1;
+        end else if (wbusy) begin
+            fb[wbase + 2*wbeat]     <= wr_data[15:0];
+            fb[wbase + 2*wbeat + 1] <= wr_data[31:16];
+            if (wbeat == 7) wbusy <= 1'b0;
+            else            wbeat <= wbeat + 1;
         end
     end
 
