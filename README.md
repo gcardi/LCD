@@ -7,6 +7,8 @@ Il progetto inizializza la PSRAM integrata con un frame buffer RGB565, lo legge
 a burst attraverso una FIFO dual-clock e genera i segnali di timing del display.
 Il pattern corrente è formato da otto barre orizzontali colorate, alte 34 righe.
 
+![Barre orizzontali visualizzate sul pannello LCD](docs/assets/images/HBars.jpg)
+
 ## Struttura
 
 - `src/TOP.sv`: integrazione di clock, PSRAM, frame buffer, FIFO e display;
