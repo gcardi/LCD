@@ -20,6 +20,11 @@
 *.bin
 *.binx
 
+# Simulation: build artefacts, and pre-fix sources that run_sim.ps1 regenerates
+# from git rather than keeping a second divergent copy of them here.
+/sim/build/
+/sim/legacy/
+
 # Simulation and waveform output
 *.vvp
 *.fst

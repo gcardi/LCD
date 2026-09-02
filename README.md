@@ -40,3 +40,19 @@ tipicamente raccolti in `build/`. Il controller PSRAM usato qui è però un IP
 Gowin: per un flusso interamente open-source, come quello proposto da Lushay
 Labs, questa parte deve essere sostituita con un'implementazione compatibile.
 
+
+## Simulazione
+
+`sim/` contiene un testbench che inietta un underrun della FIFO a metà area
+visibile e conta quanti frame restano danneggiati dopo il guasto. Serve
+Icarus Verilog (oss-cad-suite):
+
+```powershell
+.\sim\run_sim.ps1                # RTL attuale
+.\sim\run_sim.ps1 -Mode model    # con la FIFO comportamentale di riferimento
+.\sim\run_sim.ps1 -Mode legacy   # RTL pre-fix: dimostra il danno permanente
+```
+
+Il modello di PSRAM ignora i dati scritti e risponde con un pattern derivato
+dall'indirizzo. È deliberato: le barre orizzontali non possono rivelare un
+disallineamento del frame buffer, una rampa per-pixel sì.
