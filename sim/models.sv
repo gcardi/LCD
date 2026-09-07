@@ -2,7 +2,7 @@
 
 // Behavioural stand-in for PSRAM_Memory_Interface_HS_Top.
 //
-// It deliberately ignores what the controller writes and answers every read
+// It captures writes for the framebuffer audit, but answers every read
 // with data derived from the address: word i of a burst based at A carries
 // pixels A+2i and A+2i+1. Colour bars cannot reveal a misalignment, which is
 // exactly why the original bug stayed invisible; an address-derived ramp makes
