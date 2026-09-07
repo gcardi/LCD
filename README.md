@@ -5,7 +5,8 @@ Tang Nano 9K.
 
 Il progetto inizializza la PSRAM integrata con un frame buffer RGB565, lo legge
 a burst attraverso una FIFO dual-clock e genera i segnali di timing del display.
-Il pattern corrente è formato da otto barre orizzontali colorate, alte 34 righe.
+Il pattern corrente è diagonale, con bordo bianco. Sono disponibili anche otto
+barre orizzontali colorate, alte 34 righe, e un pattern bit-walk RGB565.
 
 ![Barre orizzontali visualizzate sul pannello LCD](docs/assets/images/HBars.jpg)
 
@@ -35,8 +36,12 @@ Da PowerShell, senza aprire la GUI:
 .\build.ps1 -Program     # e carica il bitstream al termine
 ```
 
-Lo script cerca l'installazione di Gowin invece di cablarne il percorso, e
-segnala le violazioni di timing che non stanno nell'IP PSRAM.
+Lo script cerca l'installazione di Gowin e fallisce in caso di report mancante,
+timing fuori baseline o mancata generazione del bitstream. L'unica eccezione
+ammessa riguarda i percorsi di calibrazione PSRAM documentati, entro limiti
+espliciti: non vengono escluse genericamente tutte le violazioni nell'IP.
+Il log completo è in `impl/build.log`; `impl/verification.json` registra
+riepilogo di timing e hash del bitstream e del report.
 
 Il dispositivo di destinazione è `GW1NR-LV9QN88PC6/I5`; il bitstream prodotto è
 `impl/pnr/LCD.fs`. In alternativa si può aprire `LCD.gprj` nella GUI di Gowin
@@ -66,11 +71,27 @@ Icarus Verilog (oss-cad-suite):
 .\sim\run_sim.ps1                # RTL attuale
 .\sim\run_sim.ps1 -Mode model    # con la FIFO comportamentale di riferimento
 .\sim\run_sim.ps1 -Mode legacy   # RTL pre-fix: dimostra il danno permanente
+.\sim\run_sim.ps1 -Mode all      # regressione completa, si ferma al primo errore
+.\sim\test_verification.ps1     # prove negative, dopo una build riuscita
 ```
 
-Il modello di PSRAM ignora i dati scritti e risponde con un pattern derivato
-dall'indirizzo. È deliberato: le barre orizzontali non possono rivelare un
-disallineamento del frame buffer, una rampa per-pixel sì.
+Il modello di PSRAM acquisisce i dati scritti per un audit indipendente di tutti
+i pixel. Le letture restituiscono una rampa derivata dall'indirizzo, per rendere
+visibile ogni disallineamento del flusso video.
+
+I test controllano due frame integri prima del guasto, l'effettivo underrun,
+quattro frame successivi e i segnali video. `legacy` passa soltanto se riproduce
+il danno persistente atteso; `current` e `model` devono recuperare subito.
+Errori e timeout producono un codice di uscita non nullo. Un file `.vvp` di una
+compilazione precedente non viene riutilizzato dopo un errore.
+
+I log sono in `sim/build/compile_<modo>.log` e `run_<modo>.log`, con avanzamento
+visibile per frame. La FIFO reale richiede diversi minuti; non è un blocco del
+simulatore. Il limite di tempo reale è 900 secondi per processo, modificabile
+con `-TimeoutSeconds`; resta attivo anche un timeout di 200 ms simulati.
+
+Misure del raster, risultati e limiti della verifica sono in
+[VERIFICATION.md](VERIFICATION.md).
 
 ## Licenza e attribuzione
 
