@@ -23,6 +23,7 @@ param(
 $ErrorActionPreference = "Stop"
 $root    = $PSScriptRoot
 $project = Join-Path $root "LCD.gprj"
+. (Join-Path $root 'tools\Invoke-LoggedProcess.ps1')
 
 if (-not (Test-Path -LiteralPath $project -PathType Leaf)) {
     throw "Progetto non trovato: $project"
@@ -47,6 +48,17 @@ $gwsh = $found | ForEach-Object {
 
 Write-Host "Toolchain: $($gwsh.Path)"
 
+$impl = Join-Path $root 'impl'
+New-Item -ItemType Directory -Force $impl | Out-Null
+$bitstream = Join-Path $root 'impl\pnr\LCD.fs'
+$report = Join-Path $root 'impl\pnr\LCD.tr'
+$manifest = Join-Path $impl 'verification.json'
+# A failed build must never leave a previous bitstream/report looking current.
+foreach ($old in @($bitstream, $report, $manifest)) {
+    # Gowin marks .fs read-only after generation.
+    if (Test-Path -LiteralPath $old) { Remove-Item -LiteralPath $old -Force }
+}
+
 $tcl = Join-Path ([System.IO.Path]::GetTempPath()) "lcd_build_$PID.tcl"
 @"
 # Le graffe impediscono a Tcl di interpretare i backslash del percorso.
@@ -56,54 +68,24 @@ run all
 "@ | Set-Content -LiteralPath $tcl -Encoding ascii
 
 try {
-    & $gwsh.Path $tcl 2>&1 | Tee-Object -Variable log | Where-Object {
-        $_ -match "^(ERROR|WARN)" -or $_ -match "Bitstream generation completed"
-    }
-    if ($LASTEXITCODE -ne 0) {
-        Write-Host ""
-        Write-Host "--- ultime righe del log ---"
-        $log | Select-Object -Last 15 | ForEach-Object { Write-Host "  $_" }
-        throw "gw_sh ha restituito $LASTEXITCODE"
-    }
+    Invoke-LoggedProcess -FilePath $gwsh.Path -Arguments @($tcl) -LogPath (Join-Path $impl 'build.log') -TimeoutSeconds 900
 } finally {
     Remove-Item -LiteralPath $tcl -ErrorAction SilentlyContinue
 }
 
-$bitstream = Join-Path $root "impl\pnr\LCD.fs"
 if (-not (Test-Path -LiteralPath $bitstream -PathType Leaf)) {
     throw "Build terminata ma il bitstream non c'e': $bitstream"
 }
 
-# Il riepilogo di timing e' la parte che vale la pena leggere a ogni build.
-$report = Join-Path $root "impl\pnr\LCD.tr"
-if (Test-Path -LiteralPath $report -PathType Leaf) {
-    $tr = Get-Content -LiteralPath $report
-
-    Write-Host ""
-    Write-Host "--- Timing ---"
-    $tr | Select-String -Pattern "Violated Endpoints" | ForEach-Object { Write-Host "  $($_.Line.Trim())" }
-
-    $fmaxAt = ($tr | Select-String -Pattern "^2\.3 Max Frequency Summary" | Select-Object -Last 1).LineNumber
-    if ($fmaxAt) {
-        $tr[$fmaxAt..($fmaxAt + 6)] | Where-Object { $_ -match "\(MHz\)" } |
-            ForEach-Object { Write-Host "  $($_.Trim())" }
-    }
-
-    # Le violazioni note stanno tutte dentro l'IP PSRAM di Gowin: vedi le note
-    # in src\LCD.sdc. Qualunque cosa fuori da psram_inst e' nostra, e nuova.
-    $setupAt = ($tr | Select-String -Pattern "^3\.1\.1 Setup Paths Table" | Select-Object -Last 1).LineNumber
-    if ($setupAt) {
-        $ours = $tr[$setupAt..($setupAt + 30)] |
-            Where-Object { $_ -match "^\s+\d+\s+-\d" -and $_ -notmatch "psram_inst" }
-        if ($ours) {
-            Write-Host ""
-            Write-Warning "Violazioni di setup fuori dall'IP PSRAM:"
-            $ours | ForEach-Object { Write-Host "  $($_.Trim())" }
-        } else {
-            Write-Host "  (violazioni residue: solo l'IP PSRAM, come da baseline)"
-        }
-    }
-}
+# Missing/truncated reports and new violations are build failures, before -Program.
+$timing = & (Join-Path $root 'tools\Test-TimingReport.ps1') -ReportPath $report
+[ordered]@{
+    VerifiedAtUtc = [DateTime]::UtcNow.ToString('o')
+    Toolchain = $gwsh.Path
+    BitstreamSHA256 = (Get-FileHash -LiteralPath $bitstream -Algorithm SHA256).Hash
+    ReportSHA256 = (Get-FileHash -LiteralPath $report -Algorithm SHA256).Hash
+    Timing = $timing
+} | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $manifest -Encoding utf8
 
 Write-Host ""
 Write-Host "Bitstream: $bitstream"

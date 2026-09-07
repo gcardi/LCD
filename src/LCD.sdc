@@ -66,10 +66,12 @@ set_clock_groups -asynchronous -group [get_clocks {lcd_clk_9}] -group [get_clock
 // Fast 1.26V 0C): this project's own RTL closes timing with positive slack at
 // the worst-case corner, and there are no hold violations anywhere.
 //
-// Seven setup-violated endpoints remain, all of them one register: calib_0
+// Historical acceptance limit: at most seven setup-violated endpoints from calib_0
 // inside the encrypted Gowin PSRAM IP, fanning out to the CALIB pins of the
-// eight IDES4 deserialisers, worst slack -1.96 ns. This is accepted, not
-// outstanding work:
+// eight IDES4 deserialisers, worst slack no worse than -1.96 ns.
+// The 2026-09-07 build has four endpoints, worst -0.666 ns (VERIFICATION.md).
+// tools/Test-TimingReport.ps1 enforces this exact path family and the limits.
+// This calibration exception is accepted for the following reasons:
 //
 //   - the flop is frozen after initialisation. Its clock enable is
 //     ~calib_done, and calib_done latches high (D tied to VCC) when the
@@ -86,4 +88,5 @@ set_clock_groups -asynchronous -group [get_clocks {lcd_clk_9}] -group [get_clock
 //     GUI-only operation and it must not be approximated by editing the PLL
 //     alone: the sampling window would stay tuned for 162 MHz.
 //
-// Any violation outside psram_inst is new and belongs to us.
+// Any violation outside this calibration exception is new, including other
+// paths inside psram_inst and any hold/recovery/removal/pulse-width violation.
