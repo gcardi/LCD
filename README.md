@@ -25,7 +25,16 @@ e degli accessi a burst nel frame buffer.
 - `src/PulseSynchronizer.sv`: trasporto di un impulso fra domini di clock;
 - `src/LCD.cst`: assegnazione dei pin della Tang Nano 9K;
 - `src/LCD.sdc`: vincoli di timing e gruppi di clock asincroni;
-- `LCD.gprj`: progetto Gowin EDA.
+- `LCD.gprj`: progetto Gowin EDA;
+- `build.ps1`, `program_tang_nano_sram.ps1`: build da riga di comando e
+  programmazione della SRAM;
+- `tools/`: gate di timing sul report Gowin e runner di processo con log e
+  timeout, condiviso da build e simulazione;
+- `sim/`: testbench di risincronizzazione del frame e prove negative;
+- `src/gowin_rpll/`, `src/psram_memory_interface_hs/`: IP generati da Gowin EDA
+  per i due PLL e per il controller PSRAM;
+- `src/framebuffer_fifo/`: FIFO generata, sostituita da `src/FramebufferFifo.sv`
+  e disabilitata in `LCD.gprj` (`enable="0"`); resta come riferimento.
 
 ## Build e programmazione
 
@@ -92,6 +101,12 @@ con `-TimeoutSeconds`; resta attivo anche un timeout di 200 ms simulati.
 
 Misure del raster, risultati e limiti della verifica sono in
 [VERIFICATION.md](VERIFICATION.md).
+
+## Sviluppi futuri
+
+[LVGL_IMPL.md](LVGL_IMPL.md) raccoglie uno studio speculativo su come
+trasformare la scheda in un controller grafico SPI pilotabile da un
+microcontrollore con LVGL. Non descrive funzionalità presenti nel codice.
 
 ## Licenza e attribuzione
 

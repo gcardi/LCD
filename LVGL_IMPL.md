@@ -27,14 +27,41 @@ modalita' normale, rasterizza autonomamente widget, testi e immagini.
 
 Il progetto pilota un pannello RGB565 da 480 x 272 pixel:
 
-- `src/TOP.sv` integra clock, PSRAM, FIFO e uscita LCD;
-- `src/VGA_Timing.sv` genera il raster e consuma due pixel RGB565 per parola
-  da 32 bit;
-- `src/FramebufferController.sv` inizializza la PSRAM con un pattern e poi la
-  legge a burst per alimentare la FIFO video;
-- `src/FramebufferFifo.sv` attraversa i domini di clock PSRAM/LCD;
-- un impulso di `frame_restart` riallinea lettore PSRAM, FIFO e raster una
-  volta per frame.
+- `src/TOP.sv` integra clock, reset, PSRAM, FIFO e uscita LCD;
+- `src/VGA_Timing.sv` genera il raster, consuma due pixel RGB565 per parola
+  da 32 bit e registra tutte le uscite verso il pannello, DE e sync inclusi,
+  su `LCD_CLK`;
+- `src/FramebufferController.sv` inizializza la PSRAM con un pattern di test e
+  poi la legge a burst per alimentare la FIFO video;
+- `src/FramebufferFifo.sv` e' una FIFO dual-clock scritta a mano, con
+  `Almost_Full` pipelined, che attraversa i domini PSRAM/LCD; sostituisce la
+  FIFO generata da Gowin, rimasta nel progetto ma disabilitata;
+- `src/ResetSynchronizer.sv` ritempra il rilascio del reset in ogni dominio;
+  l'asserzione resta asincrona e il rilascio globale e' subordinato al lock di
+  entrambi i PLL;
+- `src/PulseSynchronizer.sv` trasporta l'impulso di frame fra i domini;
+- un impulso di `frame_restart`, generato sul primo clock blanked dopo l'area
+  visibile, riallinea lettore PSRAM, FIFO e raster una volta per frame: il
+  controller svuota la FIFO (`fifo_flush`) e rimanda l'indirizzo a zero, quindi
+  un underrun danneggia un frame solo e non tutti quelli successivi.
+
+`src/LCD.sdc` dichiara quattro clock: 27 MHz del quarzo, 9 MHz del pixel clock,
+162 MHz di memoria e gli 81 MHz dell'interfaccia utente PSRAM, che l'IP ricava
+dividendo per due il clock di memoria. Sono raggruppati in tre domini
+reciprocamente asincroni; i due clock PSRAM restano nello stesso gruppo.
+
+Il generatore di pattern e' selezionabile a compile time dal parametro
+`PATTERN` di `FramebufferController.sv`: diagonali colorate con bordo bianco
+(valore attuale), otto barre orizzontali da 34 righe, oppure un bit-walk che
+accende un singolo bit RGB565 per banda. Le funzioni non selezionate vengono
+eliminate dalla sintesi.
+
+Esistono gia' un'infrastruttura di simulazione (`sim/`, con testbench di
+risincronizzazione, modello PSRAM con audit dei pixel scritti e prove
+negative) e un gate di timing sulla build (`tools/Test-TimingReport.ps1`,
+richiamato da `build.ps1`). Risultati, contratto della simulazione e misure del
+raster sono in [VERIFICATION.md](VERIFICATION.md). Il lavoro descritto qui
+dovrebbe estendere quella verifica, non sostituirla.
 
 Il formato attuale osservato e':
 
@@ -64,27 +91,34 @@ la sua responsabilita' monolitica andrebbe separata. La generazione del pattern
 di test verrebbe rimossa o mantenuta solo come modalita' diagnostica.
 
 ```mermaid
-flowchart LR
-    MCU[Microcontrollore<br/>LVGL o applicazione leggera]
-    SPI[SPI slave<br/>D/C, parser e controllo errori]
-    CQ[Coda comandi / FIFO asincrona]
-    GE[Motore grafico 2D<br/>e writer rettangolare]
-    ARB[Arbitro e scheduler PSRAM]
-    RAM[(PSRAM<br/>framebuffer RGB565)]
-    SCAN[Lettore scan-out]
-    VFIFO[FIFO dual-clock video]
-    TIM[VGA_Timing]
-    LCD[Pannello RGB 480 x 272]
+flowchart TD
+    subgraph CMD [Percorso comandi]
+        direction LR
+        MCU[Microcontrollore<br/>LVGL o applicazione leggera]
+        SPI[SPI slave<br/>D/C, parser e controllo errori]
+        CQ[Coda comandi<br/>FIFO asincrona]
+        GE[Motore grafico 2D<br/>e writer rettangolare]
+        MCU -->|SCLK, MOSI, CS, D/C| SPI
+        SPI --> CQ --> GE
+        SPI -.->|MISO / READY / IRQ| MCU
+    end
 
-    MCU -->|SCLK, MOSI, CS, D/C| SPI
-    SPI --> CQ
-    CQ --> GE
+    subgraph MEM [Memoria condivisa]
+        direction LR
+        ARB[Arbitro e scheduler PSRAM] <--> RAM[(PSRAM<br/>framebuffer RGB565)]
+    end
+
+    subgraph VID [Percorso video]
+        direction LR
+        SCAN[Lettore scan-out]
+        VFIFO[FIFO dual-clock video]
+        TIM[VGA_Timing]
+        LCD[Pannello RGB 480 x 272]
+        SCAN --> VFIFO --> TIM --> LCD
+    end
+
     GE -->|scritture| ARB
-    SCAN -->|letture| ARB
-    ARB <--> RAM
-    ARB --> SCAN
-    SCAN --> VFIFO --> TIM --> LCD
-    SPI -->|MISO / READY / IRQ| MCU
+    ARB -->|letture| SCAN
 ```
 
 Una possibile suddivisione RTL e':
@@ -355,7 +389,8 @@ flowchart TD
 La soglia e la quota di banda vanno validate in simulazione. Il lettore deve
 conservare il comportamento di risincronizzazione per frame gia' presente nel
 progetto: in caso di underrun il danno deve restare limitato e autoripararsi al
-frame successivo.
+frame successivo. La regressione che lo verifica oggi e' `sim/tb_frame_resync.sv`,
+eseguita da `sim/run_sim.ps1`; va estesa, non aggirata.
 
 Possibili miglioramenti:
 
@@ -588,7 +623,13 @@ evoluzione, non un requisito del primo prototipo.
 
 ## 16. Piano di verifica
 
-Testbench consigliati:
+Il punto di partenza e' la verifica esistente descritta in
+[VERIFICATION.md](VERIFICATION.md): audit di tutti i 130.560 pixel scritti,
+confronto di DE/HSYNC/VSYNC con un riferimento temporale indipendente,
+underrun iniettato con recupero al frame successivo, prove negative sul runner
+e gate di timing sul report Gowin. Ogni nuovo blocco deve mantenerla verde.
+
+Testbench aggiuntivi consigliati:
 
 - parser di ogni comando con lunghezze valide e invalide;
 - CS interrotto a ogni possibile byte;
