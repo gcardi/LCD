@@ -106,8 +106,8 @@ Misure del raster, risultati e limiti della verifica sono in
 
 Il modulo autonomo [SpiSlave](docs/SPI_SLAVE.md) implementa il trasporto SPI
 mode 0 per un master STM32 ed e' verificabile con `./sim/run_spi_sim.ps1`.
-Non e' ancora collegato al framebuffer: FIFO di interfaccia, parser comandi
-e arbitraggio delle scritture PSRAM restano da implementare.
+L'endpoint [SPI framebuffer](docs/SPI_FRAMEBUFFER.md) aggiunge una coda
+asincrona, burst mascherati e arbitraggio PSRAM per rettangoli RGB565.
 
 [LVGL_IMPL.md](docs/LVGL_IMPL.md) raccoglie uno studio speculativo su come
 trasformare la scheda in un controller grafico SPI pilotabile da un
@@ -126,8 +126,10 @@ EDA e restano soggetti ai termini di Gowin, non a quelli di questo progetto.
 
 ## Collegamento STM32 e collaudo SPI
 
-Il TOP include uno slave SPI mode 0 e un endpoint diagnostico separato dal
-framebuffer. Cablaggio, firmware DMA e comando unico di build/upload/test
+Il TOP include uno slave SPI mode 0 con scrittura framebuffer e una
+modalita' diagnostica selezionabile. Cablaggio, firmware DMA e comando unico di build/upload/test
 sono nel [README STM32](stm32/WeAct_H743_SPI/README.md).
-Il primo collaudo hardware rileva MISO apparentemente non pilotato;
-la comunicazione fra le schede non e' ancora validata.
+Il collegamento e' stato verificato a 12.5 MHz con fronti MEDIUM; vedere
+[SPI_DIAGNOSTIC_RESULTS.md](docs/SPI_DIAGNOSTIC_RESULTS.md). La nuova demo
+grafica e i suoi limiti di verifica sono descritti in
+[SPI_FRAMEBUFFER.md](docs/SPI_FRAMEBUFFER.md).

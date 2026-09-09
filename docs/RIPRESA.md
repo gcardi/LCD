@@ -1,6 +1,33 @@
 # Punto di ripresa — 9 settembre 2026
 
-## Ultimo stato: diagnosi fronti GPIO completata
+## Ultimo stato: rettangolo SPI visibile sul pannello
+
+Implementato percorso SPI -> coda asincrona di un burst -> scritture PSRAM
+mascherate. API STM32 `LCD_WriteRect`, rettangoli RGB565 arbitrari. Demo 67x40
+a (101,81), bordo bianco e tre fasce RGB, eseguita una volta dopo il self-test.
+L'utente ha confermato di vedere il rettangolo il 9 settembre 2026 e ha poi
+resettato la FPGA per provarne la scomparsa (esito del reset non ancora riferito).
+
+Configurazione: SPI_FRAMEBUFFER=1 in TOP, SPI_DIAG_MATRIX=0, 12.5 MHz MEDIUM.
+Build FPGA e firmware completate; FPGA caricata in SRAM, flash STM32 verificata.
+Gate timing PASS: quattro endpoint di calibrazione PSRAM, worst -1.303 ns;
+nessuna nuova violazione ammessa. Primo arbitraggio respinto dal gate, risolto
+separando decisione e comando con uno stato aggiuntivo, senza rilassare i vincoli.
+
+Collaudo SWD: 40 trasferimenti, 34992 byte, zero mismatch, HAL OK, tutte le
+prove GPIO corrette, graphics_state=2. Il riscontro visivo dell'utente completa
+la prova del primo rettangolo; non e' una qualifica estesa della grafica.
+Protocollo, comandi e limiti: `docs/SPI_FRAMEBUFFER.md`.
+
+Reset FPGA: reinizializza la PSRAM con il pattern, eliminando il rettangolo.
+La demo STM32 non si ripete automaticamente: resettare anche STM32 per reinviarla.
+Il semplice reset FPGA conserva il bitstream; lo spegnimento perde la SRAM FPGA.
+I runner diagnostici selezionano SPI_FRAMEBUFFER=0; per tornare alla grafica
+riportarlo a 1. Il runner normale con -RequireGraphics verifica anche la demo.
+
+Le sezioni seguenti sono cronologia precedente alla scrittura framebuffer.
+
+## Stato precedente: diagnosi fronti GPIO completata
 
 Configurazione normale ora a **12.5 MHz, GPIO STM32 MEDIUM**, prescaler 16,
 SDC 80 ns, file CubeMX allineato. Matrice diagnostica disabilitata e FPGA
