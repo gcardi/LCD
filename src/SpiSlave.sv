@@ -5,7 +5,11 @@
 // tx_data/tx_valid form a show-ahead source; tx_take consumes on a rising edge.
 // See docs/SPI_SLAVE.md for timing, reset and CDC integration requirements.
 module SpiSlave #(
-    parameter [7:0] IDLE_BYTE = 8'hFF
+    parameter [7:0] IDLE_BYTE = 8'hFF,
+    // Fixed-response endpoints can drive MISO directly from the shift register.
+    // Their first tx_data byte must equal FIRST_BYTE. Generic FIFO mode is unchanged.
+    parameter FIXED_FIRST_BYTE = 0,
+    parameter [7:0] FIRST_BYTE = 8'hA5
 ) (
     input  wire       rst_n,
     input  wire       spi_sck,
@@ -33,8 +37,8 @@ module SpiSlave #(
     assign tx_take = active && (bit_count == 3'd0) && tx_valid;
     assign spi_miso_oe = active;
     // Tri-state is deliberately left to the top-level I/O buffer.
-    assign spi_miso = !active ? 1'b0 :
-                      (!tx_started ? next_tx[7] : tx_shift[7]);
+    assign spi_miso = FIXED_FIRST_BYTE ? tx_shift[7] :
+                     (!active ? 1'b0 : (!tx_started ? next_tx[7] : tx_shift[7]));
 
     always @(posedge spi_sck or posedge serial_reset) begin
         if (serial_reset) begin
@@ -54,7 +58,7 @@ module SpiSlave #(
     // on falling edges; the latched byte survives a source FIFO advance.
     always @(negedge spi_sck or posedge serial_reset) begin
         if (serial_reset) begin
-            tx_shift <= IDLE_BYTE;
+            tx_shift <= FIXED_FIRST_BYTE ? FIRST_BYTE : IDLE_BYTE;
             tx_started <= 1'b0;
         end else begin
             tx_started <= 1'b1;

@@ -25,7 +25,7 @@ module SpiFramebuffer (
  wire reset_parser = !rst_n || cs_n;
  wire [7:0] reply = selected && index == 1 ?
                          (accept_packet ? 8'hC3 : 8'h00) : (selected && index == 40 ? (committed ? 8'hAC : 8'hE1) : echo_byte);
- SpiSlave slave(.rst_n(rst_n), .spi_sck(sck), .spi_cs_n(cs_n),
+ SpiSlave #(.FIXED_FIRST_BYTE(1), .FIRST_BYTE(8'hA5)) slave(.rst_n(rst_n), .spi_sck(sck), .spi_cs_n(cs_n),
  .spi_mosi(mosi), .spi_miso(miso), .spi_miso_oe(miso_oe),
  .rx_data(rx), .rx_push(push), .tx_data(reply), .tx_valid(1'b1), .tx_take());
  always @(posedge sck or negedge rst_n) begin

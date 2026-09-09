@@ -28,7 +28,7 @@ module tb_spi_framebuffer;
  task byte_io(input [7:0] value,output [7:0] reply);
    integer b;begin
      for(b=7;b>=0;b=b-1) begin
-       mosi=value[b];#40;sck=1;reply[b]=miso;#40;sck=0;
+       mosi=value[b];#20;sck=1;reply[b]=miso;#20;sck=0;
      end
    end
  endtask
@@ -46,7 +46,7 @@ module tb_spi_framebuffer;
    #100;cs=1;#100;
  end endtask
  initial begin
-   #1;rst=0;#100;rst=1;#100;sck=1;#40;sck=0;#40;sck=1;#40;sck=0;
+   #1;rst=0;#100;rst=1;#100;sck=1;#20;sck=0;#20;sck=1;#20;sck=0;
    wait(writes==8160 && !writing);#1000;
    before0=memory[496];before15=memory[511];
    packet(496,5,8'hC3);#200;if(valid)$fatal(1,"partial committed");
@@ -61,7 +61,7 @@ module tb_spi_framebuffer;
    for(i=1;i<15;i=i+1) if(memory[496+i] != ((2*i+2)*256+2*i+1))$fatal(1,"pixel %d = %h",i,memory[496+i]);
    packet(512,32,8'hC3);#2000;if(writes!=8162)$fatal(1,"queue failed reuse");
    // Partial byte abort must leave the next command aligned.
-   cs=0;#100;mosi=1;#40;sck=1;#40;sck=0;cs=1;#100;
+   cs=0;#100;mosi=1;#20;sck=1;#20;sck=0;cs=1;#100;
    packet(528,32,8'hC3);#2000;if(writes!=8163)$fatal(1,"abort recovery");
    $display("PASS: spi_framebuffer masks, bounds, busy, abort, CDC, restart and PSRAM beats");$finish;
  end

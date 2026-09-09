@@ -12,7 +12,7 @@
 create_clock -name xtal_27 -period 37.037 -waveform {0 18.518} [get_ports {XTAL_IN}]
 
 // SPI diagnostic timing for the configured STM32 prescaler.
-create_clock -name spi_clk -period 80 -waveform {0 40} [get_ports {SPI_SCK}]
+create_clock -name spi_clk -period 40 -waveform {0 20} [get_ports {SPI_SCK}]
 // Conservative initial external budget; re-qualify before increasing SCK.
 set_input_delay -clock spi_clk -clock_fall -max 10 [get_ports {SPI_MOSI}]
 set_input_delay -clock spi_clk -clock_fall -min 0 [get_ports {SPI_MOSI}]
