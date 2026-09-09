@@ -73,7 +73,7 @@ byte MOSI. Non modifica il framebuffer. Prima del DMA, una prova GPIO lenta
 invia otto byte con tre configurazioni MISO (nessun pull, up, down). Le risposte
 attese sono `A5 3C 4D 5E 6F 80 91 A2` in tutti e tre i casi.
 
-Il firmware esegue poi 40 trasferimenti DMA a 12.5 Mbit/s, GPIO MEDIUM (lunghezze
+Il firmware esegue poi 40 trasferimenti DMA a 25 Mbit/s, GPIO MEDIUM (lunghezze
 1, 2, 17, 257, 4097 ripetute otto volte), verificando 34992 byte. I buffer sono
 in SRAM D2, allineati a 32 byte, con gestione cache se abilitata. CS viene
 rialzato dopo il completamento SPI. Il risultato e' in `g_spi_test`; il runner
@@ -122,3 +122,12 @@ Il firmware inizializza ora lo slave con due impulsi SCK a CS alto prima
 passano; il runner normale le verifica oltre al DMA. La sola commutazione
 CS senza clock non era sufficiente. Vedere il report diagnostico per i
 limiti di questa sequenza di inizializzazione e le prove successive.
+
+
+## Aggiornamento grafica a 25 MHz
+
+La configurazione corrente e' prescaler 8, GPIO MEDIUM, SDC 40 ns e
+SPI_FRAMEBUFFER=1. Il nuovo serializer con primo byte fisso A5 supera timing
+e primo collaudo hardware (34992 byte senza errori e demo accettata).
+Vedere [SPI_FRAMEBUFFER.md](../../docs/SPI_FRAMEBUFFER.md).
+-RestoreSelfTest ripristina invece l'eco pura e 12.5 MHz anche in C/CubeMX/SDC.

@@ -2,10 +2,9 @@
 
 `src/SpiSlave.sv` implementa SPI mode 0 (CPOL=0, CPHA=0), full duplex,
 8 bit, MSB first e CS attivo basso. Il modulo e' indipendente dal framebuffer
-ed e' istanziato in TOP attraverso SpiDiagnostic per il collaudo hardware.
-Il wrapper risponde A5, poi il byte MOSI precedente; il framebuffer non viene
-modificato. Il collaudo fisico non e' ancora superato: vedere
-[README STM32](../stm32/WeAct_H743_SPI/README.md).
+ed e' usato da SpiFramebuffer per la grafica e da SpiDiagnostic per le prove
+separate. Il collegamento grafico passa il primo collaudo a 25 MHz MEDIUM;
+vedere [SPI_FRAMEBUFFER.md](SPI_FRAMEBUFFER.md) per risultati e limiti.
 Trasporta soltanto byte: non interpreta comandi, dati o flag del protocollo.
 Non richiede un pin D/C; un eventuale flag comando/dato sara' codificato nei
 byte dal protocollo superiore.
@@ -49,6 +48,21 @@ Se `tx_valid=0`, viene trasmesso `IDLE_BYTE` (default FF) senza consumo.
 Una transazione interrotta dopo il primo bit ha gia' consumato il byte TX:
 non esiste rollback. Una risposta a un comando ricevuto richiede byte dummy
 o una transazione successiva e una regola di disponibilita' ancora da definire.
+
+## Primo byte fisso e uscita MISO
+
+Il default `FIXED_FIRST_BYTE=0` conserva il contratto show-ahead generico.
+Con `FIXED_FIRST_BYTE=1`, il primo byte di ogni transazione deve essere noto
+prima della sintesi e corrispondere a `FIRST_BYTE` (default A5). Il wrapper
+deve presentarlo anche su tx_data con tx_valid=1 al primo tx_take.
+Il registro TX viene inizializzato a FIRST_BYTE e MISO e' direttamente il suo
+bit 7: il selettore tx_started e la maschera active sul dato vengono eliminati
+in sintesi. La disabilitazione del pin resta garantita da spi_miso_oe nel TOP.
+A slave deselezionato il valore interno spi_miso non e' significativo.
+
+SpiFramebuffer abilita questa opzione, dato che inizia sempre con A5.
+SpiDiagnostic conserva il default generico e la qualifica precedente a 12.5 MHz.
+Non usare il parametro per una FIFO il cui primo byte puo' variare.
 
 ## Slave Select e risincronizzazione
 

@@ -129,7 +129,8 @@ EDA e restano soggetti ai termini di Gowin, non a quelli di questo progetto.
 Il TOP include uno slave SPI mode 0 con scrittura framebuffer e una
 modalita' diagnostica selezionabile. Cablaggio, firmware DMA e comando unico di build/upload/test
 sono nel [README STM32](stm32/WeAct_H743_SPI/README.md).
-Il collegamento e' stato verificato a 12.5 MHz con fronti MEDIUM; vedere
+La grafica passa il primo collaudo a 25 MHz con fronti MEDIUM. Per la diagnosi
+precedente e le prove lunghe a 12.5 MHz vedere
 [SPI_DIAGNOSTIC_RESULTS.md](docs/SPI_DIAGNOSTIC_RESULTS.md). La nuova demo
 grafica e i suoi limiti di verifica sono descritti in
 [SPI_FRAMEBUFFER.md](docs/SPI_FRAMEBUFFER.md).

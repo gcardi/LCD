@@ -1,6 +1,28 @@
 # Punto di ripresa — 9 settembre 2026
 
-## Ultimo stato: rettangolo SPI visibile sul pannello
+## Ultimo stato: grafica a 25 MHz, primo collaudo PASS
+
+Ottimizzato MISO con FIXED_FIRST_BYTE=1 / FIRST_BYTE=A5 in SpiFramebuffer.
+Uscita diretta dal registro TX: rimosso il mux tx_started dal percorso al pin.
+SpiSlave conserva il comportamento generico come default per SpiDiagnostic.
+
+Configurazione attuale: SPI_FRAMEBUFFER=1, matrice disabilitata, prescaler 8,
+SDC 40 ns, GPIO MEDIUM. Build/timing PASS: sei endpoint calibrazione PSRAM,
+worst -1.308 ns, nessuna altra violazione. Schede caricate e flash verificata.
+Test a 25000000 Hz: 40 trasferimenti, 34992 byte, zero mismatch/HAL error,
+tutti i GPIO corretti, graphics_state=2. Conferma visiva a 25 MHz in attesa.
+Suite SPI PASS, banco framebuffer a 25 MHz. Non ancora prova lunga a 25 MHz.
+RestoreSelfTest riallinea anche frequenza/CubeMX/SDC a 12.5 MHz per l'eco pura.
+Dettagli e hash in SPI_FRAMEBUFFER.md. Seguono le prove precedenti.
+
+## Tentativo successivo: 25 MHz respinti dal timing
+
+Il 9 settembre provato vincolo SCK 40 ns e prescaler 8 con MEDIUM.
+Gate FAIL: uscita MISO da tx_started, slack -3.782 ns; MOSI minimo +0.043 ns.
+Nessun caricamento ne' prova hardware a 25 MHz. Ripristinata configurazione
+12.5 MHz / prescaler 16 / SDC 80 ns. Dettagli in SPI_FRAMEBUFFER.md.
+
+## Ultimo stato hardware: rettangolo SPI visibile sul pannello
 
 Implementato percorso SPI -> coda asincrona di un burst -> scritture PSRAM
 mascherate. API STM32 `LCD_WriteRect`, rettangoli RGB565 arbitrari. Demo 67x40
