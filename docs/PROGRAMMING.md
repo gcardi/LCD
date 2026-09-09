@@ -65,10 +65,30 @@ Embedded Flash durante lo sviluppo. La compressione del bitstream si disattiva
 con `.uild.ps1 -NoCompress`, ma non serve a superare la verifica: provata il
 10 settembre 2026, fallisce esattamente come quella compressa. Tenerla attiva.
 
-Se la programmazione fallisce con `Error: Program failed`, prova un ciclo di
-alimentazione della Tang Nano prima di ripetere: l'unico tentativo riuscito
-finora era il primo dopo l'accensione. Nel frattempo `program_tang_nano_sram.ps1`
-riporta la scheda in funzione in pochi secondi, in modo volatile. Gli indirizzi del `.fi` sono esadecimali
+## `Verify Failed` non significa flash scritta male
+
+`programmer_cli` fallisce sistematicamente la verifica della Embedded Flash su
+questo progetto, e quando lo fa stampa anche `Error: Program failed`, a volte
+uscendo con codice 1. **La scrittura però riesce.** Verificato il 10 settembre
+2026: dopo una programmazione conclusa così, un ciclo di alimentazione ha
+portato la FPGA a configurarsi da sola e il collaudo hardware a passare, senza
+riprogrammare nulla.
+
+Attenzione a come si controlla l'esito. Subito dopo l'operazione il dispositivo
+resta non configurato, quindi:
+
+```powershell
+programmer_cli --device GW1NR-9C --operation_index 0 --cable-index 1
+```
+
+riporta `User Code 0x00000000` e status `0x00031421` con il bit di CRC error, e
+sembra una flash vuota. Non lo è. **Stacca e riattacca l'alimentazione della
+Tang Nano, poi rileggi**: a configurazione avvenuta il User Code diventa quello
+del bitstream e il bit di CRC error sparisce. Il pulsante di reset non serve
+allo scopo, perché qui è un reset logico e non provoca riconfigurazione.
+
+Per rimettere in funzione la scheda subito, senza aspettare,
+`program_tang_nano_sram.ps1` la configura in pochi secondi in modo volatile. Gli indirizzi del `.fi` sono esadecimali
 senza prefisso e il generatore emette anche `.mem`, `.bin` e un manifest JSON.
 
 ## Embedded Flash e User Flash sono lo stesso array

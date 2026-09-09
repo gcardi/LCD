@@ -78,27 +78,35 @@ differenza.
   "programmate e verificate". Ora l'output viene ispezionato in
   `tools/Invoke-GowinProgrammer.ps1`, e il controllo si è dimostrato utile al
   primo impiego reale.
-- **La programmazione della Embedded Flash riesce solo al primo tentativo dopo
-  l'accensione.** Osservato tre volte di seguito il 10 settembre 2026:
+- **`Verify Failed` sulla Embedded Flash è un falso allarme: la scrittura
+  riesce comunque.** `programmer_cli` fallisce sistematicamente lo stadio di
+  verifica e, quando lo fa, riporta anche `Error: Program failed` e talvolta
+  esce con codice 1. Nulla di tutto ciò indica una flash scritta male.
 
-  | Tentativo | Bitstream | Output | Uscita | Dispositivo |
-  |---|---|---|---|---|
-  | 1 | compresso | `Verify Failed` | 0 | configurato, User Code `0xC765` |
-  | 2 | non compresso | `Verify Failed` + `Program failed` | 1 | non configurato |
-  | 3 | compresso | `Verify Failed` + `Program failed` | 1 | non configurato |
+  Come è stato stabilito, il 10 settembre 2026: dopo una programmazione
+  conclusa con `Program failed` ed exit 1, un ciclo di alimentazione della Tang
+  Nano ha portato la FPGA a configurarsi da sola con `User Code 0x0000C765` e
+  status `0x0003B020` senza CRC error, e il collaudo hardware è tornato PASS
+  senza alcuna riprogrammazione in mezzo.
 
-  Il terzo tentativo ripete esattamente la configurazione del primo, quindi
-  `-bit_compress` **non** è la causa: l'ipotesi iniziale era sbagliata ed è
-  stata smentita dalla prova. Non lo è nemmeno il bitstream, perché la
-  programmazione in SRAM dello stesso file riesce senza un solo errore e il
-  collaudo hardware torna PASS. L'unica differenza rimasta fra il tentativo
-  riuscito e quelli falliti è che il primo seguiva un'accensione. Ipotesi da
-  verificare: fra due operazioni sulla Embedded Flash serve un ciclo di
-  alimentazione della Tang Nano.
+  L'insidia sta nel come si legge lo stato subito dopo l'operazione: il
+  dispositivo resta non configurato, quindi `Read Device Codes` riporta
+  `User Code 0x00000000` e status `0x00031421` con il bit di CRC error. È facile
+  scambiarlo per una flash vuota, ma è solo un dispositivo che non si è ancora
+  riconfigurato. **Solo un ciclo di alimentazione dice la verità**; il pulsante
+  di reset non basta, perché in questo progetto è un reset logico e non provoca
+  riconfigurazione.
 
-  Nota che `Verify Failed` compare in **tutti** i tentativi, compreso quello
-  che ha prodotto un dispositivo funzionante, quindi resta un fenomeno distinto
-  e ancora inspiegato.
+  Una precedente annotazione sosteneva che la programmazione riuscisse solo al
+  primo tentativo dopo l'accensione: era sbagliata, nata dalla stessa
+  confusione. Anche l'ipotesi che la colpa fosse di `-bit_compress 1` è stata
+  smentita, perché un bitstream non compresso fallisce la verifica in modo
+  identico. La compressione resta attiva.
+
+  Resta aperto il perché la verifica fallisca, dato che la flash è corretta.
+  Sospetto da indagare: `bit_security`/`CRC_CHECK`, oppure una rilettura che
+  non tiene conto della User Flash accodata al bitstream.
+
 - **`programmer_cli` non parte se l'ambiente definisce `PYTHONIOENCODING`.** È
   un eseguibile Python congelato e muore con `0xC0000409` e
   `LookupError: unknown encoding: utf-8:surrogateescape` prima di toccare la
