@@ -64,6 +64,10 @@ $tcl = Join-Path ([System.IO.Path]::GetTempPath()) "lcd_build_$PID.tcl"
 # Le graffe impediscono a Tcl di interpretare i backslash del percorso.
 open_project {$project}
 set_option -gen_text_timing_rpt 1
+set_option -place_option 1
+set_option -route_option 1
+set_option -bit_security 0
+set_option -bit_compress 1
 run all
 "@ | Set-Content -LiteralPath $tcl -Encoding ascii
 

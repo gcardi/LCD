@@ -7,6 +7,9 @@
     <FileList>
         <File path="src/TOP.sv" type="file.verilog" enable="1"/>
         <File path="src/SpiFramebuffer.sv" type="file.verilog" enable="1"/>
+        <File path="src/UserFlashReader.sv" type="file.verilog" enable="1"/>
+        <File path="src/FontStore.sv" type="file.verilog" enable="1"/>
+        <File path="src/TextRenderer.sv" type="file.verilog" enable="1"/>
         <File path="src/SpiSlave.sv" type="file.verilog" enable="1"/>
         <File path="src/SpiDiagnostic.sv" type="file.verilog" enable="1"/>
         <File path="src/VGA_Timing.sv" type="file.verilog" enable="1"/>

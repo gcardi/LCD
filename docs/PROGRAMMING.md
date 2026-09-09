@@ -34,3 +34,40 @@ punta a `Gowin_V1.9.12.01_x64`. Con un'altra versione installata va aggiornata
 la variabile `$programmer` in `program_tang_nano_sram.ps1`.
 
 La programmazione SRAM viene persa quando la scheda viene spenta.
+
+Per rendere persistenti sia il bitstream sia i tre font della User Flash:
+
+```powershell
+.\program_tang_nano_flash.ps1
+```
+
+Questo usa l'operazione Gowin 6 (`embFlash Erase,Program,Verify`) passando
+insieme `impl/pnr/LCD.fs` e `fonts/user_flash_fonts.fi`.
+Il build imposta `-bit_security 0`, necessario per consentire la verifica della
+Embedded Flash durante lo sviluppo. Gli indirizzi del `.fi` sono esadecimali
+senza prefisso e il generatore emette anche `.mem`, `.bin` e un manifest JSON.
+
+## Embedded Flash e User Flash sono lo stesso array
+
+Sul GW1NR-9C bitstream e User Flash non sono due memorie distinte: occupano la
+stessa flash interna. Lo si vede negli artefatti che il programmer lascia in
+`impl/pnr/`: `LCD.bin` misura 444.426 byte, mentre l'immagine fusa
+`merged_withUserFlash.bin` ne misura 524.288. La differenza, circa 78 KB, è
+esattamente la User Flash accodata in testa al bitstream.
+
+Da qui discende l'unica regola operativa da rispettare:
+
+- **ogni** programmazione della Embedded Flash *senza* `--fiFile` cancella i
+  font. Non è un guasto e non dà errore: `FontStore` non trova più
+  l'intestazione `LCDF`, alza `fonts_error`, e da quel momento il byte di stato
+  del comando testo `B8` resta `E2`. Lato STM32 la demo fallisce con
+  `g_lcd_fpga_text_demo_state = 3`. Per questo va usato sempre
+  `program_tang_nano_flash.ps1`, mai `programmer_cli` a mano;
+- `program_tang_nano_sram.ps1` (operazione 2) è invece sicuro: tocca solo la
+  SRAM di configurazione e lascia intatti i font già programmati in flash. È il
+  modo giusto di iterare sull'RTL senza riscrivere ogni volta i font.
+
+Dopo una programmazione andata a buon fine, il rendering del testo diventa
+disponibile qualche millisecondo dopo il reset: `FontStore` verifica in CRC-32
+i 25.152 byte dell'immagine prima di accettare comandi. Il firmware STM32
+attende già questa finestra, fino a un secondo, in `text_ready()`.

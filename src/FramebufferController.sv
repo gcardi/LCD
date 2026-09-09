@@ -52,11 +52,18 @@ module FramebufferController #(
         FRAME_FLUSH, UPDATE_COMMAND, UPDATE_DATA, UPDATE_GAP
     } state_t;
 
-    state_t state;
-    logic restart_pending;
+      state_t state;
+      logic restart_pending;
+      logic fifo_almost_full_q;
     logic [255:0] update_words;
     logic [15:0] update_masks;
-    assign update_take = state == UPDATE_COMMAND;
+      assign update_take = state == UPDATE_COMMAND;
+      // Break the FIFO pointer/threshold path before it reaches the controller
+      // state decoder. The FIFO threshold already reserves a full burst.
+      always_ff @(posedge clk or negedge nRST) begin
+          if (!nRST) fifo_almost_full_q <= 1'b0;
+          else       fifo_almost_full_q <= fifo_almost_full;
+      end
     function automatic [3:0] pixel_mask(input [1:0] enabled);
         pixel_mask = {{2{!enabled[1]}}, {2{!enabled[0]}}};
     endfunction
@@ -315,9 +322,13 @@ module FramebufferController #(
                         state <= UPDATE_DATA;
                 end
                 READ_COMMAND: begin
-                    if (fifo_almost_full && update_valid) begin
+                    if (fifo_almost_full_q && update_valid) begin
                         state <= UPDATE_COMMAND;
-                    end else if (!fifo_almost_full && !fifo_full) begin
+                    // ALMOST_FULL is asserted early enough to reserve the
+                    // complete eight-word read burst, so a second FULL test
+                    // here is redundant and would reintroduce the raw Gray
+                    // pointer into this timing-critical state decoder.
+                    end else if (!fifo_almost_full_q) begin
                         addr        <= memory_address;
                         cmd         <= 1'b0;
                         cmd_en      <= 1'b1;

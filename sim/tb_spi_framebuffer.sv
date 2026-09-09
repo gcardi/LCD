@@ -1,11 +1,22 @@
 `timescale 1ns/1ps
 module tb_spi_framebuffer;
- reg clk=0,rst=1,sck=0,cs=1,mosi=0,allow=0,restart=0;
+ reg clk=0,rst=1,sck=0,cs=1,mosi=0,allow=0,restart=0,text_take=0;
  always #6 clk=~clk;
- wire miso,oe,valid,take; wire [20:0] address,addr;
+ wire miso,oe,valid,take,text_valid; wire [20:0] address,addr;
  wire [255:0] pixels; wire [15:0] mask;
  wire [31:0] wd; wire cmd,en;wire [3:0] dm;
- SpiFramebuffer endpoint(rst,sck,cs,mosi,miso,oe,clk,rst,valid,take,address,pixels,mask);
+ wire [1:0] text_font;wire [7:0] text_flags;wire [8:0] text_x,text_y,text_bh;
+ wire [9:0] text_bw;wire [15:0] text_fg,text_bg;wire [6:0] text_length;
+ reg [5:0] text_read_address=0;wire [7:0] text_read_data;
+ SpiFramebuffer endpoint(.rst_n(rst),.sck(sck),.cs_n(cs),.mosi(mosi),
+ .miso(miso),.miso_oe(oe),.clk(clk),.mem_rst_n(rst),.valid(valid),.take(take),
+ .address(address),.pixels(pixels),.mask(mask),.text_clk(clk),.text_rst_n(rst),
+ .text_enabled(1'b1),
+ .text_valid(text_valid),.text_take(text_take),.text_font_id(text_font),
+ .text_flags(text_flags),.text_x(text_x),.text_y(text_y),.text_box_width(text_bw),
+ .text_box_height(text_bh),.text_foreground(text_fg),.text_background(text_bg),
+ .text_length(text_length),.text_read_address(text_read_address),
+ .text_read_data(text_read_data));
  FramebufferController controller(.clk(clk),.nRST(rst),.init_calib(1'b1),
  .frame_restart(restart),.wr_data(wd),.rd_data(32'd0),.rd_data_valid(1'b0),
  .addr(addr),.cmd(cmd),.cmd_en(en),.data_mask(dm),.fifo_almost_full(1'b1),
@@ -33,6 +44,12 @@ module tb_spi_framebuffer;
    end
  endtask
  reg [7:0] r;integer i;reg [15:0] before0,before15;
+ function automatic [15:0] crc_byte(input [15:0] current,input [7:0] value);
+   integer bit_index;reg [15:0] next;begin next=current^{value,8'd0};
+     for(bit_index=0;bit_index<8;bit_index=bit_index+1)
+       next=next[15]?(next<<1)^16'h1021:(next<<1);
+     crc_byte=next;end
+ endfunction
  task packet(input [23:0] a,input integer count,input [7:0] status);
  begin
    cs=0;#100;byte_io(8'hB7,r);if(r!=8'hA5)$fatal(1,"identity");
@@ -45,6 +62,25 @@ module tb_spi_framebuffer;
    end
    #100;cs=1;#100;
  end endtask
+ task text_packet(input wrong_crc,input [7:0] expected_reply);
+   reg [15:0] crc;reg [7:0] value;integer n;begin
+     crc=16'hFFFF;cs=0;#100;byte_io(8'hB8,r);if(r!=8'hA5)$fatal(1,"text identity");
+     byte_io(0,r);if(r!=8'hC3)$fatal(1,"text status %h",r);
+     for(n=2;n<=17;n=n+1) begin
+       case(n)
+         2:value=1;3:value=2;4:value=0;5:value=5;6:value=0;7:value=7;
+         8:value=0;9:value=12;10:value=0;11:value=24;
+         12:value=8'hF8;13:value=0;14:value=0;15:value=8'h1F;
+         16:value=1;default:value=8'h41;
+       endcase
+       crc=crc_byte(crc,value);byte_io(value,r);
+     end
+     byte_io(crc[15:8]^(wrong_crc?8'h01:8'h00),r);byte_io(crc[7:0],r);
+     byte_io(8'hA6,r);byte_io(0,r);if(r!=expected_reply)
+       $fatal(1,"text commit %h crc=%h expected=%h invalid=%b len=%d",
+              r,endpoint.text_crc,endpoint.text_expected_crc,endpoint.text_invalid,text_length);
+     cs=1;#100;
+   end endtask
  initial begin
    #1;rst=0;#100;rst=1;#100;sck=1;#20;sck=0;#20;sck=1;#20;sck=0;
    wait(writes==8160 && !writing);#1000;
@@ -65,6 +101,16 @@ module tb_spi_framebuffer;
    // Partial byte abort must leave the next command aligned.
    cs=0;#100;mosi=1;#20;sck=1;#20;sck=0;cs=1;#100;
    packet(528,32,8'hC3);#2000;if(writes!=8163)$fatal(1,"abort recovery");
+   text_packet(0,8'hAC);#300;if(!text_valid)$fatal(1,"missing text command");
+   if(text_font!=1 || text_flags!=2 || text_x!=5 || text_y!=7 ||
+      text_bw!=12 || text_bh!=24 || text_fg!=16'hF800 || text_bg!=16'h001F ||
+      text_length!=1)$fatal(1,"text fields");
+   text_read_address=0;repeat(2)@(posedge clk);
+   if(text_read_data!=8'h41)$fatal(1,"text payload");
+   cs=0;#100;byte_io(8'hB8,r);byte_io(0,r);cs=1;#100;
+   if(r!=0)$fatal(1,"text queue did not report busy");
+   @(negedge clk);text_take=1;@(negedge clk);text_take=0;wait(!text_valid);#200;
+   text_packet(1,8'hE1);#300;if(text_valid)$fatal(1,"bad CRC committed");
    $display("PASS: spi_framebuffer masks, bounds, busy, abort, CDC, restart and PSRAM beats");$finish;
  end
  initial begin #10000000;$fatal(1,"timeout");end

@@ -3,10 +3,11 @@
 Esperimento FPGA per pilotare un pannello LCD RGB 480×272 con una Sipeed
 Tang Nano 9K.
 
-Il progetto inizializza la PSRAM integrata con un frame buffer RGB565, lo legge
-a burst attraverso una FIFO dual-clock e genera i segnali di timing del display.
-Il pattern corrente è diagonale, con bordo bianco. Sono disponibili anche otto
-barre orizzontali colorate, alte 34 righe, e un pattern bit-walk RGB565.
+Il progetto inizializza la PSRAM integrata con un frame buffer RGB565 nero, lo
+legge a burst attraverso una FIFO dual-clock e genera i segnali di timing del
+display. Tramite SPI può aggiornare rettangoli o renderizzare testo usando tre
+font bitmap residenti nella User Flash. Pattern diagnostici e barre colore
+restano disponibili nei test.
 
 ![Barre orizzontali visualizzate sul pannello LCD](docs/assets/images/HBars.jpg)
 
@@ -23,18 +24,18 @@ e degli accessi a burst nel frame buffer.
 - `src/ResetSynchronizer.sv`: reset asincrono in assert, sincrono in rilascio;
 - `src/FramebufferFifo.sv`: FIFO dual-clock con almost-full pipelined;
 - `src/PulseSynchronizer.sv`: trasporto di un impulso fra domini di clock;
+- `src/UserFlashReader.sv`, `src/FontStore.sv`, `src/TextRenderer.sv`: lettura,
+  validazione CRC e rendering dei font 8x16, 12x24 e 16x32;
 - `src/LCD.cst`: assegnazione dei pin della Tang Nano 9K;
 - `src/LCD.sdc`: vincoli di timing e gruppi di clock asincroni;
 - `LCD.gprj`: progetto Gowin EDA;
-- `build.ps1`, `program_tang_nano_sram.ps1`: build da riga di comando e
-  programmazione della SRAM;
+- `build.ps1`, `program_tang_nano_sram.ps1`, `program_tang_nano_flash.ps1`:
+  build e programmazione volatile o persistente con i font;
 - `tools/`: gate di timing sul report Gowin e runner di processo con log e
   timeout, condiviso da build e simulazione;
 - `sim/`: testbench di risincronizzazione del frame e prove negative;
 - `src/gowin_rpll/`, `src/psram_memory_interface_hs/`: IP generati da Gowin EDA
   per i due PLL e per il controller PSRAM;
-- `src/framebuffer_fifo/`: FIFO generata, sostituita da `src/FramebufferFifo.sv`
-  e disabilitata in `LCD.gprj` (`enable="0"`); resta come riferimento.
 
 ## Build e programmazione
 
@@ -60,6 +61,13 @@ Per caricarlo nella SRAM volatile da PowerShell:
 
 ```powershell
 .\program_tang_nano_sram.ps1
+```
+
+Per programmare insieme Embedded Flash e User Flash:
+
+```powershell
+python .\tools\generate_user_flash_fonts.py .\third_party\terminus-font-4.49.1-master .\fonts
+.\program_tang_nano_flash.ps1
 ```
 
 Ulteriori dettagli sono in [PROGRAMMING.md](docs/PROGRAMMING.md).
@@ -108,6 +116,8 @@ Il modulo autonomo [SpiSlave](docs/SPI_SLAVE.md) implementa il trasporto SPI
 mode 0 per un master STM32 ed e' verificabile con `./sim/run_spi_sim.ps1`.
 L'endpoint [SPI framebuffer](docs/SPI_FRAMEBUFFER.md) aggiunge una coda
 asincrona, burst mascherati e arbitraggio PSRAM per rettangoli RGB565.
+Il comando [SPI testo B8](docs/SPI_TEXT.md) aggiunge testo UTF-8 limitato,
+clipping, ritorno a capo opzionale e sfondo opaco o trasparente.
 
 [LVGL_IMPL.md](docs/LVGL_IMPL.md) raccoglie uno studio speculativo su come
 trasformare la scheda in un controller grafico SPI pilotabile da un
@@ -120,8 +130,7 @@ Rilasciato sotto licenza MIT: vedi [LICENSE](LICENSE).
 La struttura iniziale del progetto e il timing del pannello derivano
 dall'esempio `lcd_4.3` della raccolta [Sipeed
 TangNano-9K-example](https://github.com/sipeed/TangNano-9K-example). I file
-sotto `src/framebuffer_fifo/`, `src/gowin_rpll/` e
-`src/psram_memory_interface_hs/` sono generati dall'IP Core Generator di Gowin
+sotto `src/gowin_rpll/` e `src/psram_memory_interface_hs/` sono generati dall'IP Core Generator di Gowin
 EDA e restano soggetti ai termini di Gowin, non a quelli di questo progetto.
 
 ## Collegamento STM32 e collaudo SPI

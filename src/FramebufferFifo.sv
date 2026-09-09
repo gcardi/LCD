@@ -19,7 +19,7 @@ module FramebufferFifo
     parameter int unsigned ALMOST_EMPTY = 240,
     // 504 in the vendor part. Four cycles of pointer lag plus one more write
     // plus an eight-word burst still lands well inside 512.
-    parameter int unsigned ALMOST_FULL  = 496
+    parameter int unsigned ALMOST_FULL  = 495
 )
 (
     input  logic             Reset,             // active high, asynchronous
