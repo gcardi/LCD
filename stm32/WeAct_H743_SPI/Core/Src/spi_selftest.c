@@ -72,6 +72,26 @@ void HAL_SPI_ErrorCallback(SPI_HandleTypeDef *hspi)
     if(hspi == &hspi2) failed = 1;
 }
 
+// Synchronous owner of the same DMA buffers/callbacks as the boot test.
+// Caller owns CS. No concurrent transfers are allowed.
+int SPI_Exchange_DMA(const uint8_t *send,uint8_t *receive,uint16_t length)
+{
+    if(!length || length>sizeof(tx)) return 0;
+    memcpy(tx,send,length);
+    uint32_t cache_length=(length+31u)&~31u;
+    if(SCB->CCR & SCB_CCR_DC_Msk) {
+        SCB_CleanDCache_by_Addr((uint32_t*)tx,cache_length);
+        SCB_CleanInvalidateDCache_by_Addr((uint32_t*)rx,cache_length);
+    }
+    __DSB();completed=0;failed=0;
+    uint32_t start=HAL_GetTick();
+    HAL_StatusTypeDef status=HAL_SPI_TransmitReceive_DMA(&hspi2,tx,rx,length);
+    while(status==HAL_OK && !completed && !failed && HAL_GetTick()-start<1000) {}
+    if(status!=HAL_OK || !completed || failed) {HAL_SPI_Abort(&hspi2);return 0;}
+    if(SCB->CCR & SCB_CCR_DC_Msk) SCB_InvalidateDCache_by_Addr((uint32_t*)rx,cache_length);
+    __DSB();memcpy(receive,rx,length);return 1;
+}
+
 void SPI_SelfTest_Run(void)
 {
 #if SPI_DIAG_MATRIX
@@ -89,10 +109,12 @@ void SPI_SelfTest_Run(void)
     HAL_Delay(100); // FPGA configuration/PLL startup and initial CS reset.
     reset_transaction_after_config();
     probe_gpio();
-    for(uint32_t round=0;round<8;round++) {
+    for(uint32_t round=0;round<SPI_SELFTEST_ROUNDS;round++) {
         for(uint32_t t=0;t<sizeof(lengths)/sizeof(lengths[0]);t++) {
             uint16_t length=lengths[t];
             for(uint32_t i=0;i<sizeof(tx);i++) tx[i]=(uint8_t)((i*37+round*53)^(i>>3));
+            // B7 is the graphics opcode, never send it as an echo opcode.
+            if(tx[0]==0xB7) tx[0]=0x37;
             memset(rx,0,sizeof(rx));
             if(SCB->CCR & SCB_CCR_DC_Msk) {
                 SCB_CleanDCache_by_Addr((uint32_t*)tx,sizeof(tx));

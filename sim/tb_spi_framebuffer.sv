@@ -48,6 +48,8 @@ module tb_spi_framebuffer;
  initial begin
    #1;rst=0;#100;rst=1;#100;sck=1;#20;sck=0;#20;sck=1;#20;sck=0;
    wait(writes==8160 && !writing);#1000;
+   for(i=0;i<130560;i=i+1)
+     if(memory[i] !== 16'h0000) $fatal(1,"startup pixel %d is not black",i);
    before0=memory[496];before15=memory[511];
    packet(496,5,8'hC3);#200;if(valid)$fatal(1,"partial committed");
    packet(497,32,8'hC3);#200;if(valid)$fatal(1,"unaligned committed");

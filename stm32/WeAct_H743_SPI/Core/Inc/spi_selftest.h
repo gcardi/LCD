@@ -7,5 +7,6 @@ typedef struct {
     uint32_t first_bad_index, expected, actual, hal_error, elapsed_ms, sck_hz;
 } SpiTestResult;
 extern volatile SpiTestResult g_spi_test;
+int SPI_Exchange_DMA(const uint8_t *send, uint8_t *receive, uint16_t length);
 void SPI_SelfTest_Run(void);
 #endif

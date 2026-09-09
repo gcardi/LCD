@@ -2,12 +2,17 @@ param(
     [Parameter(Mandatory)][ValidatePattern('^[A-Za-z0-9]+$')][string]$SerialNumber,
     [switch]$ReadOnly,
     [switch]$RequireGraphics,
+    [switch]$RequireStress,
     [string]$ProgrammerPath,
     [ValidateRange(5,120)][int]$TimeoutSeconds=20
 )
 $ErrorActionPreference='Stop'
 if((Get-Content (Join-Path $PSScriptRoot 'Core/Inc/spi_diag_config.h') -Raw) -match '#define SPI_DIAG_MATRIX 1') {
     throw 'Matrice diagnostica abilitata: usare diagnose-hardware.ps1 -RestoreSelfTest -SerialNumber <seriale> prima del collaudo normale.'
+}
+if(($RequireGraphics -or $RequireStress) -and
+   (Get-Content (Join-Path $PSScriptRoot 'Core/Inc/spi_diag_config.h') -Raw) -match '#define LCD_BOOT_TESTS 0') {
+    throw 'Test grafici disabilitati: impostare LCD_BOOT_TESTS 1 in Core/Inc/spi_diag_config.h e ricompilare/caricare; ripristinare 0 per avvio uniforme.'
 }
 $repoRoot=Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 . (Join-Path $repoRoot 'tools/Invoke-LoggedProcess.ps1')
@@ -79,10 +84,46 @@ if ($RequireGraphics) {
         Start-Sleep -Milliseconds 100
     } while($graphicsTimer.Elapsed.TotalSeconds -lt $TimeoutSeconds)
 }
-$result | ConvertTo-Json | Set-Content -LiteralPath $resultPath
-if($result.magic -ne 0x53504954 -or $result.version -ne 1 -or $result.state -ne 2 -or $result.transfers -ne 40 -or $result.checked_bytes -ne 34992 -or $result.mismatches -ne 0 -or $result.hal_error -ne 0 -or -not $result.gpio_probe.all_match) {
+$roundConfig=Get-Content (Join-Path $PSScriptRoot 'Core/Inc/spi_diag_config.h') -Raw
+if($roundConfig -notmatch '#define SPI_SELFTEST_ROUNDS (\d+)') {throw 'Numero round non definito'}
+$expectedRounds=[int]$Matches[1]
+if($RequireStress) {
+    $stressSymbol=@($symbols | Where-Object {$_ -match '^[0-9a-fA-F]+\s+\w\s+g_lcd_stress$'})
+    if($stressSymbol.Count -ne 1) {throw 'Simbolo stress mancante'}
+    $stressAddress='0x'+($stressSymbol[0] -split '\s+')[0]
+    $stressDump=Join-Path $build 'hardware-stress.bin'
+    $stressTimer=[Diagnostics.Stopwatch]::StartNew()
+    do {
+        if(Test-Path $stressDump) {Remove-Item -LiteralPath $stressDump}
+        Invoke-LoggedProcess -FilePath $ProgrammerPath -Arguments @('-c','port=SWD',"sn=$SerialNumber",'mode=HOTPLUG','freq=1000','-u',$stressAddress,'24',$stressDump) -LogPath (Join-Path $build 'hardware-stress.log') -TimeoutSeconds $TimeoutSeconds
+        $stressBytes=[IO.File]::ReadAllBytes($stressDump)
+        if($stressBytes.Length -ne 24) {throw 'Dump stress troncato'}
+        $stress=[ordered]@{}
+        $stressNames=@('state','rectangles','pixels','packets','elapsed_ms','failed_rect')
+        for($i=0;$i -lt 6;$i++) {$stress[$stressNames[$i]]=[BitConverter]::ToUInt32($stressBytes,$i*4)}
+        if($stress.state -in @(2,3)) {break}
+        Start-Sleep -Milliseconds 250
+    } while($stressTimer.Elapsed.TotalSeconds -lt $TimeoutSeconds)
+    $result['stress']=$stress
+    $errorSymbol=@($symbols | Where-Object {$_ -match '^[0-9a-fA-F]+\s+\w\s+g_lcd_error$'})
+    if($errorSymbol.Count -eq 1) {
+        $errorAddress='0x'+($errorSymbol[0] -split '\s+')[0]
+        $errorDump=Join-Path $build 'hardware-lcd-error.bin'
+        if(Test-Path $errorDump) {Remove-Item -LiteralPath $errorDump}
+        Invoke-LoggedProcess -FilePath $ProgrammerPath -Arguments @('-c','port=SWD',"sn=$SerialNumber",'mode=HOTPLUG','freq=1000','-u',$errorAddress,'24',$errorDump) -LogPath (Join-Path $build 'hardware-lcd-error.log') -TimeoutSeconds $TimeoutSeconds
+        $errorBytes=[IO.File]::ReadAllBytes($errorDump)
+        if($errorBytes.Length -ne 24) {throw 'Dump errore LCD troncato'}
+        $lcdError=[ordered]@{}
+        $errorNames=@('phase','address','index','expected','actual','hal_error')
+        for($i=0;$i -lt 6;$i++) {$lcdError[$errorNames[$i]]=[BitConverter]::ToUInt32($errorBytes,$i*4)}
+        $result['lcd_error']=$lcdError
+    }
+}
+$result | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $resultPath
+if($result.magic -ne 0x53504954 -or $result.version -ne 1 -or $result.state -ne 2 -or $result.transfers -ne ($expectedRounds*5) -or $result.checked_bytes -ne ($expectedRounds*4374) -or $result.mismatches -ne 0 -or $result.hal_error -ne 0 -or -not $result.gpio_probe.all_match) {
     throw "Test hardware NON superato (timeout/errore): $($result | ConvertTo-Json -Compress)"
 }
 if ($RequireGraphics -and $result.graphics_state -ne 2) {throw "Demo grafica NON superata: stato $($result.graphics_state)"}
+if($RequireStress -and ($result.stress.state -ne 2 -or $result.stress.rectangles -ne 512 -or $result.stress.pixels -ne 354528 -or $result.stress.packets -ne 30035 -or $result.lcd_error.phase -ne 0 -or $result.checked_bytes -lt 1000000)) {throw "Stress NON superato: $($result | ConvertTo-Json -Depth 5 -Compress)"}
 Write-Host "PASS: SPI DMA, $($result.transfers) trasferimenti, $($result.checked_bytes) byte verificati, $($result.elapsed_ms) ms."
 Write-Host "Risultato: $resultPath"

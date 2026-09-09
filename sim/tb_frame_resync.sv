@@ -244,6 +244,7 @@ module tb_frame_resync;
             ref_pixel = ref_bar(y);
 `else
             case (ctrl.PATTERN)
+                3:       ref_pixel = ctrl.BACKGROUND_COLOR;
                 2:       ref_pixel = border ? 16'hFFFF : (16'd1 << (y / PITCH));
                 1:       ref_pixel = border ? 16'hFFFF :
                                      ((((x + y) % PITCH) == 0) ? ref_bar(y) : 16'h0000);

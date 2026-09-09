@@ -4,4 +4,7 @@
 #define SPI_DIAG_MATRIX 0
 #define SPI_DIAG_MODE 0
 #define SPI_DIAG_ROUNDS 8
+#define SPI_SELFTEST_ROUNDS 240
+// Opt in to destructive on-screen demo/stress drawing at boot.
+#define LCD_BOOT_TESTS 0
 #endif

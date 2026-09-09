@@ -1,4 +1,6 @@
-module FramebufferController
+module FramebufferController #(
+    parameter [15:0] BACKGROUND_COLOR = 16'h0000
+)
 (
     input  logic        clk,
     input  logic        nRST,
@@ -82,7 +84,8 @@ module FramebufferController
     localparam int unsigned PATTERN_DIAGONAL = 1;  // coloured diagonals, border
     localparam int unsigned PATTERN_BITWALK  = 2;  // one RGB565 bit per band
 
-    localparam int unsigned PATTERN = PATTERN_DIAGONAL;
+    localparam int unsigned PATTERN_SOLID = 3;
+    localparam int unsigned PATTERN = PATTERN_SOLID;
 
     // The pitch must be odd and share no factor with the burst length, or a
     // shift of exactly one burst would slide the pattern onto itself and stay
@@ -153,6 +156,7 @@ module FramebufferController
             x_hi = x_lo + 9'd1;
 
             case (PATTERN)
+                PATTERN_SOLID: write_pair = {BACKGROUND_COLOR, BACKGROUND_COLOR};
                 PATTERN_DIAGONAL: begin
                     // base <= 16 and 2*beat <= 14, so one conditional subtract
                     // is enough to bring both back below the pitch.

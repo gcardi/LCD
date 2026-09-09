@@ -11,14 +11,14 @@
 // On-board crystal, 27 MHz.
 create_clock -name xtal_27 -period 37.037 -waveform {0 18.518} [get_ports {XTAL_IN}]
 
-// SPI diagnostic timing for the configured STM32 prescaler.
+// Keep the stricter 25 MHz constraint while the qualified master runs at 12.5 MHz.
 create_clock -name spi_clk -period 40 -waveform {0 20} [get_ports {SPI_SCK}]
 // Conservative initial external budget; re-qualify before increasing SCK.
 set_input_delay -clock spi_clk -clock_fall -max 10 [get_ports {SPI_MOSI}]
 set_input_delay -clock spi_clk -clock_fall -min 0 [get_ports {SPI_MOSI}]
 set_output_delay -clock spi_clk -max 10 [get_ports {SPI_MISO}]
 set_output_delay -clock spi_clk -min -3 [get_ports {SPI_MISO}]
-// CS changes while SCK is stopped, with firmware guard time of >=1 ms.
+// CS changes while SCK is stopped: graphics firmware guards CS by >=1 us.
 set_false_path -from [get_ports {SPI_CS_N}]
 
 // -----------------------------------------------------------------------

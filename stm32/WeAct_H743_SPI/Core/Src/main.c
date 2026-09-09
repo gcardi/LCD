@@ -26,6 +26,7 @@
 /* USER CODE BEGIN Includes */
 #include "spi_selftest.h"
 #include "lcd_spi.h"
+#include "spi_diag_config.h"
 
 /* USER CODE END Includes */
 
@@ -98,9 +99,17 @@ int main(void)
   MX_SPI2_Init();
   /* USER CODE BEGIN 2 */
   SPI_SelfTest_Run();
-  // Graphics endpoint is detected by the demo.
-  if (g_spi_test.state == 2) LCD_Demo_Run();
+  // Keep the uniform FPGA background unless graphical tests are requested.
+#if LCD_BOOT_TESTS
+  if (g_spi_test.state == 2) {
+    LCD_Demo_Run();
+    if(g_lcd_demo_state==2) {
+      LCD_Stress_Run();
+      if(g_lcd_stress.state==2) LCD_Demo_Run();
+    }
+  }
 
+#endif
   /* USER CODE END 2 */
 
   /* Infinite loop */
