@@ -23,3 +23,4 @@ Invoke-GowinProgrammer -ProgrammerPath $ProgrammerPath -Arguments @(
 ) | Out-Null
 
 Write-Host "Programmazione SRAM completata."
+exit 0

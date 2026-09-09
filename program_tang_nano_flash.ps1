@@ -19,12 +19,19 @@ Write-Host "User Flash: $resolvedUserFlash"
 
 # I font vanno sempre passati insieme al bitstream: Embedded Flash e User Flash
 # sono lo stesso array, quindi programmare senza --fiFile li cancella.
-Invoke-GowinProgrammer -ProgrammerPath $ProgrammerPath -Arguments @(
+$result = Invoke-GowinProgrammer -ProgrammerPath $ProgrammerPath -Arguments @(
     '--device', 'GW1NR-9C',
     '--operation_index', '6',
     '--cable-index', '1',
     '--fsFile', $resolvedBitstream,
     '--fiFile', $resolvedUserFlash
-) | Out-Null
+)
 
-Write-Host 'Embedded Flash e User Flash programmate e verificate.'
+if ($result.VerifyWarning) {
+    # Mai dichiarare verificato cio' che il tool ha rifiutato di verificare.
+    Write-Host 'Embedded Flash e User Flash programmate; verifica NON superata.'
+    Write-Host 'Conferma con un ciclo di alimentazione, come indicato sopra.'
+} else {
+    Write-Host 'Embedded Flash e User Flash programmate e verificate.'
+}
+exit 0
