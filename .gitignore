@@ -30,8 +30,44 @@
 *.fst
 *.vcd
 
+# STM32 CMake/Ninja/GCC reproducible outputs (including nested projects).
+/stm32/**/build/
+/stm32/**/build-*/
+/stm32/**/cmake-build-*/
+/stm32/**/out/
+/stm32/**/CMakeFiles/
+/stm32/**/.cmake/
+/stm32/**/CMakeCache.txt
+/stm32/**/cmake_install.cmake
+/stm32/**/build.ninja
+/stm32/**/rules.ninja
+/stm32/**/.ninja_deps
+/stm32/**/.ninja_log
+/stm32/**/*.o
+/stm32/**/*.obj
+/stm32/**/*.a
+/stm32/**/*.elf
+/stm32/**/*.hex
+/stm32/**/*.map
+/stm32/**/*.d
+/stm32/**/*.i
+/stm32/**/*.lst
+/stm32/**/*.s19
+/stm32/**/*.srec
+/stm32/**/*.su
+/stm32/**/*.cyclo
+/stm32/**/compile_commands.json
+
+# Local CMake/STM32/editor state. Keep CMakePresets.json, .ioc, source,
+# linker scripts, Drivers, and shareable .vscode launch/tasks/settings files.
+/stm32/**/CMakeUserPresets.json
+/stm32/**/.mxproject
+/stm32/**/.cache/
+/stm32/**/.vscode/.browse.c_cpp.db*
+/stm32/**/.vscode/ipch/
+/stm32/**/.vscode/.cortex-debug*
+
 # Operating-system and editor files
 .DS_Store
 Thumbs.db
 *~
-
