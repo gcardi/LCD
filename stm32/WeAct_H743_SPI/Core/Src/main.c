@@ -26,6 +26,7 @@
 /* USER CODE BEGIN Includes */
 #include "spi_selftest.h"
 #include "lcd_spi.h"
+#include "lcd_text.h"
 #include "spi_diag_config.h"
 
 /* USER CODE END Includes */
@@ -99,6 +100,9 @@ int main(void)
   MX_SPI2_Init();
   /* USER CODE BEGIN 2 */
   SPI_SelfTest_Run();
+#if LCD_TEXT_DEMO
+  if (g_spi_test.state == 2) LCD_TextDemo_Run();
+#endif
   // Keep the uniform FPGA background unless graphical tests are requested.
 #if LCD_BOOT_TESTS
   if (g_spi_test.state == 2) {
