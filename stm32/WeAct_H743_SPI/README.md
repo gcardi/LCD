@@ -1,5 +1,8 @@
 # Firmware WeAct H743 / Tang Nano 9K
 
+Origine del progetto (STM32CubeMX con generazione CMake), ambiente VS Code,
+file generati e regole di rigenerazione: [TOOLCHAIN.md](TOOLCHAIN.md).
+
 ## Build e upload
 
 Aprire questa cartella in VS Code. Servono CMake, Ninja, arm-none-eabi-gcc
