@@ -20,7 +20,12 @@ module FramebufferController
     input  logic        fifo_full,
     output logic [31:0] fifo_write_data,
     output logic        fifo_write_enable,
-    output logic        fifo_flush
+    output logic        fifo_flush,
+    input wire update_valid,
+    input wire [20:0] update_addr,
+    input wire [255:0] update_data,
+    input wire [15:0] update_mask,
+    output wire update_take
 );
 
     localparam int unsigned FRAME_WIDTH     = 480;
@@ -34,7 +39,7 @@ module FramebufferController
     // several cycles by the FIFO's read side, which runs nine times slower.
     localparam int unsigned FLUSH_CYCLES    = 63;
 
-    typedef enum logic [2:0] {
+    typedef enum logic [3:0] {
         WAIT_CALIBRATION,
         WRITE_COMMAND,
         WRITE_DATA,
@@ -42,10 +47,17 @@ module FramebufferController
         READ_COMMAND,
         READ_DATA,
         READ_GAP,
-        FRAME_FLUSH
+        FRAME_FLUSH, UPDATE_COMMAND, UPDATE_DATA, UPDATE_GAP
     } state_t;
 
     state_t state;
+    logic restart_pending;
+    logic [255:0] update_words;
+    logic [15:0] update_masks;
+    assign update_take = state == UPDATE_COMMAND;
+    function automatic [3:0] pixel_mask(input [1:0] enabled);
+        pixel_mask = {{2{!enabled[1]}}, {2{!enabled[0]}}};
+    endfunction
 
     logic [20:0] memory_address;
     logic  [8:0] init_x;
@@ -170,6 +182,9 @@ module FramebufferController
 
     always_ff @(posedge clk or negedge nRST) begin
         if (!nRST) begin
+            restart_pending <= 0;
+            update_words <= 0;
+            update_masks <= 0;
             state          <= WAIT_CALIBRATION;
             memory_address <= 21'd0;
             init_x         <= 9'd0;
@@ -190,6 +205,7 @@ module FramebufferController
             // Commands are single-cycle pulses. Write data is reloaded every
             // cycle so each beat of the burst carries its own pixels.
             cmd_en <= 1'b0;
+            if (frame_restart) restart_pending <= 1;
 
             case (state)
                 WAIT_CALIBRATION: begin
@@ -269,8 +285,35 @@ module FramebufferController
                         command_gap <= command_gap - 5'd1;
                 end
 
+                UPDATE_DATA: begin
+                    update_words <= update_words >> 32;
+                    update_masks <= update_masks >> 2;
+                    wr_data <= update_words[63:32];
+                    data_mask <= pixel_mask(update_masks[3:2]);
+                    if (burst_beat == 7) begin
+                        command_gap <= 10;
+                        state <= UPDATE_GAP;
+                    end else burst_beat <= burst_beat + 1'b1;
+                end
+                UPDATE_GAP: begin
+                    if (command_gap == 0) state <= READ_COMMAND;
+                    else command_gap <= command_gap - 1'b1;
+                end
+                UPDATE_COMMAND: begin
+                        addr <= update_addr;
+                        cmd <= 1;
+                        cmd_en <= 1;
+                        wr_data <= update_data[31:0];
+                        data_mask <= pixel_mask(update_mask[1:0]);
+                        update_words <= update_data;
+                        update_masks <= update_mask;
+                        burst_beat <= 0;
+                        state <= UPDATE_DATA;
+                end
                 READ_COMMAND: begin
-                    if (!fifo_almost_full && !fifo_full) begin
+                    if (fifo_almost_full && update_valid) begin
+                        state <= UPDATE_COMMAND;
+                    end else if (!fifo_almost_full && !fifo_full) begin
                         addr        <= memory_address;
                         cmd         <= 1'b0;
                         cmd_en      <= 1'b1;
@@ -322,9 +365,10 @@ module FramebufferController
             // is applied last and overrides the assignments above. The initial
             // write pass is exempt: it must complete before anything is worth
             // displaying.
-            if (frame_restart && (state == READ_COMMAND ||
+            if ((frame_restart || restart_pending) && (state == READ_COMMAND ||
                                   state == READ_DATA    ||
                                   state == READ_GAP)) begin
+                restart_pending <= 0;
                 fifo_flush     <= 1'b1;
                 flush_count    <= FLUSH_CYCLES[5:0];
                 memory_address <= 21'd0;

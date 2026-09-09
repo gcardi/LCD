@@ -36,14 +36,34 @@ module TOP
 	// PLL outputs are meaningless until they lock, so the release is gated on
 	// both locks and then retimed separately into each domain.
 	wire global_rst_n = Reset_Button & psram_pll_lock & lcd_pll_lock;
+    wire psram_rst_n;
     wire spi_miso_data, spi_miso_enable;
+    wire update_valid, update_take;
+    wire [20:0] update_addr;
+    wire [255:0] update_data;
+    wire [15:0] update_mask;
+    localparam SPI_FRAMEBUFFER = 1;
+    generate if (SPI_FRAMEBUFFER) begin : graphics
+    SpiFramebuffer spi_framebuffer (
+        .rst_n(global_rst_n), .sck(SPI_SCK), .cs_n(SPI_CS_N),
+        .mosi(SPI_MOSI), .miso(spi_miso_data), .miso_oe(spi_miso_enable),
+        .clk(psram_clk), .mem_rst_n(psram_rst_n),
+        .valid(update_valid), .take(update_take), .address(update_addr),
+        .pixels(update_data), .mask(update_mask)
+    );
+    end else begin : diagnostic
+    assign update_valid = 0;
+    assign update_addr = 0;
+    assign update_data = 0;
+    assign update_mask = 0;
     SpiDiagnostic #(.MODE(0)) spi_diagnostic (
         .rst_n(global_rst_n), .sck(SPI_SCK), .cs_n(SPI_CS_N),
         .mosi(SPI_MOSI), .miso(spi_miso_data), .miso_oe(spi_miso_enable)
     );
+    end endgenerate
     assign SPI_MISO = spi_miso_enable ? spi_miso_data : 1'bz;
 
-	wire psram_rst_n;
+
 	wire lcd_rst_n;
 
 	// PSRAM user interface.
@@ -152,7 +172,9 @@ module TOP
 		.fifo_write_data (fifo_write_data),
 		.fifo_write_enable(fifo_write_enable),
 		.frame_restart    (frame_restart_psram),
-		.fifo_flush       (fifo_flush)
+		.fifo_flush       (fifo_flush),
+        .update_valid(update_valid), .update_take(update_take),
+        .update_addr(update_addr), .update_data(update_data), .update_mask(update_mask)
 	);
 
 	FramebufferFifo framebuffer_fifo_inst (
