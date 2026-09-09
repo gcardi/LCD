@@ -90,11 +90,11 @@ module psram_model
 endmodule
 
 
-// Behavioural stand-in for the generated Gowin dual-clock FIFO: 512 words,
-// first-word-fall-through, the same almost-full / almost-empty thresholds as
-// framebuffer_fifo.ipc. The fill level is shared combinationally instead of
-// being resynchronised into each domain, which is idealised but conservative
-// for what this bench checks.
+// Behavioural stand-in for the dual-clock FIFO: 512 words,
+// first-word-fall-through, and the vendor almost-full / almost-empty
+// thresholds recorded in FramebufferFifo.sv. The fill level is shared
+// combinationally instead of being resynchronised into each domain, which
+// is idealised but conservative for what this bench checks.
 module fifo_model
 (
     input               Reset,
