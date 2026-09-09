@@ -5,6 +5,7 @@
 #include <stdint.h>
 // State: 0 diagnostic endpoint, 1 running, 2 submitted, 3 failure.
 volatile uint32_t g_lcd_demo_state;
+volatile uint32_t g_lcd_fpga_text_demo_state;
 volatile LcdStressResult g_lcd_stress;
 // First failing exchange: phase, address, byte index, expected, actual, HAL error.
 volatile uint32_t g_lcd_error[6];
@@ -46,6 +47,85 @@ static int ready(void)
         HAL_Delay(1);
     } while(HAL_GetTick()-start<1000);
     return bad(4,1,0xC3,rx[1]);
+}
+
+static uint16_t crc16_byte(uint16_t crc,uint8_t value)
+{
+    crc^=(uint16_t)value<<8;
+    for(unsigned bit=0;bit<8;bit++)
+        crc=(uint16_t)((crc<<1)^((crc&0x8000u)?0x1021u:0u));
+    return crc;
+}
+
+static int text_ready(void)
+{
+    uint8_t tx[2]={0xB8,0},rx[2];
+    uint32_t start=HAL_GetTick();
+    do {
+        if(!exchange(tx,rx,2)) return 0;
+        if(rx[0]!=0xA5) return bad(9,0,0xA5,rx[0]);
+        if(rx[1]==0xC3) return 1;
+        // 00 means renderer busy; E2 means the User Flash CRC is still being
+        // checked. A damaged/unprogrammed image remains E2 until timeout.
+        if(rx[1]!=0 && rx[1]!=0xE2) return bad(10,1,0xC3,rx[1]);
+        HAL_Delay(1);
+    } while(HAL_GetTick()-start<1000);
+    return bad(11,1,0xC3,rx[1]);
+}
+
+int LCD_DrawTextFPGA(uint16_t x,uint16_t y,uint16_t box_width,
+                     uint16_t box_height,uint8_t font_id,uint8_t flags,
+                     uint16_t foreground,uint16_t background,const char *utf8)
+{
+    uint8_t tx[85]={0},rx[85];
+    unsigned length=0;
+    if(!utf8 || x>=480 || y>=272 || box_width>480 || box_height>272 ||
+       font_id>LCD_FONT_16X32 || (flags&~3u)) return 0;
+    while(length<=64 && utf8[length]) length++;
+    if(length>64) return 0;
+
+    tx[0]=0xB8;tx[2]=font_id;tx[3]=flags;
+    tx[4]=(uint8_t)(x>>8);tx[5]=(uint8_t)x;
+    tx[6]=(uint8_t)(y>>8);tx[7]=(uint8_t)y;
+    tx[8]=(uint8_t)(box_width>>8);tx[9]=(uint8_t)box_width;
+    tx[10]=(uint8_t)(box_height>>8);tx[11]=(uint8_t)box_height;
+    tx[12]=(uint8_t)(foreground>>8);tx[13]=(uint8_t)foreground;
+    tx[14]=(uint8_t)(background>>8);tx[15]=(uint8_t)background;
+    tx[16]=(uint8_t)length;
+    for(unsigned i=0;i<length;i++) tx[17+i]=(uint8_t)utf8[i];
+    uint16_t crc=0xFFFF;
+    for(unsigned i=2;i<=16+length;i++) crc=crc16_byte(crc,tx[i]);
+    tx[17+length]=(uint8_t)(crc>>8);tx[18+length]=(uint8_t)crc;
+    tx[19+length]=0xA6;
+    unsigned packet_length=21+length;
+
+    if(!text_ready() || !exchange(tx,rx,(uint16_t)packet_length)) return 0;
+    if(rx[0]!=0xA5) return bad(12,0,0xA5,rx[0]);
+    if(rx[1]!=0xC3) return bad(13,1,0xC3,rx[1]);
+    for(unsigned i=2;i+1<packet_length;i++)
+        if(rx[i]!=tx[i-1]) return bad(14,i,tx[i-1],rx[i]);
+    if(rx[packet_length-1]!=0xAC)
+        return bad(15,packet_length-1,0xAC,rx[packet_length-1]);
+    return text_ready();
+}
+
+void LCD_FPGATextDemo_Run(void)
+{
+    g_lcd_fpga_text_demo_state=1;
+    if(!LCD_Clear(0x0000) ||
+       !LCD_DrawTextFPGA(16,12,0,0,LCD_FONT_16X32,0,0x07FF,0,"Tang Nano 9K") ||
+       !LCD_DrawTextFPGA(20,54,0,0,LCD_FONT_12X24,0,0xFFFF,0,
+                         "STM32 -> FPGA @ 12.5 MHz") ||
+       !LCD_DrawTextFPGA(20,88,0,0,LCD_FONT_8X16,0,0x07E0,0,
+                         "Accenti: \xC3\xA0 \xC3\xA8 \xC3\xA9 \xC3\xAC \xC3\xB2 \xC3\xB9  Frecce: \xE2\x86\x90 \xE2\x86\x91 \xE2\x86\x92 \xE2\x86\x93") ||
+       !LCD_DrawTextFPGA(20,120,220,72,LCD_FONT_12X24,LCD_TEXT_WRAP,
+                         0xFFE0,0,"Wrap automatico dentro un box stretto") ||
+       !LCD_DrawTextFPGA(20,210,0,0,LCD_FONT_8X16,LCD_TEXT_TRANSPARENT,
+                         0xFD20,0,"Font bitmap residenti nella User Flash") ||
+       !LCD_DrawTextFPGA(430,236,50,32,LCD_FONT_16X32,0,0xF81F,0,"CLIP")) {
+        g_lcd_fpga_text_demo_state=3;return;
+    }
+    g_lcd_fpga_text_demo_state=2;
 }
 // Arbitrary rectangle; unselected pixels in edge bursts are masked in PSRAM.
 int LCD_WriteRect(uint16_t x, uint16_t y, uint16_t w, uint16_t h,

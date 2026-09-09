@@ -7,6 +7,7 @@
 #define SPI_SELFTEST_ROUNDS 240
 // Opt in to destructive on-screen demo/stress drawing at boot.
 #define LCD_BOOT_TESTS 0
-// Current manual test: render the 12x24 UTF-8 font sample after SPI self-test.
-#define LCD_TEXT_DEMO 1
+// CPU-rendered reference and FPGA/User-Flash rendered demo are independent.
+#define LCD_TEXT_DEMO 0
+#define LCD_FPGA_TEXT_DEMO 1
 #endif

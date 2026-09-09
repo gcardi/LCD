@@ -113,8 +113,8 @@ void SPI_SelfTest_Run(void)
         for(uint32_t t=0;t<sizeof(lengths)/sizeof(lengths[0]);t++) {
             uint16_t length=lengths[t];
             for(uint32_t i=0;i<sizeof(tx);i++) tx[i]=(uint8_t)((i*37+round*53)^(i>>3));
-            // B7 is the graphics opcode, never send it as an echo opcode.
-            if(tx[0]==0xB7) tx[0]=0x37;
+            // B7 and B8 are application opcodes, never send them as echo opcodes.
+            if(tx[0]==0xB7 || tx[0]==0xB8) tx[0]^=0x80;
             memset(rx,0,sizeof(rx));
             if(SCB->CCR & SCB_CCR_DC_Msk) {
                 SCB_CleanDCache_by_Addr((uint32_t*)tx,sizeof(tx));

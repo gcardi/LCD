@@ -103,6 +103,9 @@ int main(void)
 #if LCD_TEXT_DEMO
   if (g_spi_test.state == 2) LCD_TextDemo_Run();
 #endif
+#if LCD_FPGA_TEXT_DEMO
+  if (g_spi_test.state == 2) LCD_FPGATextDemo_Run();
+#endif
   // Keep the uniform FPGA background unless graphical tests are requested.
 #if LCD_BOOT_TESTS
   if (g_spi_test.state == 2) {

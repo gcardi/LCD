@@ -4,6 +4,7 @@ param(
     [switch]$RequireGraphics,
     [switch]$RequireStress,
     [switch]$RequireText,
+    [switch]$RequireFPGAText,
     [string]$ProgrammerPath,
     [ValidateRange(5,120)][int]$TimeoutSeconds=20
 )
@@ -18,6 +19,10 @@ if(($RequireGraphics -or $RequireStress) -and
 if($RequireText -and
    (Get-Content (Join-Path $PSScriptRoot 'Core/Inc/spi_diag_config.h') -Raw) -match '#define LCD_TEXT_DEMO 0') {
     throw 'Demo testo disabilitata: impostare LCD_TEXT_DEMO 1 in Core/Inc/spi_diag_config.h e ricompilare/caricare.'
+}
+if($RequireFPGAText -and
+   (Get-Content (Join-Path $PSScriptRoot 'Core/Inc/spi_diag_config.h') -Raw) -match '#define LCD_FPGA_TEXT_DEMO 0') {
+    throw 'Demo testo FPGA disabilitata: impostare LCD_FPGA_TEXT_DEMO 1 in Core/Inc/spi_diag_config.h e ricompilare/caricare.'
 }
 $repoRoot=Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 . (Join-Path $repoRoot 'tools/Invoke-LoggedProcess.ps1')
@@ -105,6 +110,35 @@ if($RequireText) {
         Start-Sleep -Milliseconds 100
     } while($textTimer.Elapsed.TotalSeconds -lt $TimeoutSeconds)
 }
+if($RequireFPGAText) {
+    $fpgaTextSymbol=@($symbols | Where-Object {$_ -match '^[0-9a-fA-F]+\s+\w\s+g_lcd_fpga_text_demo_state$'})
+    if($fpgaTextSymbol.Count -ne 1) {throw 'Simbolo demo testo FPGA mancante'}
+    $fpgaTextAddress='0x'+($fpgaTextSymbol[0] -split '\s+')[0]
+    $fpgaTextDump=Join-Path $build 'hardware-fpga-text.bin'
+    $fpgaTextTimer=[Diagnostics.Stopwatch]::StartNew()
+    do {
+        if(Test-Path $fpgaTextDump) {Remove-Item -LiteralPath $fpgaTextDump}
+        Invoke-LoggedProcess -FilePath $ProgrammerPath -Arguments @('-c','port=SWD',"sn=$SerialNumber",'mode=HOTPLUG','freq=1000','-u',$fpgaTextAddress,'4',$fpgaTextDump) -LogPath (Join-Path $build 'hardware-fpga-text.log') -TimeoutSeconds $TimeoutSeconds
+        $fpgaTextBytes=[IO.File]::ReadAllBytes($fpgaTextDump)
+        if($fpgaTextBytes.Length -ne 4) {throw 'Dump demo testo FPGA troncato'}
+        $result['fpga_text_state']=[BitConverter]::ToUInt32($fpgaTextBytes,0)
+        if($result.fpga_text_state -ne 1) {break}
+        Start-Sleep -Milliseconds 100
+    } while($fpgaTextTimer.Elapsed.TotalSeconds -lt $TimeoutSeconds)
+    $errorSymbol=@($symbols | Where-Object {$_ -match '^[0-9a-fA-F]+\s+\w\s+g_lcd_error$'})
+    if($errorSymbol.Count -eq 1) {
+        $errorAddress='0x'+($errorSymbol[0] -split '\s+')[0]
+        $errorDump=Join-Path $build 'hardware-lcd-error.bin'
+        if(Test-Path $errorDump) {Remove-Item -LiteralPath $errorDump}
+        Invoke-LoggedProcess -FilePath $ProgrammerPath -Arguments @('-c','port=SWD',"sn=$SerialNumber",'mode=HOTPLUG','freq=1000','-u',$errorAddress,'24',$errorDump) -LogPath (Join-Path $build 'hardware-lcd-error.log') -TimeoutSeconds $TimeoutSeconds
+        $errorBytes=[IO.File]::ReadAllBytes($errorDump)
+        if($errorBytes.Length -ne 24) {throw 'Dump errore LCD troncato'}
+        $lcdError=[ordered]@{}
+        $errorNames=@('phase','address','index','expected','actual','hal_error')
+        for($i=0;$i -lt 6;$i++) {$lcdError[$errorNames[$i]]=[BitConverter]::ToUInt32($errorBytes,$i*4)}
+        $result['lcd_error']=$lcdError
+    }
+}
 $roundConfig=Get-Content (Join-Path $PSScriptRoot 'Core/Inc/spi_diag_config.h') -Raw
 if($roundConfig -notmatch '#define SPI_SELFTEST_ROUNDS (\d+)') {throw 'Numero round non definito'}
 $expectedRounds=[int]$Matches[1]
@@ -146,6 +180,7 @@ if($result.magic -ne 0x53504954 -or $result.version -ne 1 -or $result.state -ne 
 }
 if ($RequireGraphics -and $result.graphics_state -ne 2) {throw "Demo grafica NON superata: stato $($result.graphics_state)"}
 if($RequireText -and $result.text_state -ne 2) {throw "Demo testo NON superata: stato $($result.text_state)"}
+if($RequireFPGAText -and ($result.fpga_text_state -ne 2 -or $result.lcd_error.phase -ne 0)) {throw "Demo testo FPGA NON superata: $($result | ConvertTo-Json -Depth 5 -Compress)"}
 if($RequireStress -and ($result.stress.state -ne 2 -or $result.stress.rectangles -ne 512 -or $result.stress.pixels -ne 354528 -or $result.stress.packets -ne 30035 -or $result.lcd_error.phase -ne 0 -or $result.checked_bytes -lt 1000000)) {throw "Stress NON superato: $($result | ConvertTo-Json -Depth 5 -Compress)"}
 Write-Host "PASS: SPI DMA, $($result.transfers) trasferimenti, $($result.checked_bytes) byte verificati, $($result.elapsed_ms) ms."
 Write-Host "Risultato: $resultPath"
