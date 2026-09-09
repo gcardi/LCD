@@ -11,6 +11,10 @@ SPI testbench PASS con controllo di tutti i 130560 pixel iniziali neri.
 Gate timing PASS: sette endpoint di calibrazione ammessi, worst -1.487 ns,
 nessun'altra violazione. SDC mantenuto a 40 ns, master effettivo 12.5 MHz.
 
+Aggiunte API STM32 LCD_FillRect(x,y,w,h,color) e LCD_Clear(color), implementate
+sopra LCD_WriteRect con un buffer di riga da 960 byte sullo stack. RGB565,
+ritorno 1/0, nessun nuovo opcode FPGA e nessun disegno automatico aggiunto.
+
 Comandi/primitive attuali documentati in SPI_FRAMEBUFFER.md: burst RGB565
 mascherato, query disponibilita', eco diagnostica; API LCD_WriteRect lato STM32.
 Nessuna primitiva fill/linee/testo/readback FPGA, LVGL non integrato.

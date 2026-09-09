@@ -28,13 +28,25 @@ se i test grafici sono disabilitati nella configurazione locale.
 | SPI | B7 + indirizzo + maschera + 16 pixel + 5A: scrittura di un burst mascherato; dummy finale per leggere AC/E1 |
 | SPI diagnostico | Eco A5, poi byte precedente, con opcode iniziale diverso da B7 |
 | API STM32 | LCD_WriteRect(x,y,w,h,pixels): rettangolo di pixel RGB565, anche non allineato |
+| API STM32 | LCD_FillRect(x,y,w,h,color): riempimento uniforme RGB565 |
+| API STM32 | LCD_Clear(color): riempimento uniforme di tutto il display 480x272 |
 
 Il comando di scrittura usa un indirizzo lineare allineato a 16 pixel. Coordinate,
 righe e bordi del rettangolo vengono gestiti dalla funzione STM32.
 Non ci sono primitive FPGA per clear/fill rettangoli, linee, cerchi, testo,
-font, copia di aree o lettura dei pixel. Un rettangolo pieno e' realizzabile
-preparando i pixel dello stesso colore e chiamando LCD_WriteRect, ma non e' ancora
-un comando dedicato. LCD_Demo_Run e LCD_Stress_Run sono programmi di collaudo.
+font, copia di aree o lettura dei pixel. LCD_FillRect e LCD_Clear sono primitive software STM32, non nuovi comandi FPGA:
+riutilizzano LCD_WriteRect con una riga da 480 pixel (960 byte sullo stack).
+Non allocano un framebuffer completo. Sono sincrone, restituiscono 1 in caso
+di successo e 0 per errore. FillRect rifiuta dimensioni nulle e rettangoli fuori
+schermo senza clipping; in caso di errore di trasporto l'area puo' risultare
+aggiornata parzialmente. Non annullano scritture gia' accettate.
+
+```c
+if (!LCD_Clear(0x0000)) { /* errore: pulizia a nero */ }
+if (!LCD_FillRect(20, 30, 100, 60, 0xF800)) { /* errore: rettangolo rosso */ }
+```
+
+Queste funzioni non vengono chiamate automaticamente all'avvio. LCD_Demo_Run e LCD_Stress_Run sono programmi di collaudo.
 
 ## Protocollo
 

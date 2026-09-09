@@ -72,6 +72,24 @@ int LCD_WriteRect(uint16_t x, uint16_t y, uint16_t w, uint16_t h,
     }
     return ready();
 }
+// Reuse one scanline instead of allocating an entire rectangle/framebuffer.
+// Same bounds and failure semantics as LCD_WriteRect: no clipping or rollback.
+int LCD_FillRect(uint16_t x, uint16_t y, uint16_t w, uint16_t h,
+                 uint16_t color)
+{
+    if(!w || !h || x>=480 || y>=272 || w>480-x || h>272-y) return 0;
+    uint16_t line[480];
+    for(unsigned i=0;i<w;i++) line[i]=color;
+    for(unsigned row=0;row<h;row++)
+        if(!LCD_WriteRect(x,(uint16_t)(y+row),w,1,line)) return 0;
+    return 1;
+}
+
+int LCD_Clear(uint16_t color)
+{
+    return LCD_FillRect(0,0,480,272,color);
+}
+
 void LCD_Demo_Run(void)
 {
     static uint16_t pixels[67*40];
