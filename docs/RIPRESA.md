@@ -1,4 +1,70 @@
-# Punto di ripresa — 9 settembre 2026
+# Punto di ripresa — 10 settembre 2026
+
+## Ultimo stato: testo renderizzato dalla FPGA, font in User Flash
+
+Il rendering del testo è passato dall'STM32 alla FPGA. Tre moduli nuovi:
+`src/UserFlashReader.sv` incapsula il primitivo `FLASH608K` in una lettura a
+word di sola lettura; `src/FontStore.sv` valida l'immagine (magic `LCDF`,
+versione, lunghezza, CRC-32 sui 25.152 byte) e poi espone le word ai client;
+`src/TextRenderer.sv` decodifica UTF-8 e disegna a cella fissa sopra
+l'interfaccia di burst mascherato già esistente. Il comando SPI è l'opcode
+`B8`, documentato in `SPI_TEXT.md` con pacchetto, CRC16 e byte di stato.
+
+I font sono tre Terminus a cella fissa (8x16, 12x24, 16x32), 196 glifi
+ciascuno: ASCII stampabile, Latin-1, euro e quattro frecce. Occupano 25.152 dei
+77.824 byte della User Flash. `tools/generate_user_flash_fonts.py` li ricava in
+modo riproducibile dai BDF sotto `third_party` (SIL OFL 1.1) ed emette `.fi`,
+`.mem`, `.bin` e un manifest JSON.
+
+Verifiche superate:
+
+- sei testbench PASS, inclusi i due nuovi `tb_font_store` e `tb_text_renderer`;
+  la simulazione legge `fonts/user_flash_fonts.mem` tramite il ramo `SIMULATION`
+  di `UserFlashReader`, quindi quel file deve esistere prima di simulare;
+- build FPGA PASS con `FLASH608K` piazzata 1/1; gate di timing senza violazioni,
+  Fmax 57.92 MHz su xtal_27, 57.364 su lcd_clk_9, 81.373 su psram_clk_81.
+  Attenzione a come si legge questo risultato: il vincolo `spi_clk` in `LCD.sdc`
+  è stato riportato da 40 ns a 80 ns, cioè ai 12.5 MHz effettivi del master,
+  mentre prima si teneva di proposito il vincolo più severo dei 25 MHz. Parte
+  del margine guadagnato viene da lì, non solo dal pipeline di `Almost_Full` in
+  `FramebufferController` e dalla soglia scesa a 495 in `FramebufferFifo`.
+  Prima di risalire di frequenza il vincolo va rimesso a 40 ns e il gate
+  rieseguito;
+- collaudo hardware PASS a 12.5 MHz con `-RequireFPGAText`:
+  `fpga_text_state=2`, `lcd_error.phase=0`, 1.049.760 byte di eco, zero
+  mismatch, tutte le prove GPIO corrette;
+- riscontro visivo dell'utente sul pannello: accenti e frecce corretti, wrap
+  dentro un box stretto, sfondo trasparente, e il clipping confermato dal
+  comando `CLIP` a x=430 che si ferma su `CLI`.
+
+Lato STM32 `LCD_DrawTextFPGA()` costruisce il pacchetto, calcola il CRC16,
+attende l'accettazione e ritorna solo a rendering finito. In
+`spi_diag_config.h` la demo di collaudo `LCD_FPGA_TEXT_DEMO` è a 1 e la vecchia
+demo CPU `LCD_TEXT_DEMO` è a 0; `LCD_BOOT_TESTS` resta 0.
+
+Rimossa `src/framebuffer_fifo/`: era l'IP Gowin già sostituito da
+`FramebufferFifo.sv` e disabilitato nel progetto. Le sue soglie di riferimento
+(512 word, FWFT, almost-full 504, almost-empty 240) restano annotate in
+`FramebufferFifo.sv`. Rebuild dopo la rimozione: stessi Fmax, nessuna
+differenza.
+
+### Punti aperti
+
+- **La scheda ha in Embedded Flash un bitstream più vecchio di quello su disco.**
+  L'ultima programmazione flash precede l'ultimo build; la conferma visiva viene
+  da un caricamento SRAM successivo. Spegnendo e riaccendendo riparte il vecchio.
+  Rilanciare `program_tang_nano_flash.ps1`.
+- Embedded Flash e User Flash sono lo stesso array fisico: programmare la
+  embFlash senza `--fiFile` cancella i font, in silenzio. Dettagli e conseguenze
+  in `PROGRAMMING.md`.
+- Le demo di collaudo sono ancora attive e disegnano al boot: quando il testo
+  non va più dimostrato, riportare `LCD_FPGA_TEXT_DEMO` a 0.
+- Il debounce del pulsante di reset resta rinviato, come da sessioni precedenti.
+- La sequenza XE/YE/SE di `UserFlashReader` usa un'attesa fissa tarata sui
+  27 MHz: funziona al banco, ma non è stata confrontata con i margini del
+  datasheet del primitivo.
+
+Le sezioni seguenti sono cronologia.
 
 ## Ultimo stato: avvio nero uniforme, SPI 12.5 MHz
 
