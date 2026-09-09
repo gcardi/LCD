@@ -5,7 +5,7 @@
 Su richiesta dell'utente: PATTERN_SOLID in FramebufferController con parametro
 BACKGROUND_COLOR=16'h0000. Nessun bordo o diagonale all'avvio/reset FPGA.
 LCD_BOOT_TESTS=0 in spi_diag_config.h: demo/stress grafici sono opt-in; resta
-il self-test eco lungo, che non modifica lo schermo. Schede programmate,
+il self-test eco lungo, che da solo non modifica lo schermo. Schede programmate,
 flash verificata; eco hardware PASS 1049760 byte a 12.5 MHz, GPIO corrette.
 SPI testbench PASS con controllo di tutti i 130560 pixel iniziali neri.
 Gate timing PASS: sette endpoint di calibrazione ammessi, worst -1.487 ns,
@@ -14,6 +14,15 @@ nessun'altra violazione. SDC mantenuto a 40 ns, master effettivo 12.5 MHz.
 Aggiunte API STM32 LCD_FillRect(x,y,w,h,color) e LCD_Clear(color), implementate
 sopra LCD_WriteRect con un buffer di riga da 960 byte sullo stack. RGB565,
 ritorno 1/0, nessun nuovo opcode FPGA e nessun disegno automatico aggiunto.
+
+Prototipo font STM32 aggiunto: rendering UTF-8 opaco fixed 12x24 con 196 glifi
+(ASCII, Latin-1, euro, frecce), 9408 byte bitmap in flash MCU. Generatore
+riproducibile dal BDF sotto SIL OFL 1.1 in third_party. `LCD_TEXT_DEMO=1` e'
+temporaneamente attivo per la prova visiva; `LCD_BOOT_TESTS` resta 0.
+Firmware caricato e collaudo hardware PASS: 1200 trasferimenti, 1049760 byte,
+zero mismatch a 12.5 MHz, `text_state=2`. L'utente ha confermato visivamente
+il campione completo: testo regolare, simbolo di grado, vocali accentate e
+quattro frecce corretti, senza corruzione apparente.
 
 Comandi/primitive attuali documentati in SPI_FRAMEBUFFER.md: burst RGB565
 mascherato, query disponibilita', eco diagnostica; API LCD_WriteRect lato STM32.

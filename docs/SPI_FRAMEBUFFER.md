@@ -16,8 +16,9 @@ bianco, F800 rosso, 07E0 verde, 001F blu. Il pattern selezionato e' PATTERN_SOLI
 i precedenti pattern restano nel sorgente come strumenti diagnostici.
 Il colore iniziale non e' attualmente modificabile con un comando SPI.
 
-Lo STM32 usa `LCD_BOOT_TESTS=0`: l'eco DMA di avvio resta attiva ma non modifica
-il framebuffer. Demo e stress grafici non vengono eseguiti automaticamente.
+Lo STM32 usa `LCD_BOOT_TESTS=0`: demo e stress grafici non vengono eseguiti.
+La prova font corrente usa il flag separato `LCD_TEXT_DEMO=1` e modifica il
+framebuffer dopo che l'eco DMA di avvio e' terminata.
 Per provarli impostare LCD_BOOT_TESTS=1 in spi_diag_config.h e ricompilare/caricare;
 riportare a 0 per l'avvio uniforme. Il runner rifiuta -RequireGraphics/-RequireStress
 se i test grafici sono disabilitati nella configurazione locale.
@@ -30,11 +31,13 @@ se i test grafici sono disabilitati nella configurazione locale.
 | API STM32 | LCD_WriteRect(x,y,w,h,pixels): rettangolo di pixel RGB565, anche non allineato |
 | API STM32 | LCD_FillRect(x,y,w,h,color): riempimento uniforme RGB565 |
 | API STM32 | LCD_Clear(color): riempimento uniforme di tutto il display 480x272 |
+| API STM32 | LCD_DrawCodepoint(...): glifo opaco fixed 12x24 RGB565 |
+| API STM32 | LCD_DrawText(...): stringa UTF-8 fixed 12x24, anche multilinea |
 
 Il comando di scrittura usa un indirizzo lineare allineato a 16 pixel. Coordinate,
 righe e bordi del rettangolo vengono gestiti dalla funzione STM32.
 Non ci sono primitive FPGA per clear/fill rettangoli, linee, cerchi, testo,
-font, copia di aree o lettura dei pixel. LCD_FillRect e LCD_Clear sono primitive software STM32, non nuovi comandi FPGA:
+font, copia di aree o lettura dei pixel. Fill, clear e testo sono primitive software STM32, non nuovi comandi FPGA:
 riutilizzano LCD_WriteRect con una riga da 480 pixel (960 byte sullo stack).
 Non allocano un framebuffer completo. Sono sincrone, restituiscono 1 in caso
 di successo e 0 per errore. FillRect rifiuta dimensioni nulle e rettangoli fuori
@@ -46,7 +49,16 @@ if (!LCD_Clear(0x0000)) { /* errore: pulizia a nero */ }
 if (!LCD_FillRect(20, 30, 100, 60, 0xF800)) { /* errore: rettangolo rosso */ }
 ```
 
-Queste funzioni non vengono chiamate automaticamente all'avvio. LCD_Demo_Run e LCD_Stress_Run sono programmi di collaudo.
+Con `LCD_TEXT_DEMO=1`, la prova corrente chiama clear e testo automaticamente.
+Riportandolo a 0 nessuna primitiva grafica viene chiamata all'avvio.
+LCD_Demo_Run e LCD_Stress_Run restano programmi di collaudo separati.
+
+Il prototipo testo usa una tabella 12x24 nella flash interna STM32: 196 glifi,
+9408 byte bitmap, ASCII stampabile, Latin-1, euro e frecce. `LCD_DrawText`
+decodifica UTF-8, usa celle monospaziate opache e sostituisce con `?` i glifi
+mancanti. Non esegue wrapping o clipping e verifica l'intero ingombro prima di
+disegnare. La tabella e' riproducibile dal BDF e dalla licenza conservati in
+`third_party/terminus-font-4.49.1-master`; non usa ancora la User Flash FPGA.
 
 ## Protocollo
 

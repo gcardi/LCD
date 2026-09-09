@@ -145,8 +145,35 @@ in [SPI_STRESS.md](../../docs/SPI_STRESS.md). Le sezioni precedenti che indicano
 
 ## Avvio uniforme
 
-LCD_BOOT_TESTS=0 e' ora il default: la FPGA inizializza il display a nero e
-lo STM32 esegue solo l'eco SPI. Demo e stress grafici richiedono LCD_BOOT_TESTS=1
+LCD_BOOT_TESTS=0 lascia disabilitate demo e stress grafici. La prova font
+corrente abilita separatamente LCD_TEXT_DEMO=1 e quindi sostituisce il fondo
+nero con il campione testuale dopo l'eco SPI. Demo e stress richiedono LCD_BOOT_TESTS=1
 in Core/Inc/spi_diag_config.h e nuovo caricamento. I comandi -RequireGraphics
 e -RequireStress controllano questa impostazione. Vedere SPI_FRAMEBUFFER.md
 per la distinzione fra comando burst FPGA e API rettangolo STM32.
+
+## Prototipo testo 12x24
+
+`lcd_text.c` aggiunge `LCD_DrawCodepoint()` e `LCD_DrawText()`: celle fisse
+12x24, rendering opaco RGB565 e input UTF-8. Il subset contiene ASCII
+stampabile, Latin-1, euro e le quattro frecce, per 196 glifi e 9408 byte di
+bitmap nella flash STM32. I caratteri non disponibili diventano `?`; newline
+e carriage return sono gestiti, senza wrapping o clipping.
+
+I dati vengono generati dal BDF 12x24 normal con:
+
+```powershell
+python ../../tools/generate_lcd_font.py `
+  ../../third_party/terminus-font-4.49.1-master/ter-u24n.bdf `
+  Core/Inc/lcd_font_12x24.h Core/Src/lcd_font_12x24.c
+```
+
+La sorgente e' distribuita sotto SIL OFL 1.1; attribuzione, checksum e testo
+della licenza sono in `../../third_party/terminus-font-4.49.1-master`.
+`LCD_TEXT_DEMO=1` mostra il campione corrente dopo il self-test SPI;
+`-RequireText` controlla via SWD che il rendering sia stato inviato. Riportare
+il flag a 0 per conservare lo schermo nero dopo l'avvio.
+
+Collaudo del 2026-09-09: PASS a 12.5 MHz, 1049760 byte SPI senza mismatch e
+`text_state=2`. Conferma visiva ricevuta per ASCII, grado, accenti e frecce;
+nessuna corruzione o traslazione apparente dei glifi.
