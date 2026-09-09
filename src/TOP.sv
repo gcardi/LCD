@@ -3,6 +3,10 @@ module TOP
 	input			Reset_Button,
     //input           User_Button,
     input           XTAL_IN,
+    input wire      SPI_SCK,
+    input wire      SPI_CS_N,
+    input wire      SPI_MOSI,
+    output wire     SPI_MISO,
 
 	output			LCD_CLK,
 	output			LCD_HYNC,
@@ -32,6 +36,12 @@ module TOP
 	// PLL outputs are meaningless until they lock, so the release is gated on
 	// both locks and then retimed separately into each domain.
 	wire global_rst_n = Reset_Button & psram_pll_lock & lcd_pll_lock;
+    wire spi_miso_data, spi_miso_enable;
+    SpiDiagnostic #(.MODE(0)) spi_diagnostic (
+        .rst_n(global_rst_n), .sck(SPI_SCK), .cs_n(SPI_CS_N),
+        .mosi(SPI_MOSI), .miso(spi_miso_data), .miso_oe(spi_miso_enable)
+    );
+    assign SPI_MISO = spi_miso_enable ? spi_miso_data : 1'bz;
 
 	wire psram_rst_n;
 	wire lcd_rst_n;

@@ -62,7 +62,7 @@ Per caricarlo nella SRAM volatile da PowerShell:
 .\program_tang_nano_sram.ps1
 ```
 
-Ulteriori dettagli sono in [PROGRAMMING.md](PROGRAMMING.md).
+Ulteriori dettagli sono in [PROGRAMMING.md](docs/PROGRAMMING.md).
 
 Il `.gitignore` prevede anche output prodotti da Yosys, nextpnr-gowin e Apicula,
 tipicamente raccolti in `build/`. Il controller PSRAM usato qui è però un IP
@@ -100,11 +100,16 @@ simulatore. Il limite di tempo reale è 900 secondi per processo, modificabile
 con `-TimeoutSeconds`; resta attivo anche un timeout di 200 ms simulati.
 
 Misure del raster, risultati e limiti della verifica sono in
-[VERIFICATION.md](VERIFICATION.md).
+[VERIFICATION.md](docs/VERIFICATION.md).
 
 ## Sviluppi futuri
 
-[LVGL_IMPL.md](LVGL_IMPL.md) raccoglie uno studio speculativo su come
+Il modulo autonomo [SpiSlave](docs/SPI_SLAVE.md) implementa il trasporto SPI
+mode 0 per un master STM32 ed e' verificabile con `./sim/run_spi_sim.ps1`.
+Non e' ancora collegato al framebuffer: FIFO di interfaccia, parser comandi
+e arbitraggio delle scritture PSRAM restano da implementare.
+
+[LVGL_IMPL.md](docs/LVGL_IMPL.md) raccoglie uno studio speculativo su come
 trasformare la scheda in un controller grafico SPI pilotabile da un
 microcontrollore con LVGL. Non descrive funzionalità presenti nel codice.
 
@@ -118,3 +123,11 @@ TangNano-9K-example](https://github.com/sipeed/TangNano-9K-example). I file
 sotto `src/framebuffer_fifo/`, `src/gowin_rpll/` e
 `src/psram_memory_interface_hs/` sono generati dall'IP Core Generator di Gowin
 EDA e restano soggetti ai termini di Gowin, non a quelli di questo progetto.
+
+## Collegamento STM32 e collaudo SPI
+
+Il TOP include uno slave SPI mode 0 e un endpoint diagnostico separato dal
+framebuffer. Cablaggio, firmware DMA e comando unico di build/upload/test
+sono nel [README STM32](stm32/WeAct_H743_SPI/README.md).
+Il primo collaudo hardware rileva MISO apparentemente non pilotato;
+la comunicazione fra le schede non e' ancora validata.

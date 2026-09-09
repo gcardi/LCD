@@ -9,6 +9,8 @@ function Invoke-LoggedProcess {
     )
     $info = New-Object System.Diagnostics.ProcessStartInfo
     $info.FileName = $FilePath
+    # PowerShell Set/Push-Location does not update the native process cwd.
+    $info.WorkingDirectory = (Get-Location).ProviderPath
     # Windows argv quoting (no cmd.exe/PowerShell interpretation).
     $info.Arguments = ($Arguments | ForEach-Object {
         '"' + [regex]::Replace([regex]::Replace($_, '(\\*)"', '$1$1\"'), '(\\+)$', '$1$1') + '"'

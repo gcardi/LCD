@@ -1,0 +1,41 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "STM32 + FPGA: Build, upload and test SPI",
+            "type": "process",
+            "command": "powershell.exe",
+            "args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "${workspaceFolder}/test-hardware.ps1", "-SerialNumber", "${input:stlinkSerial}"],
+            "problemMatcher": "$gcc"
+        },
+        {
+            "label": "STM32: Build Debug",
+            "type": "process",
+            "command": "powershell.exe",
+            "args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "${workspaceFolder}/build.ps1"],
+            "problemMatcher": "$gcc",
+            "group": {"kind": "build", "isDefault": true}
+        },
+        {
+            "label": "STM32: List ST-LINK probes",
+            "type": "process",
+            "command": "powershell.exe",
+            "args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "${workspaceFolder}/build.ps1", "-ListProbes"],
+            "problemMatcher": []
+        },
+        {
+            "label": "STM32: Build and upload Debug",
+            "type": "process",
+            "command": "powershell.exe",
+            "args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "${workspaceFolder}/build.ps1", "-Program", "-SerialNumber", "${input:stlinkSerial}"],
+            "problemMatcher": "$gcc"
+        }
+    ],
+    "inputs": [
+        {
+            "id": "stlinkSerial",
+            "type": "promptString",
+            "description": "Seriale ST-LINK (ottenuto con il task List ST-LINK probes)"
+        }
+    ]
+}

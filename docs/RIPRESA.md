@@ -1,0 +1,162 @@
+# Punto di ripresa — 9 settembre 2026
+
+## Ultimo stato: diagnosi fronti GPIO completata
+
+Configurazione normale ora a **12.5 MHz, GPIO STM32 MEDIUM**, prescaler 16,
+SDC 80 ns, file CubeMX allineato. Matrice diagnostica disabilitata e FPGA
+riportata all'eco (MODE=0). Nessuna modifica al cablaggio.
+
+A 12.5 MHz MEDIUM: eco lungo 1049760 byte / 1200 trasferimenti senza errori;
+sequenza autonoma FPGA 104976 byte senza errori; 24 blocchi MOSI da 4096 byte
+con CRC corretto riletto a 781250 Hz. HIGH e VERY_HIGH falliscono in modo
+ripetibile alla stessa frequenza. Evidenza compatibile con integrita' dei
+segnali, ma non localizza fisicamente il disturbo. Nessuna misura analogica.
+
+Dettagli, archivi e comandi: `docs/SPI_DIAGNOSTIC_RESULTS.md`.
+Il runner `diagnose-hardware.ps1` offre echo/miso/mosi, -Rounds 8..80,
+e -RestoreSelfTest per tornare al test normale e ricaricare le schede.
+Non confondere una matrice completata con un PASS: i mismatch sono dati
+diagnostici; leggere le colonne nel JSON. Il runner normale resta severo
+sui mismatch DMA e rifiuta di operare con la matrice abilitata.
+
+L'anomalia iniziale GPIO e' associata al caricamento FPGA: dopo il solo
+riavvio/riprogrammazione STM32 tutte le tre prove GPIO passano. Due impulsi
+SCK a CS alto prima della prima transazione eliminano l'anomalia nel test
+dopo caricamento FPGA; la sola sequenza CS basso/alto non bastava.
+Il firmware include ora i due impulsi, senza payload e a slave deselezionato.
+Il runner normale richiede anche tutte le sequenze GPIO corrette. La causa
+interna all'avvio non e' ancora dimostrata; la sequenza e' verificata al banco.
+Ulteriori prove inizializzate MISO/MOSI confermano MEDIUM senza errori; nel
+CRC a 6.25 MHz VERY_HIGH si e' osservato un blocco con stato errato anche
+a regime. Non considerare VERY_HIGH affidabile su questo collegamento.
+
+Le sezioni seguenti sono cronologia, superata dallo stato qui sopra.
+
+## Stato aggiornato dopo correzione connettore
+
+L'utente ha corretto un connettore invertito e spento/riacceso l'hardware.
+Ricaricate entrambe le schede: DMA PASS a 0.78125, 1.5625, 3.125 e 6.25 MHz,
+zero mismatch su 34992 byte per frequenza. A 12.5 MHz: 32 mismatch, HAL OK,
+timing FPGA PASS. Arrestata la salita; configurazione riportata a 6.25 MHz
+(SPI prescaler 32, SDC periodo 160 ns). Anche il file CubeMX e' aggiornato.
+Il risultato espone ora la frequenza calcolata dal clock/prescaler effettivi.
+
+Prima prova GPIO ancora anomala (`D2 BC 4D 5E 6F 80 91 A2` senza pull);
+le altre due rispondono correttamente. MISO non risulta piu' flottante come
+prima. Vedere `docs/SPI_PERFORMANCE.md` per tabella e limiti del collaudo.
+Prima di salire oltre 6.25 MHz occorre isolare gli errori a 12.5 MHz e
+l'anomalia iniziale GPIO. SRAM FPGA sempre volatile.
+
+Le sezioni seguenti conservano la cronologia precedente alla correzione.
+
+Sessione sospesa per riavvio del PC. Non ripartire dalla configurazione CubeMX:
+firmware, endpoint FPGA e automazione del collaudo sono gia' implementati.
+
+## Hardware e collegamenti attesi dal codice
+
+- WeAct STM32H743VIT6: rilevata rev. V, 3.27 V via ST-LINK V2.
+- Seriale ST-LINK: `35FF6C064D53373238602143`.
+- Tang Nano 9K con display RGB 480x272 e PSRAM; flat circa 15–20 cm.
+- L'utente ha verificato collegamenti e assenza di corti. Resta da confermare
+  che la mappatura effettiva coincida con quella del bitstream qui sotto.
+
+| STM32 | IO Tang (numero chip, non posizione connettore) | Segnale |
+|---|---:|---|
+| PB13 | 36 | SCK |
+| PB15 | 25 | MOSI |
+| PB14 | 26 | MISO |
+| PB12 | 27 | CS attivo basso |
+| GND | GND | Massa comune |
+
+Alimentazioni USB separate, nessun collegamento fra rail 5 V/3.3 V.
+MicroSD vuota: IO36 e' condiviso con il clock della scheda SD.
+
+## Implementato e verificato
+
+- CPU 480 MHz, SPI2 master mode 0, 8 bit MSB first, kernel 200 MHz,
+  prescaler 256: SCK 781.25 kHz. NSS software, PB12 gestito come GPIO.
+- DMA1 stream 0 TX / stream 1 RX, buffer allineati in SRAM D2 (non DTCM),
+  gestione cache se attiva. Progetto CMake GCC in `stm32/WeAct_H743_SPI`.
+- `src/SpiSlave.sv`: slave generico a byte, senza D/C; CS alto azzera
+  il conteggio e disabilita MISO. Logica nel dominio SCK.
+- `src/SpiDiagnostic.sv`, istanziato in TOP: prima risposta A5, poi
+  il byte MOSI precedente; CS alto reinizializza la transazione.
+  Il test SPI non modifica il framebuffer LCD.
+- Simulazioni SPI superate: 525 byte RX / 515 TX nel test generico,
+  32777 byte nel test diagnostico.
+- Build FPGA e gate timing superati: una violazione di calibrazione PSRAM
+  ammessa dalla baseline (-0.175 ns), nessun'altra violazione rilevata.
+- Build firmware riuscita, entrambe le schede programmate; flash STM32
+  verificata. FPGA programmata SOLO in SRAM: si perde allo spegnimento.
+- `tools/Invoke-LoggedProcess.ps1` ora imposta anche la working directory
+  del processo nativo, necessaria per il build CMake dalla radice del repo.
+- README STM32 e documentazione SPI aggiornati. Modifiche non committate;
+  preservare anche le rinomine preesistenti dei documenti in `docs/`.
+
+## Guasto ancora aperto: collaudo hardware NON superato
+
+40 transazioni DMA, 34992 byte confrontati, 34853 mismatch, nessun errore HAL.
+Il primo byte ricevuto varia (FC/F0/00) invece di A5; blocchi successivi
+quasi tutti zero. Non e' ancora una comunicazione funzionante.
+
+Per separare SPI/DMA dai segnali e' stata aggiunta una prova GPIO lenta
+prima del DMA (`probe_gpio` in `Core/Src/spi_selftest.c`). Trasmette otto
+byte tre volte, con MISO senza pull, pull-up e pull-down. Atteso sempre:
+`A5 3C 4D 5E 6F 80 91 A2`.
+
+Risultato misurato:
+
+- nessun pull: `FF FF FF FF FF FF FF FF`;
+- pull-up: `FF FF FF FF FF FF FF FF`;
+- pull-down: `00 00 00 00 00 00 00 00`.
+
+Questo indica MISO apparentemente non pilotato lato STM32 durante la prova;
+non dimostra da solo un errore di cablaggio. Controllare corrispondenza pin,
+CS effettivo sulla FPGA e reset/abilitazione del driver MISO.
+Il reset SPI in TOP dipende da Reset_Button e lock di entrambi i PLL.
+Il report Gowin conferma i pin 36/25/26/27; il netlist include TBUF MISO.
+Non aumentare ancora la frequenza: vincolo SCK attuale 1280 ns.
+
+## Ripartenza
+
+Dalla radice del repository, con entrambe le schede collegate:
+
+```powershell
+# Simula, compila, carica entrambe le schede e legge il risultato via SWD:
+.\stm32\WeAct_H743_SPI\test-hardware.ps1 -SerialNumber 35FF6C064D53373238602143
+
+# Solo lettura, se ELF locale e firmware caricato coincidono:
+.\stm32\WeAct_H743_SPI\test-hardware.ps1 -ReadOnly -SerialNumber 35FF6C064D53373238602143
+```
+
+Il runner restituisce errore se il test non passa: e' l'esito attualmente
+atteso, non un problema del runner. Salva risultato e prova GPIO in
+`stm32/WeAct_H743_SPI/build/Debug/hardware-result.json` (ignorato da Git).
+Legge gli indirizzi dei simboli dall'ELF, senza indirizzi RAM fissi.
+`-ReadOnly` non verifica che la flash corrisponda all'ELF locale.
+
+Task VS Code disponibile nel progetto STM32:
+`STM32 + FPGA: Build, upload and test SPI`.
+
+Prima domanda rimasta aperta all'utente: confermare i quattro collegamenti
+della tabella, usando numeri IO del chip come nell'immagine del pinout.
+Poi diagnosticare CS/reset/MISO; non rifare configurazione o implementazione
+gia' completate. ST-LINK V2 funziona, non serve passare a V3 per questo test.
+
+## Nuova prova dopo revisione cablaggi — 9 settembre 2026, ore 10:32
+
+Ripetuto test-hardware.ps1 completo: simulazioni PASS, build FPGA e gate
+ timing PASS (sola calibrazione PSRAM -0.175 ns), SRAM FPGA caricata,
+firmware STM32 caricato e flash verificata.
+
+A 781250 Hz: stato FAIL, 40 trasferimenti, 34992 byte confrontati,
+34853 mismatch, primo byte atteso A5 ricevuto 00, HAL error 0, 1525 ms.
+GPIO: no pull e pull-up = otto FF; pull-down = otto 00.
+Il problema di MISO apparentemente non pilotato persiste. Nessun aumento
+ di frequenza effettuato e nessuna modifica a firmware/RTL/vincoli.
+
+Il codice abilita MISO solo con CS basso e global_rst_n alto;
+global_rst_n = Reset_Button & psram_pll_lock & lcd_pll_lock.
+Prossimo riscontro fisico: immagine LCD presente e collegamenti effettivi
+PB13->IO36, PB15->IO25, PB14->IO26, PB12->IO27, massa comune.
+Il JSON dettagliato resta in stm32/WeAct_H743_SPI/build/Debug/hardware-result.json.

@@ -11,6 +11,16 @@
 // On-board crystal, 27 MHz.
 create_clock -name xtal_27 -period 37.037 -waveform {0 18.518} [get_ports {XTAL_IN}]
 
+// SPI diagnostic timing for the configured STM32 prescaler.
+create_clock -name spi_clk -period 80 -waveform {0 40} [get_ports {SPI_SCK}]
+// Conservative initial external budget; re-qualify before increasing SCK.
+set_input_delay -clock spi_clk -clock_fall -max 10 [get_ports {SPI_MOSI}]
+set_input_delay -clock spi_clk -clock_fall -min 0 [get_ports {SPI_MOSI}]
+set_output_delay -clock spi_clk -max 10 [get_ports {SPI_MISO}]
+set_output_delay -clock spi_clk -min -3 [get_ports {SPI_MISO}]
+// CS changes while SCK is stopped, with firmware guard time of >=1 ms.
+set_false_path -from [get_ports {SPI_CS_N}]
+
 // -----------------------------------------------------------------------
 // PLL-derived clocks
 // -----------------------------------------------------------------------
@@ -42,7 +52,7 @@ create_clock -name psram_clk_81 -period 12.346 -waveform {0 6.173} [get_nets {ps
 // mem_clk_162 and psram_clk_81 stay in one group on purpose: the second is
 // the first divided by two inside the same PLL block, and the PSRAM serdes
 // depends on that relationship being analysed.
-set_clock_groups -asynchronous -group [get_clocks {lcd_clk_9}] -group [get_clocks {xtal_27}] -group [get_clocks {mem_clk_162 psram_clk_81}]
+set_clock_groups -asynchronous -group [get_clocks {spi_clk}] -group [get_clocks {lcd_clk_9}] -group [get_clocks {xtal_27}] -group [get_clocks {mem_clk_162 psram_clk_81}]
 
 // -----------------------------------------------------------------------
 // Notes
