@@ -50,16 +50,41 @@ differenza.
 
 ### Punti aperti
 
-- **La scheda ha in Embedded Flash un bitstream più vecchio di quello su disco.**
-  L'ultima programmazione flash precede l'ultimo build; la conferma visiva viene
-  da un caricamento SRAM successivo. Spegnendo e riaccendendo riparte il vecchio.
-  Rilanciare `program_tang_nano_flash.ps1`.
+- ~~La scheda ha in Embedded Flash un bitstream più vecchio di quello su disco.~~
+  Chiuso il 10 settembre 2026. Il sintomo era schermo spento dopo un reset di
+  FPGA e MCU. La diagnosi via SWD ha escluso subito i font: `state=3`, quindi
+  self-test fallito, `fpga_text_state=0`, quindi demo testo mai avviata, e
+  `lcd_error.phase=0`, quindi nessun comando `B8` mai inviato. Il dato decisivo
+  è stata la prova GPIO, che leggeva `FF` su MISO in tutte e tre le
+  configurazioni, **pull-down incluso**: non una linea flottante, come nel
+  guasto storico che con pull-down dava `00`, ma una linea tenuta alta. È la
+  firma di una FPGA non configurata, i cui I/O restano in ingresso con i
+  pull-up deboli previsti da `Unused_Pin`. Confermato dal User Code a
+  `0x00000000` e dal bit di CRC error nello status `0x00031421`.
+  Dopo `program_tang_nano_flash.ps1`: User Code `0x0000C765`, status
+  `0x0003B020` senza CRC error, e collaudo PASS con `state=2`, zero mismatch,
+  GPIO corrette in tutte e tre le prove e `fpga_text_state=2`. Riscontro visivo
+  dell'utente sul pannello.
 - Embedded Flash e User Flash sono lo stesso array fisico: programmare la
   embFlash senza `--fiFile` cancella i font, in silenzio. Dettagli e conseguenze
   in `PROGRAMMING.md`.
 - Le demo di collaudo sono ancora attive e disegnano al boot: quando il testo
   non va più dimostrato, riportare `LCD_FPGA_TEXT_DEMO` a 0.
 - Il debounce del pulsante di reset resta rinviato, come da sessioni precedenti.
+- **`program_tang_nano_flash.ps1` dichiara successo anche quando la verifica
+  fallisce.** Nella programmazione del 10 settembre `programmer_cli` ha stampato
+  `Error: Verify Failed at 0` ed è comunque uscito con codice 0, quindi il
+  controllo su `$LASTEXITCODE` non se ne è accorto e lo script ha riportato
+  "programmate e verificate". Serve ispezionare anche l'output. Il dispositivo
+  funziona, e il sospetto è che la verifica non regga il bitstream compresso
+  prodotto da `-bit_compress 1` in `build.ps1`, ma è un'ipotesi non verificata:
+  si conferma riprogrammando con `-bit_compress 0`.
+- **`programmer_cli` non parte se l'ambiente definisce `PYTHONIOENCODING`.** È
+  un eseguibile Python congelato e muore con `0xC0000409` e
+  `LookupError: unknown encoding: utf-8:surrogateescape` prima di toccare la
+  scheda. Non si vede da una PowerShell interattiva normale, ma colpisce
+  qualunque automazione che esporti quella variabile. Gli script che invocano il
+  programmer dovrebbero azzerarla per il processo figlio.
 - La sequenza XE/YE/SE di `UserFlashReader` usa un'attesa fissa tarata sui
   27 MHz: funziona al banco, ma non è stata confrontata con i margini del
   datasheet del primitivo.
