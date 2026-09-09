@@ -30,8 +30,25 @@ Lo script termina con un'eccezione se il bitstream indicato non esiste o se
 
 A differenza di `build.ps1`, che cerca l'installazione di Gowin sotto
 `C:\Program Files\Gowin`, qui il percorso di `programmer_cli.exe` è fisso e
-punta a `Gowin_V1.9.12.01_x64`. Con un'altra versione installata va aggiornata
-la variabile `$programmer` in `program_tang_nano_sram.ps1`.
+punta a `Gowin_V1.9.12.01_x64`. Con un'altra versione installata si passa
+`-ProgrammerPath`, oppure si aggiorna il percorso predefinito in
+`tools/Invoke-GowinProgrammer.ps1`, che ora è l'unico punto in cui compare.
+
+## Due trappole di programmer_cli
+
+Entrambi gli script passano da `tools/Invoke-GowinProgrammer.ps1`, che esiste
+per gestire due comportamenti scoperti il 10 settembre 2026:
+
+- **`programmer_cli` non parte se l'ambiente definisce `PYTHONIOENCODING`.** È
+  un eseguibile Python congelato e il suo interprete rifiuta la forma
+  `utf-8:surrogateescape`: muore con `0xC0000409` e `Fatal Python error:
+  Py_Initialize` prima ancora di aprire il cavo. Da una PowerShell interattiva
+  non si vede quasi mai, ma colpisce qualunque automazione che esporti quella
+  variabile. L'helper la azzera per la durata della chiamata e la ripristina.
+- **`programmer_cli` esce con codice 0 anche quando stampa `Error: Verify
+  Failed`.** Il solo controllo di `$LASTEXITCODE` dichiarerebbe quindi
+  "programmata e verificata" una scheda mai verificata. L'helper ispeziona anche
+  l'output e solleva un'eccezione se vi trova un errore.
 
 La programmazione SRAM viene persa quando la scheda viene spenta.
 
@@ -44,7 +61,14 @@ Per rendere persistenti sia il bitstream sia i tre font della User Flash:
 Questo usa l'operazione Gowin 6 (`embFlash Erase,Program,Verify`) passando
 insieme `impl/pnr/LCD.fs` e `fonts/user_flash_fonts.fi`.
 Il build imposta `-bit_security 0`, necessario per consentire la verifica della
-Embedded Flash durante lo sviluppo. Gli indirizzi del `.fi` sono esadecimali
+Embedded Flash durante lo sviluppo. La compressione del bitstream si disattiva
+con `.uild.ps1 -NoCompress`, ma non serve a superare la verifica: provata il
+10 settembre 2026, fallisce esattamente come quella compressa. Tenerla attiva.
+
+Se la programmazione fallisce con `Error: Program failed`, prova un ciclo di
+alimentazione della Tang Nano prima di ripetere: l'unico tentativo riuscito
+finora era il primo dopo l'accensione. Nel frattempo `program_tang_nano_sram.ps1`
+riporta la scheda in funzione in pochi secondi, in modo volatile. Gli indirizzi del `.fi` sono esadecimali
 senza prefisso e il generatore emette anche `.mem`, `.bin` e un manifest JSON.
 
 ## Embedded Flash e User Flash sono lo stesso array

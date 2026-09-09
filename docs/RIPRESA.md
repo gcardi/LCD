@@ -75,10 +75,30 @@ differenza.
   fallisce.** Nella programmazione del 10 settembre `programmer_cli` ha stampato
   `Error: Verify Failed at 0` ed è comunque uscito con codice 0, quindi il
   controllo su `$LASTEXITCODE` non se ne è accorto e lo script ha riportato
-  "programmate e verificate". Serve ispezionare anche l'output. Il dispositivo
-  funziona, e il sospetto è che la verifica non regga il bitstream compresso
-  prodotto da `-bit_compress 1` in `build.ps1`, ma è un'ipotesi non verificata:
-  si conferma riprogrammando con `-bit_compress 0`.
+  "programmate e verificate". Ora l'output viene ispezionato in
+  `tools/Invoke-GowinProgrammer.ps1`, e il controllo si è dimostrato utile al
+  primo impiego reale.
+- **La programmazione della Embedded Flash riesce solo al primo tentativo dopo
+  l'accensione.** Osservato tre volte di seguito il 10 settembre 2026:
+
+  | Tentativo | Bitstream | Output | Uscita | Dispositivo |
+  |---|---|---|---|---|
+  | 1 | compresso | `Verify Failed` | 0 | configurato, User Code `0xC765` |
+  | 2 | non compresso | `Verify Failed` + `Program failed` | 1 | non configurato |
+  | 3 | compresso | `Verify Failed` + `Program failed` | 1 | non configurato |
+
+  Il terzo tentativo ripete esattamente la configurazione del primo, quindi
+  `-bit_compress` **non** è la causa: l'ipotesi iniziale era sbagliata ed è
+  stata smentita dalla prova. Non lo è nemmeno il bitstream, perché la
+  programmazione in SRAM dello stesso file riesce senza un solo errore e il
+  collaudo hardware torna PASS. L'unica differenza rimasta fra il tentativo
+  riuscito e quelli falliti è che il primo seguiva un'accensione. Ipotesi da
+  verificare: fra due operazioni sulla Embedded Flash serve un ciclo di
+  alimentazione della Tang Nano.
+
+  Nota che `Verify Failed` compare in **tutti** i tentativi, compreso quello
+  che ha prodotto un dispositivo funzionante, quindi resta un fenomeno distinto
+  e ancora inspiegato.
 - **`programmer_cli` non parte se l'ambiente definisce `PYTHONIOENCODING`.** È
   un eseguibile Python congelato e muore con `0xC0000409` e
   `LookupError: unknown encoding: utf-8:surrogateescape` prima di toccare la

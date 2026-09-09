@@ -17,7 +17,10 @@
 #>
 param(
     [string]$GowinRoot = "C:\Program Files\Gowin",
-    [switch]$Program
+    [switch]$Program,
+    # Il bitstream compresso non supera la verifica della Embedded Flash:
+    # -NoCompress lo disattiva quando si vuole programmare e verificare.
+    [switch]$NoCompress
 )
 
 $ErrorActionPreference = "Stop"
@@ -67,7 +70,7 @@ set_option -gen_text_timing_rpt 1
 set_option -place_option 1
 set_option -route_option 1
 set_option -bit_security 0
-set_option -bit_compress 1
+set_option -bit_compress $(if ($NoCompress) { 0 } else { 1 })
 run all
 "@ | Set-Content -LiteralPath $tcl -Encoding ascii
 

@@ -31,8 +31,9 @@ e degli accessi a burst nel frame buffer.
 - `LCD.gprj`: progetto Gowin EDA;
 - `build.ps1`, `program_tang_nano_sram.ps1`, `program_tang_nano_flash.ps1`:
   build e programmazione volatile o persistente con i font;
-- `tools/`: gate di timing sul report Gowin e runner di processo con log e
-  timeout, condiviso da build e simulazione;
+- `tools/`: gate di timing sul report Gowin, runner di processo con log e
+  timeout condiviso da build e simulazione, e wrapper di `programmer_cli` che
+  ne aggira le due trappole note;
 - `sim/`: testbench di risincronizzazione del frame e prove negative;
 - `src/gowin_rpll/`, `src/psram_memory_interface_hs/`: IP generati da Gowin EDA
   per i due PLL e per il controller PSRAM;
