@@ -13,7 +13,7 @@ if($RestoreSelfTest) {
     $text=[IO.File]::ReadAllText($config) -replace '#define SPI_DIAG_MATRIX \d+','#define SPI_DIAG_MATRIX 0' -replace '#define SPI_DIAG_MODE \d+','#define SPI_DIAG_MODE 0'
     [IO.File]::WriteAllText($config,$text)
     $top=Join-Path $repoRoot 'src/TOP.sv'
-    [IO.File]::WriteAllText($top,([IO.File]::ReadAllText($top) -replace 'SpiDiagnostic #\(\.MODE\(\d+\)\)','SpiDiagnostic #(.MODE(0))'))
+    [IO.File]::WriteAllText($top,([IO.File]::ReadAllText($top) -replace 'localparam SPI_FRAMEBUFFER = \d+;', 'localparam SPI_FRAMEBUFFER = 0;' -replace 'SpiDiagnostic #\(\.MODE\(\d+\)\)','SpiDiagnostic #(.MODE(0))'))
     & (Join-Path $PSScriptRoot 'test-hardware.ps1') -SerialNumber $SerialNumber
     return
 }
@@ -28,7 +28,7 @@ try {
     $text=$text -replace '#define SPI_DIAG_ROUNDS \d+',"#define SPI_DIAG_ROUNDS $Rounds"
     [IO.File]::WriteAllText($config,$text)
     $top=Join-Path $repoRoot 'src/TOP.sv'
-    [IO.File]::WriteAllText($top,([IO.File]::ReadAllText($top) -replace 'SpiDiagnostic #\(\.MODE\(\d+\)\)',"SpiDiagnostic #(.MODE($modeNumber))"))
+    [IO.File]::WriteAllText($top,([IO.File]::ReadAllText($top) -replace 'localparam SPI_FRAMEBUFFER = \d+;', 'localparam SPI_FRAMEBUFFER = 0;' -replace 'SpiDiagnostic #\(\.MODE\(\d+\)\)',"SpiDiagnostic #(.MODE($modeNumber))"))
     $sdc=Join-Path $repoRoot 'src/LCD.sdc'
     [IO.File]::WriteAllText($sdc,([IO.File]::ReadAllText($sdc) -replace 'create_clock -name spi_clk -period \d+ -waveform \{0 \d+\}','create_clock -name spi_clk -period 80 -waveform {0 40}'))
     & ./sim/run_spi_sim.ps1

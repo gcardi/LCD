@@ -25,6 +25,7 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include "spi_selftest.h"
+#include "lcd_spi.h"
 
 /* USER CODE END Includes */
 
@@ -97,6 +98,8 @@ int main(void)
   MX_SPI2_Init();
   /* USER CODE BEGIN 2 */
   SPI_SelfTest_Run();
+  // Graphics endpoint is detected by the demo.
+  if (g_spi_test.state == 2) LCD_Demo_Run();
 
   /* USER CODE END 2 */
 

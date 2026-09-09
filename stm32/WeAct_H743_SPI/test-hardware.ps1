@@ -1,6 +1,7 @@
 param(
     [Parameter(Mandatory)][ValidatePattern('^[A-Za-z0-9]+$')][string]$SerialNumber,
     [switch]$ReadOnly,
+    [switch]$RequireGraphics,
     [string]$ProgrammerPath,
     [ValidateRange(5,120)][int]$TimeoutSeconds=20
 )
@@ -62,9 +63,26 @@ if($probeSymbol.Count -eq 1) {
     $probe['all_match']=($probe.no_pull -eq $probe.expected -and $probe.pull_up -eq $probe.expected -and $probe.pull_down -eq $probe.expected)
     $result['gpio_probe']=$probe
 }
+if ($RequireGraphics) {
+    $graphicsSymbol=@($symbols | Where-Object {$_ -match '^[0-9a-fA-F]+\s+\w\s+g_lcd_demo_state$'})
+    if($graphicsSymbol.Count -ne 1) {throw 'Simbolo demo grafica mancante'}
+    $graphicsAddress='0x'+($graphicsSymbol[0] -split '\s+')[0]
+    $graphicsDump=Join-Path $build 'hardware-graphics.bin'
+    $graphicsTimer=[Diagnostics.Stopwatch]::StartNew()
+    do {
+        if(Test-Path $graphicsDump) {Remove-Item -LiteralPath $graphicsDump}
+        Invoke-LoggedProcess -FilePath $ProgrammerPath -Arguments @('-c','port=SWD',"sn=$SerialNumber",'mode=HOTPLUG','freq=1000','-u',$graphicsAddress,'4',$graphicsDump) -LogPath (Join-Path $build 'hardware-graphics.log') -TimeoutSeconds $TimeoutSeconds
+        $graphicsBytes=[IO.File]::ReadAllBytes($graphicsDump)
+        if($graphicsBytes.Length -ne 4) {throw 'Dump grafico troncato'}
+        $result['graphics_state']=[BitConverter]::ToUInt32($graphicsBytes,0)
+        if($result.graphics_state -ne 1) {break}
+        Start-Sleep -Milliseconds 100
+    } while($graphicsTimer.Elapsed.TotalSeconds -lt $TimeoutSeconds)
+}
 $result | ConvertTo-Json | Set-Content -LiteralPath $resultPath
 if($result.magic -ne 0x53504954 -or $result.version -ne 1 -or $result.state -ne 2 -or $result.transfers -ne 40 -or $result.checked_bytes -ne 34992 -or $result.mismatches -ne 0 -or $result.hal_error -ne 0 -or -not $result.gpio_probe.all_match) {
     throw "Test hardware NON superato (timeout/errore): $($result | ConvertTo-Json -Compress)"
 }
+if ($RequireGraphics -and $result.graphics_state -ne 2) {throw "Demo grafica NON superata: stato $($result.graphics_state)"}
 Write-Host "PASS: SPI DMA, $($result.transfers) trasferimenti, $($result.checked_bytes) byte verificati, $($result.elapsed_ms) ms."
 Write-Host "Risultato: $resultPath"
