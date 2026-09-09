@@ -43,8 +43,13 @@ LVGL non e' stato integrato: la condizione concordata del PASS a 25 MHz manca.
 
 ## Modifiche conservate
 
-`SPI_SELFTEST_ROUNDS=240` in spi_diag_config.h controlla la durata dell'eco;
-il runner ricava i conteggi attesi dalla configurazione. Il primo byte B7 viene
+`SPI_SELFTEST_ROUNDS` in spi_diag_config.h controlla la durata dell'eco; il
+runner ricava i conteggi attesi dalla configurazione. Il valore predefinito e'
+ora 8, sceso da 240 il 10 settembre 2026 perche' l'eco lunga ritardava di nove
+secondi la comparsa del testo a ogni avvio. `-RequireStress` pretende pero'
+oltre 1.000.000 di byte controllati, cioe' almeno 229 round: prima di quella
+qualifica va riportato a 240 e il firmware ricompilato. Il runner lo verifica
+ora in anticipo e lo dice, invece di fallire alla fine sul totale. Il primo byte B7 viene
 sostituito con 37 nel pattern eco per non attivare il parser grafico.
 
 `LCD_Stress_Run()` varia larghezza 1..67, altezza 1..40, posizione e pixel,

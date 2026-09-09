@@ -24,6 +24,14 @@ if($RequireFPGAText -and
    (Get-Content (Join-Path $PSScriptRoot 'Core/Inc/spi_diag_config.h') -Raw) -match '#define LCD_FPGA_TEXT_DEMO 0') {
     throw 'Demo testo FPGA disabilitata: impostare LCD_FPGA_TEXT_DEMO 1 in Core/Inc/spi_diag_config.h e ricompilare/caricare.'
 }
+# -RequireStress pretende oltre 1.000.000 di byte di eco e ogni round ne vale
+# 4374, quindi servono almeno 229 round. Va detto prima di compilare e caricare.
+if($RequireStress) {
+    $roundsPre=Get-Content (Join-Path $PSScriptRoot 'Core/Inc/spi_diag_config.h') -Raw
+    if($roundsPre -match '#define SPI_SELFTEST_ROUNDS (\d+)' -and [int]$Matches[1] -lt 229) {
+        throw "SPI_SELFTEST_ROUNDS=$([int]$Matches[1]): la qualifica di stress richiede almeno 229 round, cioe' 1.000.000 di byte. Portarlo a 240 in Core/Inc/spi_diag_config.h e ricompilare."
+    }
+}
 $repoRoot=Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 . (Join-Path $repoRoot 'tools/Invoke-LoggedProcess.ps1')
 if(-not $ProgrammerPath) {
