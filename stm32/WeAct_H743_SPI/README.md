@@ -136,8 +136,10 @@ Vedere [SPI_FRAMEBUFFER.md](../../docs/SPI_FRAMEBUFFER.md).
 ## Stato dopo collaudo prolungato
 
 Il primo PASS a 25 MHz non e' confermato dalla prova grafica prolungata.
-Configurazione finale: prescaler 16, 12.5 MHz MEDIUM, 240 round eco e 512
-rettangoli via DMA. Tre prove complete passano dopo upload/reset/reload.
+Configurazione della qualifica: prescaler 16, 12.5 MHz MEDIUM, 240 round eco e
+512 rettangoli via DMA. Dal 10 settembre 2026 il valore predefinito dei round e'
+8, per non ritardare l'avvio: va riportato a 240 per rieseguire questa qualifica.
+Tre prove complete passano dopo upload/reset/reload.
 SDC resta a 40 ns come vincolo conservativo. Dettagli e comando -RequireStress
 in [SPI_STRESS.md](../../docs/SPI_STRESS.md). Le sezioni precedenti che indicano
 25 MHz descrivono lo stato prima del test prolungato.
