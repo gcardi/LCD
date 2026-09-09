@@ -73,7 +73,7 @@ byte MOSI. Non modifica il framebuffer. Prima del DMA, una prova GPIO lenta
 invia otto byte con tre configurazioni MISO (nessun pull, up, down). Le risposte
 attese sono `A5 3C 4D 5E 6F 80 91 A2` in tutti e tre i casi.
 
-Il firmware esegue poi 40 trasferimenti DMA a 25 Mbit/s, GPIO MEDIUM (lunghezze
+Il firmware esegue poi 1200 trasferimenti DMA a 12.5 Mbit/s, GPIO MEDIUM (lunghezze
 1, 2, 17, 257, 4097 ripetute otto volte), verificando 34992 byte. I buffer sono
 in SRAM D2, allineati a 32 byte, con gestione cache se abilitata. CS viene
 rialzato dopo il completamento SPI. Il risultato e' in `g_spi_test`; il runner
@@ -131,3 +131,22 @@ SPI_FRAMEBUFFER=1. Il nuovo serializer con primo byte fisso A5 supera timing
 e primo collaudo hardware (34992 byte senza errori e demo accettata).
 Vedere [SPI_FRAMEBUFFER.md](../../docs/SPI_FRAMEBUFFER.md).
 -RestoreSelfTest ripristina invece l'eco pura e 12.5 MHz anche in C/CubeMX/SDC.
+
+
+## Stato dopo collaudo prolungato
+
+Il primo PASS a 25 MHz non e' confermato dalla prova grafica prolungata.
+Configurazione finale: prescaler 16, 12.5 MHz MEDIUM, 240 round eco e 512
+rettangoli via DMA. Tre prove complete passano dopo upload/reset/reload.
+SDC resta a 40 ns come vincolo conservativo. Dettagli e comando -RequireStress
+in [SPI_STRESS.md](../../docs/SPI_STRESS.md). Le sezioni precedenti che indicano
+25 MHz descrivono lo stato prima del test prolungato.
+
+
+## Avvio uniforme
+
+LCD_BOOT_TESTS=0 e' ora il default: la FPGA inizializza il display a nero e
+lo STM32 esegue solo l'eco SPI. Demo e stress grafici richiedono LCD_BOOT_TESTS=1
+in Core/Inc/spi_diag_config.h e nuovo caricamento. I comandi -RequireGraphics
+e -RequireStress controllano questa impostazione. Vedere SPI_FRAMEBUFFER.md
+per la distinzione fra comando burst FPGA e API rettangolo STM32.

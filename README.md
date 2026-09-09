@@ -10,7 +10,7 @@ barre orizzontali colorate, alte 34 righe, e un pattern bit-walk RGB565.
 
 ![Barre orizzontali visualizzate sul pannello LCD](docs/assets/images/HBars.jpg)
 
-Il pattern diagonale viene usato per rendere visibili disallineamenti dei pixel
+Il pattern diagonale diagnostico viene usato per rendere visibili disallineamenti dei pixel
 e degli accessi a burst nel frame buffer.
 
 ![Pattern diagonale di test visualizzato sul pannello LCD](docs/assets/images/TestPattern1.jpg)
@@ -129,7 +129,8 @@ EDA e restano soggetti ai termini di Gowin, non a quelli di questo progetto.
 Il TOP include uno slave SPI mode 0 con scrittura framebuffer e una
 modalita' diagnostica selezionabile. Cablaggio, firmware DMA e comando unico di build/upload/test
 sono nel [README STM32](stm32/WeAct_H743_SPI/README.md).
-La grafica passa il primo collaudo a 25 MHz con fronti MEDIUM. Per la diagnosi
+Il [collaudo prolungato](docs/SPI_STRESS.md) passa a 12.5 MHz MEDIUM; a 25 MHz
+restano errori grafici intermittenti. Per la diagnosi
 precedente e le prove lunghe a 12.5 MHz vedere
 [SPI_DIAGNOSTIC_RESULTS.md](docs/SPI_DIAGNOSTIC_RESULTS.md). La nuova demo
 grafica e i suoi limiti di verifica sono descritti in

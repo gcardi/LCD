@@ -1,5 +1,38 @@
 # Punto di ripresa — 9 settembre 2026
 
+## Ultimo stato: avvio nero uniforme, SPI 12.5 MHz
+
+Su richiesta dell'utente: PATTERN_SOLID in FramebufferController con parametro
+BACKGROUND_COLOR=16'h0000. Nessun bordo o diagonale all'avvio/reset FPGA.
+LCD_BOOT_TESTS=0 in spi_diag_config.h: demo/stress grafici sono opt-in; resta
+il self-test eco lungo, che non modifica lo schermo. Schede programmate,
+flash verificata; eco hardware PASS 1049760 byte a 12.5 MHz, GPIO corrette.
+SPI testbench PASS con controllo di tutti i 130560 pixel iniziali neri.
+Gate timing PASS: sette endpoint di calibrazione ammessi, worst -1.487 ns,
+nessun'altra violazione. SDC mantenuto a 40 ns, master effettivo 12.5 MHz.
+
+Comandi/primitive attuali documentati in SPI_FRAMEBUFFER.md: burst RGB565
+mascherato, query disponibilita', eco diagnostica; API LCD_WriteRect lato STM32.
+Nessuna primitiva fill/linee/testo/readback FPGA, LVGL non integrato.
+Le sezioni seguenti sono cronologia.
+
+## Ultimo stato: collaudo lungo, ripristinati 12.5 MHz
+
+La prova lunga rivela errori grafici intermittenti a 25 MHz, anche quando
+1049760 byte eco DMA passano. Una prova grafica DMA passa, ma la ripetizione
+dopo ricaricamento FPGA fallisce: non considerare i 25 MHz qualificati.
+
+Configurazione finale: SPI_FRAMEBUFFER=1, prescaler 16 (C/CubeMX), GPIO MEDIUM,
+SPI_SELFTEST_ROUNDS=240, matrice disabilitata. SDC resta a 40 ns, piu' severo.
+Risposta SPI registrata direttamente; grafica DMA con guardie CS 1 us.
+A 12.5 MHz tre prove finali PASS (upload, reset STM32, reload FPGA + reset STM32):
+ciascuna 1049760 byte eco, 512 rettangoli, 30035 pacchetti, zero errori.
+Nessuna rilettura PSRAM nel collaudo hardware. LVGL non ancora integrato.
+Prossimo lavoro: isolare il difetto a 25 MHz, oppure concordare LVGL a 12.5 MHz.
+Dettagli, comandi, limiti e archivi in `docs/SPI_STRESS.md`.
+
+Le sezioni seguenti sono cronologia, superata dal collaudo lungo.
+
 ## Ultimo stato: grafica a 25 MHz, primo collaudo PASS
 
 Ottimizzato MISO con FIXED_FIRST_BYTE=1 / FIRST_BYTE=A5 in SpiFramebuffer.

@@ -1,12 +1,44 @@
 # Scrittura framebuffer via SPI
 
+> Aggiornamento: il collaudo lungo rileva errori grafici intermittenti a 25 MHz.
+> Configurazione corrente 12.5 MHz, qualificata in tre prove prolungate.
+> Vedere [SPI_STRESS.md](SPI_STRESS.md); i risultati successivi a 25 MHz sono cronologia.
+
 Prima implementazione: `SpiFramebuffer.sv` trasferisce burst mascherati alla
 PSRAM tramite una coda asincrona di un elemento. `LCD_WriteRect` li compone
 per aggiornare rettangoli RGB565 arbitrari entro 480x272.
 
+## Avvio e primitive disponibili
+
+La FPGA inizializza ogni pixel a nero (RGB565 0000), anche dopo il reset.
+`FramebufferController.BACKGROUND_COLOR` e' un parametro di sintesi: FFFF per
+bianco, F800 rosso, 07E0 verde, 001F blu. Il pattern selezionato e' PATTERN_SOLID;
+i precedenti pattern restano nel sorgente come strumenti diagnostici.
+Il colore iniziale non e' attualmente modificabile con un comando SPI.
+
+Lo STM32 usa `LCD_BOOT_TESTS=0`: l'eco DMA di avvio resta attiva ma non modifica
+il framebuffer. Demo e stress grafici non vengono eseguiti automaticamente.
+Per provarli impostare LCD_BOOT_TESTS=1 in spi_diag_config.h e ricompilare/caricare;
+riportare a 0 per l'avvio uniforme. Il runner rifiuta -RequireGraphics/-RequireStress
+se i test grafici sono disabilitati nella configurazione locale.
+
+| Livello | Operazione implementata |
+|---|---|
+| SPI | B7 00: verifica spazio nella coda, ritorna A5 e C3 oppure 00 |
+| SPI | B7 + indirizzo + maschera + 16 pixel + 5A: scrittura di un burst mascherato; dummy finale per leggere AC/E1 |
+| SPI diagnostico | Eco A5, poi byte precedente, con opcode iniziale diverso da B7 |
+| API STM32 | LCD_WriteRect(x,y,w,h,pixels): rettangolo di pixel RGB565, anche non allineato |
+
+Il comando di scrittura usa un indirizzo lineare allineato a 16 pixel. Coordinate,
+righe e bordi del rettangolo vengono gestiti dalla funzione STM32.
+Non ci sono primitive FPGA per clear/fill rettangoli, linee, cerchi, testo,
+font, copia di aree o lettura dei pixel. Un rettangolo pieno e' realizzabile
+preparando i pixel dello stesso colore e chiamando LCD_WriteRect, ma non e' ancora
+un comando dedicato. LCD_Demo_Run e LCD_Stress_Run sono programmi di collaudo.
+
 ## Protocollo
 
-SPI mode 0, MSB first, 25 MHz, GPIO STM32 MEDIUM. Un pacchetto per CS.
+SPI mode 0, MSB first, 12.5 MHz, GPIO STM32 MEDIUM. Un pacchetto per CS.
 I due impulsi iniziali a CS alto restano necessari come nel collaudo precedente.
 
 | Offset byte | MOSI | MISO |
@@ -48,7 +80,7 @@ e il tempo di recupero PSRAM. Non si interrompe una scrittura a meta'.
 
 `Core/Inc/lcd_spi.h` espone `LCD_WriteRect(x,y,w,h,pixels)`. Il buffer contiene
 w*h uint16_t in ordine di riga. Ritorna 1 per invio riuscito, 0 per parametri,
-timeout o risposta errata. Questa prima versione usa HAL sincrona, non DMA.
+timeout o risposta errata. Il trasporto usa DMA con attesa sincrona e guardie CS di 1 us.
 Il test DMA precedente resta eseguito prima della demo.
 
 La demo disegna a (101,81) un rettangolo 67x40, bordo bianco e interno rosso,
