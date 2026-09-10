@@ -93,6 +93,12 @@ significa 8160 pacchetti e circa 334 kB sul filo; `B9` fa la stessa cosa con
 **un pacchetto da 18 byte**. Per questo l'interfaccia resta usabile da una MCU
 piccola, che non deve né generare né trasferire i pixel.
 
+Misurato al banco il 10 settembre 2026, con `g_lcd_clear_ms16`: **128 ms per
+sedici clear a schermo intero, cioè 8 ms l'uno**. Il limite non è più la SPI ma
+il renderer, che costruisce i burst in serie: 8160 burst da 16 pixel a 27 MHz,
+più l'handshake verso il dominio PSRAM. Restano circa 37 volte meno dei ~300 ms
+che la stessa operazione costa passando pixel per pixel da `B7`.
+
 | Offset | Campo MOSI |
 |---:|---|
 | 0 | opcode `B9` |
@@ -261,6 +267,25 @@ verticali funzionano, è la FPGA a essere da riprogrammare, non il codice.
 
 La fase **11** ha un valore analogo per il testo: è la firma di una User Flash
 cancellata o scritta male. Vedi [PROGRAMMING.md](PROGRAMMING.md).
+
+### Quando firmware e bitstream non sono della stessa versione
+
+Vale la pena riconoscerne il sintomo, perché il 10 settembre 2026 è costato
+una diagnosi sbagliata. La demo si fermava **sempre nello stesso punto** — i
+primi cinque testi disegnati, dal sesto in poi niente — con fase 9, cioè primo
+byte `00` invece di `A5`. Quel byte è una costante precaricata nello shift
+register: leggerlo a zero significa che lo slave SPI non stava pilotando la
+linea, uno stato in cui non dovrebbe trovarsi.
+
+La causa non era elettrica: sulla scheda c'era un bitstream **anteriore
+all'ultima modifica dell'RTL**, quindi firmware e logica si parlavano con due
+contratti diversi. Ricostruire e riprogrammare ha risolto senza toccare altro.
+
+Il modo rapido di escluderlo è confrontare le date: se `impl/pnr/LCD.fs` è più
+vecchio di un file sotto `src/`, la scheda non sta eseguendo quello che si sta
+leggendo nei sorgenti. Un guasto **deterministico e sempre allo stesso comando**
+punta a un disallineamento del genere; un cablaggio difettoso darebbe errori
+sparsi e irriproducibili.
 
 ## Cosa manca, in breve
 
