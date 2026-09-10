@@ -10,6 +10,15 @@ int LCD_WriteRect(uint16_t x, uint16_t y, uint16_t w, uint16_t h,
 int LCD_FillRect(uint16_t x, uint16_t y, uint16_t w, uint16_t h,
                  uint16_t color);
 int LCD_Clear(uint16_t color);
+// One-pixel-thick lines, extending right/down from (x,y), length in pixels.
+// Same blocking return/error contract as FillRect; zero length or any part
+// outside the screen is rejected without drawing (no clipping).
+int LCD_DrawHLine(uint16_t x, uint16_t y, uint16_t length, uint16_t color);
+int LCD_DrawVLine(uint16_t x, uint16_t y, uint16_t length, uint16_t color);
+// FPGA Bresenham, one pixel thick, inclusive endpoints in any direction.
+// A point is valid; off-screen endpoints are rejected without clipping.
+int LCD_DrawLine(uint16_t x0, uint16_t y0, uint16_t x1, uint16_t y1,
+                 uint16_t color);
 
 #define LCD_FONT_8X16  0u
 #define LCD_FONT_12X24 1u

@@ -153,7 +153,25 @@ void LCD_FPGATextDemo_Run(void)
                          0xFD20,0,"Font bitmap residenti nella User Flash") ||
        !LCD_DrawTextFPGA(308,136,0,0,LCD_FONT_8X16,LCD_TEXT_TRANSPARENT,
                          0xFFE0,0,"FILL B9") ||
-       !LCD_DrawTextFPGA(430,236,50,32,LCD_FONT_16X32,0,0xF81F,0,"CLIP")) {
+       !LCD_DrawTextFPGA(430,236,50,32,LCD_FONT_16X32,0,0xF81F,0,"CLIP") ||
+       // One-pixel lines: full-screen edges plus an unaligned inner frame.
+       !LCD_DrawHLine(0,0,480,0xFFFF) ||
+       !LCD_DrawHLine(0,271,480,0xFFFF) ||
+       !LCD_DrawVLine(0,0,272,0x07FF) ||
+       !LCD_DrawVLine(479,0,272,0x07FF) ||
+       !LCD_DrawHLine(299,117,103,0xFFE0) ||
+       !LCD_DrawHLine(299,171,103,0xFFE0) ||
+       !LCD_DrawVLine(299,117,55,0xF81F) ||
+       !LCD_DrawVLine(401,117,55,0xF81F) ||
+       // Eight-direction star in the unused area right of the text.
+       !LCD_DrawLine(350,193,315,178,0xF800) ||
+       !LCD_DrawLine(350,193,335,175,0xFFE0) ||
+       !LCD_DrawLine(350,193,365,175,0x07E0) ||
+       !LCD_DrawLine(350,193,385,178,0x07FF) ||
+       !LCD_DrawLine(350,193,385,208,0x001F) ||
+       !LCD_DrawLine(350,193,365,211,0xF81F) ||
+       !LCD_DrawLine(350,193,335,211,0xFFFF) ||
+       !LCD_DrawLine(350,193,315,208,0xFD20)) {
         g_lcd_fpga_text_demo_state=3;return;
     }
     g_lcd_fpga_text_demo_state=2;
@@ -183,23 +201,16 @@ int LCD_WriteRect(uint16_t x, uint16_t y, uint16_t w, uint16_t h,
     }
     return ready();
 }
-// Reuse one scanline instead of allocating an entire rectangle/framebuffer.
-// Same bounds and failure semantics as LCD_WriteRect: no clipping or rollback.
-int LCD_FillRect(uint16_t x, uint16_t y, uint16_t w, uint16_t h,
-                 uint16_t color)
+// Shared B9 transport. Callers validate coordinates before any SPI traffic.
+static int draw_shape(uint8_t shape,uint16_t x,uint16_t y,
+                       uint16_t a,uint16_t b,uint16_t color)
 {
-    // Same contract as before the FPGA gained B9: empty or off-screen
-    // rectangles are refused here rather than clipped, even though the
-    // renderer would clip them. What changed is the cost - one packet instead
-    // of one per row - and atomicity: the CRC is checked before anything is
-    // drawn, so a corrupted transfer now leaves the screen untouched.
-    if(!w || !h || x>=480 || y>=272 || w>480-x || h>272-y) return 0;
     uint8_t tx[18]={0},rx[18];
-    tx[0]=0xB9;tx[2]=0;tx[3]=0;          // forma 0: rettangolo
+    tx[0]=0xB9;tx[2]=shape;tx[3]=0; // 0 rectangle, 1 line; reserved flags zero.
     tx[4]=(uint8_t)(x>>8);tx[5]=(uint8_t)x;
     tx[6]=(uint8_t)(y>>8);tx[7]=(uint8_t)y;
-    tx[8]=(uint8_t)(w>>8);tx[9]=(uint8_t)w;
-    tx[10]=(uint8_t)(h>>8);tx[11]=(uint8_t)h;
+    tx[8]=(uint8_t)(a>>8);tx[9]=(uint8_t)a;
+    tx[10]=(uint8_t)(b>>8);tx[11]=(uint8_t)b;
     tx[12]=(uint8_t)(color>>8);tx[13]=(uint8_t)color;
     uint16_t crc=0xFFFF;
     for(unsigned i=2;i<=13;i++) crc=crc16_byte(crc,tx[i]);
@@ -215,9 +226,35 @@ int LCD_FillRect(uint16_t x, uint16_t y, uint16_t w, uint16_t h,
     return shape_ready();
 }
 
+int LCD_FillRect(uint16_t x,uint16_t y,uint16_t w,uint16_t h,uint16_t color)
+{
+    if(!w || !h || x>=480 || y>=272 || w>480-x || h>272-y) return 0;
+    return draw_shape(0,x,y,w,h,color);
+}
+
+int LCD_DrawLine(uint16_t x0,uint16_t y0,uint16_t x1,uint16_t y1,uint16_t color)
+{
+    if(x0>=480 || x1>=480 || y0>=272 || y1>=272) return 0;
+    if(y0==y1) return LCD_DrawHLine(x0<x1?x0:x1,y0,
+                                    (uint16_t)((x0<x1?x1-x0:x0-x1)+1),color);
+    if(x0==x1) return LCD_DrawVLine(x0,y0<y1?y0:y1,
+                                    (uint16_t)((y0<y1?y1-y0:y0-y1)+1),color);
+    return draw_shape(1,x0,y0,x1,y1,color);
+}
+
 int LCD_Clear(uint16_t color)
 {
     return LCD_FillRect(0,0,480,272,color);
+}
+
+int LCD_DrawHLine(uint16_t x, uint16_t y, uint16_t length, uint16_t color)
+{
+    return LCD_FillRect(x,y,length,1,color);
+}
+
+int LCD_DrawVLine(uint16_t x, uint16_t y, uint16_t length, uint16_t color)
+{
+    return LCD_FillRect(x,y,1,length,color);
 }
 
 void LCD_Demo_Run(void)

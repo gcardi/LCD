@@ -3,6 +3,13 @@
 Origine del progetto (STM32CubeMX con generazione CMake), ambiente VS Code,
 file generati e regole di rigenerazione: [TOOLCHAIN.md](TOOLCHAIN.md).
 
+Stato corrente: SPI 12.5 MHz, B7 pixel, B8 testo FPGA, B9 fill/clear e linee
+orizzontali/verticali. `LCD_DrawLine` usa B9 tipo 1 per linee oblique con
+estremi inclusi e richiede anche il nuovo bitstream FPGA. API e protocollo:
+[GRAPHICS_COMMANDS.md](../../docs/GRAPHICS_COMMANDS.md).
+Release collaudata: [confronto dimensioni e tempi](../../docs/MCU_RELEASE_COMPARISON.md).
+Le sezioni datate sotto conservano la cronologia dei collaudi.
+
 ## Build e upload
 
 Aprire questa cartella in VS Code. Servono CMake, Ninja, arm-none-eabi-gcc
@@ -55,6 +62,11 @@ con l'uscita di alimentazione 3.3 V di alcune sonde/cloni; WeAct alimentata USB.
 
 Dalla radice del repository:
 
+Il firmware normale ha `SPI_GPIO_PROBE=0`: per questo runner abilitare
+`SPI_GPIO_PROBE=1` in `Core/Inc/spi_diag_config.h`. Per lo stress servono anche
+`SPI_SELFTEST_ROUNDS=240` e `LCD_BOOT_TESTS=1`; ripristinare le impostazioni
+di avvio dopo la qualifica. I flag `-Require*` verificano questi prerequisiti.
+
 ```powershell
 .\stm32\WeAct_H743_SPI\test-hardware.ps1 -SerialNumber 35FF6C064D53373238602143
 ```
@@ -67,17 +79,21 @@ spegnimento della Tang: ripetere il comando dopo un ciclo di alimentazione.
 `-ReadOnly` legge soltanto i risultati usando i simboli dell'ELF locale: usarlo
 solo se quell'ELF e' quello caricato. L'hash registrato identifica il file locale,
 non costituisce una verifica della flash in questa modalita'.
+`-Preset Release` seleziona anche nel runner ELF e risultati Release;
+il default resta Debug.
 
 `SpiDiagnostic` restituisce A5 al primo byte dopo CS basso, poi il precedente
 byte MOSI. Non modifica il framebuffer. Prima del DMA, una prova GPIO lenta
 invia otto byte con tre configurazioni MISO (nessun pull, up, down). Le risposte
 attese sono `A5 3C 4D 5E 6F 80 91 A2` in tutti e tre i casi.
 
-Il firmware esegue poi 1200 trasferimenti DMA a 12.5 Mbit/s, GPIO MEDIUM (lunghezze
-1, 2, 17, 257, 4097 ripetute otto volte), verificando 34992 byte. I buffer sono
+Il firmware normale esegue un round: 5 trasferimenti DMA a 12.5 Mbit/s,
+GPIO MEDIUM (lunghezze 1, 2, 17, 257, 4097), verificando 4374 byte.
+La qualifica a 240 round esegue 1200 trasferimenti e verifica 1049760 byte.
+I buffer sono
 in SRAM D2, allineati a 32 byte, con gestione cache se abilitata. CS viene
 rialzato dopo il completamento SPI. Il risultato e' in `g_spi_test`; il runner
-salva `build/Debug/hardware-result.json` e fallisce su timeout o mismatch.
+salva `build/<preset>/hardware-result.json` e fallisce su timeout o mismatch.
 La sezione RAM aggiuntiva e il sorgente del test sono collegati dal CMake
 utente, senza modificare il linker generato da CubeMX.
 
@@ -138,9 +154,9 @@ Vedere [SPI_FRAMEBUFFER.md](../../docs/SPI_FRAMEBUFFER.md).
 Il primo PASS a 25 MHz non e' confermato dalla prova grafica prolungata.
 Configurazione della qualifica: prescaler 16, 12.5 MHz MEDIUM, 240 round eco e
 512 rettangoli via DMA. Dal 10 settembre 2026 il valore predefinito dei round e'
-8, per non ritardare l'avvio: va riportato a 240 per rieseguire questa qualifica.
+1, per non ritardare l'avvio: va riportato a 240 per rieseguire questa qualifica.
 Tre prove complete passano dopo upload/reset/reload.
-SDC resta a 40 ns come vincolo conservativo. Dettagli e comando -RequireStress
+SDC era a 40 ns durante questa qualifica; quello corrente è 80 ns. Dettagli e comando -RequireStress
 in [SPI_STRESS.md](../../docs/SPI_STRESS.md). Le sezioni precedenti che indicano
 25 MHz descrivono lo stato prima del test prolungato.
 
@@ -148,7 +164,7 @@ in [SPI_STRESS.md](../../docs/SPI_STRESS.md). Le sezioni precedenti che indicano
 ## Avvio uniforme
 
 LCD_BOOT_TESTS=0 lascia disabilitate demo e stress grafici. La prova font
-corrente abilita separatamente LCD_TEXT_DEMO=1 e quindi sostituisce il fondo
+corrente abilita separatamente LCD_FPGA_TEXT_DEMO=1 (LCD_TEXT_DEMO=0) e quindi sostituisce il fondo
 nero con il campione testuale dopo l'eco SPI. Demo e stress richiedono LCD_BOOT_TESTS=1
 in Core/Inc/spi_diag_config.h e nuovo caricamento. I comandi -RequireGraphics
 e -RequireStress controllano questa impostazione. Vedere SPI_FRAMEBUFFER.md
@@ -172,7 +188,7 @@ python ../../tools/generate_lcd_font.py `
 
 La sorgente e' distribuita sotto SIL OFL 1.1; attribuzione, checksum e testo
 della licenza sono in `../../third_party/terminus-font-4.49.1-master`.
-`LCD_TEXT_DEMO=1` mostra il campione corrente dopo il self-test SPI;
+`LCD_TEXT_DEMO=1` mostra il campione del prototipo CPU dopo il self-test SPI;
 `-RequireText` controlla via SWD che il rendering sia stato inviato. Riportare
 il flag a 0 per conservare lo schermo nero dopo l'avvio.
 
