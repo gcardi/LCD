@@ -48,7 +48,45 @@ module tb_text_renderer;
    for(row=0;row<24;row=row+1)
      if(framebuffer[(7+row)*480+4]!==16'hDEAD ||
         framebuffer[(7+row)*480+17]!==16'hDEAD)$fatal(1,"clip/mask edge");
-   $display("PASS: text_renderer 12x24 opaque glyph and unaligned burst masks");$finish;
+
+   // --- Riempimento B9: rettangolo disallineato rispetto ai gruppi da 16 ---
+   for(i=0;i<130560;i=i+1) framebuffer[i]=16'hDEAD;
+   kind=1;x=5;y=7;box_width=30;box_height=5;foreground=16'h07E0;
+   @(negedge clk);command_valid=1;wait(command_take);@(negedge clk);command_valid=0;
+   repeat(4)@(posedge clk);
+   for(row=0;row<5;row=row+1) for(column=0;column<30;column=column+1)
+     if(framebuffer[(7+row)*480+5+column]!==16'h07E0)
+       $fatal(1,"fill row=%0d col=%0d value=%h",row,column,
+              framebuffer[(7+row)*480+5+column]);
+   for(row=0;row<5;row=row+1)
+     if(framebuffer[(7+row)*480+4]!==16'hDEAD ||
+        framebuffer[(7+row)*480+35]!==16'hDEAD)$fatal(1,"fill bordo orizzontale");
+   if(framebuffer[6*480+5]!==16'hDEAD || framebuffer[12*480+5]!==16'hDEAD)
+     $fatal(1,"fill bordo verticale");
+
+   // --- Clipping: il rettangolo sborda a destra e in basso ---
+   for(i=0;i<130560;i=i+1) framebuffer[i]=16'hDEAD;
+   kind=1;x=470;y=268;box_width=30;box_height=10;foreground=16'hF81F;
+   @(negedge clk);command_valid=1;wait(command_take);@(negedge clk);command_valid=0;
+   repeat(4)@(posedge clk);
+   for(row=0;row<4;row=row+1) for(column=470;column<480;column=column+1)
+     if(framebuffer[(268+row)*480+column]!==16'hF81F)
+       $fatal(1,"clip row=%0d col=%0d value=%h",row,column,
+              framebuffer[(268+row)*480+column]);
+   // Sbordare a destra si vedrebbe come inizio della riga successiva sporcato.
+   for(row=269;row<272;row=row+1)
+     if(framebuffer[row*480]!==16'hDEAD)$fatal(1,"clip: sbordo a destra");
+   if(framebuffer[267*480+470]!==16'hDEAD)$fatal(1,"clip: sbordo in alto");
+
+   // --- Schermo intero, cioe' il caso LCD_Clear: 0 significa fino al bordo ---
+   for(i=0;i<130560;i=i+1) framebuffer[i]=16'hDEAD;
+   kind=1;x=0;y=0;box_width=0;box_height=0;foreground=16'h1234;
+   @(negedge clk);command_valid=1;wait(command_take);@(negedge clk);command_valid=0;
+   repeat(4)@(posedge clk);
+   for(i=0;i<130560;i=i+1)
+     if(framebuffer[i]!==16'h1234)$fatal(1,"clear: pixel %0d vale %h",i,framebuffer[i]);
+
+   $display("PASS: text_renderer glyph, and B9 fill unaligned, clipped and full screen");$finish;
  end
  initial begin #10000000;$fatal(1,"timeout");end
 endmodule

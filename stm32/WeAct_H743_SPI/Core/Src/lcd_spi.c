@@ -73,6 +73,23 @@ static int text_ready(void)
     return bad(11,1,0xC3,rx[1]);
 }
 
+// The shape queue is the text queue, so the wait is the same one; the poll
+// uses B9 rather than B8 because a fill touches no font and must stay usable
+// on a board whose User Flash image is missing or corrupt, where B8 answers E2.
+static int shape_ready(void)
+{
+    uint8_t tx[2]={0xB9,0},rx[2];
+    uint32_t start=HAL_GetTick();
+    do {
+        if(!exchange(tx,rx,2)) return 0;
+        if(rx[0]!=0xA5) return bad(16,0,0xA5,rx[0]);
+        if(rx[1]==0xC3) return 1;
+        if(rx[1]!=0) return bad(17,1,0xC3,rx[1]);
+        HAL_Delay(1);
+    } while(HAL_GetTick()-start<1000);
+    return bad(18,1,0xC3,rx[1]);
+}
+
 int LCD_DrawTextFPGA(uint16_t x,uint16_t y,uint16_t box_width,
                      uint16_t box_height,uint8_t font_id,uint8_t flags,
                      uint16_t foreground,uint16_t background,const char *utf8)
@@ -109,10 +126,22 @@ int LCD_DrawTextFPGA(uint16_t x,uint16_t y,uint16_t box_width,
     return text_ready();
 }
 
+// Tempo di sedici clear a schermo intero, in millisecondi. Sedici perche'
+// HAL_GetTick ha risoluzione di 1 ms e un singolo clear e' dello stesso ordine.
+volatile uint32_t g_lcd_clear_ms16;
+
 void LCD_FPGATextDemo_Run(void)
 {
     g_lcd_fpga_text_demo_state=1;
+    uint32_t clear_start=HAL_GetTick();
+    for(unsigned i=0;i<16;i++)
+        if(!LCD_Clear(0x0000)) {g_lcd_fpga_text_demo_state=3;return;}
+    g_lcd_clear_ms16=HAL_GetTick()-clear_start;
+    // Origine e dimensioni non multiple di 16 di proposito: se le maschere dei
+    // bordi fossero sbagliate il rettangolo verrebbe largo o stretto di qualche
+    // pixel, e il testo trasparente sopra lo rende evidente.
     if(!LCD_Clear(0x0000) ||
+       !LCD_FillRect(300,118,101,53,0x0010) ||
        !LCD_DrawTextFPGA(16,12,0,0,LCD_FONT_16X32,0,0x07FF,0,"Tang Nano 9K") ||
        !LCD_DrawTextFPGA(20,54,0,0,LCD_FONT_12X24,0,0xFFFF,0,
                          "STM32 -> FPGA @ 12.5 MHz") ||
@@ -122,6 +151,8 @@ void LCD_FPGATextDemo_Run(void)
                          0xFFE0,0,"Wrap automatico dentro un box stretto") ||
        !LCD_DrawTextFPGA(20,210,0,0,LCD_FONT_8X16,LCD_TEXT_TRANSPARENT,
                          0xFD20,0,"Font bitmap residenti nella User Flash") ||
+       !LCD_DrawTextFPGA(308,136,0,0,LCD_FONT_8X16,LCD_TEXT_TRANSPARENT,
+                         0xFFE0,0,"FILL B9") ||
        !LCD_DrawTextFPGA(430,236,50,32,LCD_FONT_16X32,0,0xF81F,0,"CLIP")) {
         g_lcd_fpga_text_demo_state=3;return;
     }
@@ -157,12 +188,31 @@ int LCD_WriteRect(uint16_t x, uint16_t y, uint16_t w, uint16_t h,
 int LCD_FillRect(uint16_t x, uint16_t y, uint16_t w, uint16_t h,
                  uint16_t color)
 {
+    // Same contract as before the FPGA gained B9: empty or off-screen
+    // rectangles are refused here rather than clipped, even though the
+    // renderer would clip them. What changed is the cost - one packet instead
+    // of one per row - and atomicity: the CRC is checked before anything is
+    // drawn, so a corrupted transfer now leaves the screen untouched.
     if(!w || !h || x>=480 || y>=272 || w>480-x || h>272-y) return 0;
-    uint16_t line[480];
-    for(unsigned i=0;i<w;i++) line[i]=color;
-    for(unsigned row=0;row<h;row++)
-        if(!LCD_WriteRect(x,(uint16_t)(y+row),w,1,line)) return 0;
-    return 1;
+    uint8_t tx[18]={0},rx[18];
+    tx[0]=0xB9;tx[2]=0;tx[3]=0;          // forma 0: rettangolo
+    tx[4]=(uint8_t)(x>>8);tx[5]=(uint8_t)x;
+    tx[6]=(uint8_t)(y>>8);tx[7]=(uint8_t)y;
+    tx[8]=(uint8_t)(w>>8);tx[9]=(uint8_t)w;
+    tx[10]=(uint8_t)(h>>8);tx[11]=(uint8_t)h;
+    tx[12]=(uint8_t)(color>>8);tx[13]=(uint8_t)color;
+    uint16_t crc=0xFFFF;
+    for(unsigned i=2;i<=13;i++) crc=crc16_byte(crc,tx[i]);
+    tx[14]=(uint8_t)(crc>>8);tx[15]=(uint8_t)crc;
+    tx[16]=0xA6;
+
+    if(!shape_ready() || !exchange(tx,rx,18)) return 0;
+    if(rx[0]!=0xA5) return bad(19,0,0xA5,rx[0]);
+    if(rx[1]!=0xC3) return bad(20,1,0xC3,rx[1]);
+    for(unsigned i=2;i<17;i++)
+        if(rx[i]!=tx[i-1]) return bad(21,i,tx[i-1],rx[i]);
+    if(rx[17]!=0xAC) return bad(22,17,0xAC,rx[17]);
+    return shape_ready();
 }
 
 int LCD_Clear(uint16_t color)

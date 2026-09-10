@@ -1,4 +1,5 @@
 param(
+    [ValidateSet('Debug', 'Release')][string]$Preset = 'Debug',
     [Parameter(Mandatory)][ValidatePattern('^[A-Za-z0-9]+$')][string]$SerialNumber,
     [switch]$ReadOnly,
     [switch]$RequireGraphics,
@@ -45,14 +46,14 @@ if(-not $ProgrammerPath) {
     else {$ProgrammerPath=(Get-ChildItem 'C:/ST/STM32CubeCLT_*/STM32CubeProgrammer/bin/STM32_Programmer_CLI.exe' -File | Sort-Object LastWriteTime -Descending | Select-Object -First 1).FullName}
 }
 if(-not $ProgrammerPath) {throw 'CubeProgrammer CLI non trovato'}
-$build=Join-Path $PSScriptRoot 'build/Debug'
+$build=Join-Path $PSScriptRoot "build/$Preset"
 New-Item -ItemType Directory -Force $build | Out-Null
 $resultPath=Join-Path $build 'hardware-result.json'
 if(Test-Path $resultPath) {Remove-Item -LiteralPath $resultPath}
 if(-not $ReadOnly) {
     & (Join-Path $repoRoot 'sim/run_spi_sim.ps1')
     & (Join-Path $repoRoot 'build.ps1') -Program
-    & (Join-Path $PSScriptRoot 'build.ps1') -Program -SerialNumber $SerialNumber -ProgrammerPath $ProgrammerPath
+    & (Join-Path $PSScriptRoot 'build.ps1') -Preset $Preset -Program -SerialNumber $SerialNumber -ProgrammerPath $ProgrammerPath
 }
 $elf=Join-Path $build 'WeAct_H743_SPI.elf'
 $symbols=& arm-none-eabi-nm $elf
