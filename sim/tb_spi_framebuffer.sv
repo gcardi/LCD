@@ -1,6 +1,7 @@
 `timescale 1ns/1ps
 module tb_spi_framebuffer;
- reg clk=0,rst=1,sck=0,cs=1,mosi=0,allow=0,restart=0,text_take=0;
+ reg clk=0,rst=1,sck=0,cs=1,mosi=0,allow=0,restart=0,text_take=0,text_enabled=1;
+ wire text_kind;
  always #6 clk=~clk;
  wire miso,oe,valid,take,text_valid; wire [20:0] address,addr;
  wire [255:0] pixels; wire [15:0] mask;
@@ -11,7 +12,7 @@ module tb_spi_framebuffer;
  SpiFramebuffer endpoint(.rst_n(rst),.sck(sck),.cs_n(cs),.mosi(mosi),
  .miso(miso),.miso_oe(oe),.clk(clk),.mem_rst_n(rst),.valid(valid),.take(take),
  .address(address),.pixels(pixels),.mask(mask),.text_clk(clk),.text_rst_n(rst),
- .text_enabled(1'b1),
+ .text_enabled(text_enabled),.text_kind(text_kind),
  .text_valid(text_valid),.text_take(text_take),.text_font_id(text_font),
  .text_flags(text_flags),.text_x(text_x),.text_y(text_y),.text_box_width(text_bw),
  .text_box_height(text_bh),.text_foreground(text_fg),.text_background(text_bg),
@@ -81,6 +82,28 @@ module tb_spi_framebuffer;
               r,endpoint.text_crc,endpoint.text_expected_crc,endpoint.text_invalid,text_length);
      cs=1;#100;
    end endtask
+ task shape_packet(input integer shape,ax,ay,bx,by,flags_value,
+                   input bit bad_crc,abort_packet,input [7:0] expected_status,expected_commit);
+   reg [7:0] bytes[0:17];reg [7:0] reply;reg [15:0] crc;integer k;
+   begin
+     bytes[0]=8'hB9;bytes[1]=0;bytes[2]=shape;bytes[3]=flags_value;
+     bytes[4]=ax>>8;bytes[5]=ax;bytes[6]=ay>>8;bytes[7]=ay;
+     bytes[8]=bx>>8;bytes[9]=bx;bytes[10]=by>>8;bytes[11]=by;
+     bytes[12]=8'hAB;bytes[13]=8'hCD;crc=16'hFFFF;
+     for(k=2;k<=13;k=k+1)crc=crc_byte(crc,bytes[k]);
+     bytes[14]=crc[15:8]^(bad_crc?8'h01:0);bytes[15]=crc[7:0];
+     bytes[16]=8'hA6;bytes[17]=0;
+     cs=0;#100;
+     for(k=0;k<(abort_packet?16:18);k=k+1)begin
+       byte_io(bytes[k],reply);
+       if(k==0 && reply!=8'hA5)$fatal(1,"shape first byte");
+       if(k==1 && reply!=expected_status)$fatal(1,"shape busy %h",reply);
+       if(k>=2 && k<=16 && reply!=bytes[k-1])$fatal(1,"shape echo");
+       if(k==17 && reply!=expected_commit)$fatal(1,"shape commit %h expected %h",reply,expected_commit);
+     end
+     cs=1;#300;
+   end
+ endtask
  initial begin
    #1;rst=0;#100;rst=1;#100;sck=1;#20;sck=0;#20;sck=1;#20;sck=0;
    wait(writes==8160 && !writing);#1000;
@@ -111,7 +134,31 @@ module tb_spi_framebuffer;
    if(r!=0)$fatal(1,"text queue did not report busy");
    @(negedge clk);text_take=1;@(negedge clk);text_take=0;wait(!text_valid);#200;
    text_packet(1,8'hE1);#300;if(text_valid)$fatal(1,"bad CRC committed");
-   $display("PASS: spi_framebuffer masks, bounds, busy, abort, CDC, restart and PSRAM beats");$finish;
+   // B9 line packet validation, including high bits before field truncation.
+   shape_packet(1,0,0,479,271,0,1,0,8'hC3,8'hE1);
+   if(text_valid)$fatal(1,"shape CRC committed");
+   shape_packet(1,0,0,480,271,0,0,0,8'hC3,8'hE1);
+   shape_packet(1,0,0,479,272,0,0,0,8'hC3,8'hE1);
+   shape_packet(1,512,0,479,271,0,0,0,8'hC3,8'hE1);
+   shape_packet(1,0,0,1024,0,0,0,0,8'hC3,8'hE1);
+   shape_packet(2,0,0,10,10,0,0,0,8'hC3,8'hE1);
+   shape_packet(1,0,0,10,10,1,0,0,8'hC3,8'hE1);
+   shape_packet(1,0,0,479,271,0,0,1,8'hC3,0);
+   if(text_valid)$fatal(1,"invalid/aborted line committed");
+   text_enabled=0;
+   shape_packet(1,479,271,0,0,0,0,0,8'hC3,8'hAC);
+   if(!text_valid || !text_kind || text_font!=1 || text_x!=479 || text_y!=271 ||
+      text_bw!=0 || text_bh!=0 || text_fg!=16'hABCD)$fatal(1,"line fields");
+   // A busy text poll must not change the pending shape's kind or fields.
+   text_enabled=1;
+   cs=0;#100;byte_io(8'hB8,r);byte_io(0,r);cs=1;#100;
+   if(r!=0 || !text_kind)$fatal(1,"busy poll changed pending kind");
+   shape_packet(0,5,7,12,24,0,0,0,0,8'hE1);
+   if(text_font!=1 || text_x!=479 || text_y!=271)$fatal(1,"busy shape overwritten");
+   @(negedge clk);text_take=1;@(negedge clk);text_take=0;wait(!text_valid);#200;
+   shape_packet(0,5,7,12,24,0,0,0,8'hC3,8'hAC);
+   if(!text_valid || text_font!=0 || !text_kind)$fatal(1,"fill regression");
+   $display("PASS: spi_framebuffer masks, bounds, busy, abort, CDC, B9 line/fill CRC and PSRAM beats");$finish;
  end
  initial begin #10000000;$fatal(1,"timeout");end
 endmodule

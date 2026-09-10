@@ -4,10 +4,9 @@
 module TextRenderer (
  input wire clk,rst_n,fonts_ready,
  input wire command_valid,output wire command_take,
- // 0 = testo con i font della User Flash, 1 = riempimento di un rettangolo.
- // Le due forme condividono coda, registri di comando e percorso di burst:
- // x, y, box_width, box_height e foreground sono gia' esattamente i campi che
- // servono a un rettangolo, quindi il fill non aggiunge nessun registro.
+ // kind 0 = testo; kind 1 = forma B9, font_id 0 fill / 1 linea.
+ // Testo e forme condividono coda, campi e percorso dei burst. Per le linee
+ // box_width/box_height contengono x1/y1, non dimensioni del riquadro.
  input wire command_kind,
  input wire [1:0] command_font_id,input wire [7:0] command_flags,
  input wire [8:0] command_x,input wire [8:0] command_y,
@@ -21,18 +20,31 @@ module TextRenderer (
  output reg [20:0] update_address,output reg [255:0] update_data,
  output reg [15:0] update_mask
 );
- localparam [3:0] IDLE=0,CHAR_ADDR=1,CHAR_WAIT=2,CHAR_CONSUME=3,
+ localparam [4:0] IDLE=0,CHAR_ADDR=1,CHAR_WAIT=2,CHAR_CONSUME=3,
                   PROCESS_CHAR=4,GLYPH_BASE=5,POSITION_CHAR=6,
                   FETCH_REQUEST=7,FETCH_WAIT=8,PREP_BURST=9,
                   BUILD_PIXEL=10,ISSUE_BURST=11,DONE=12,WAIT_CLEAR=13,
-                  FILL_PREP=14;
- reg [3:0] state;
- reg kind;
- reg [1:0] font_id;
- reg [7:0] flags;
+                  FILL_PREP=14,LINE_INIT=15,LINE_START=16,
+                  LINE_PIXEL=17,LINE_CHECK=18,LINE_FLUSH=19,LINE_RELEASE=20;
+ reg [4:0] state;
  reg [8:0] origin_x,pen_x,pen_y;
  reg [9:0] clip_right;
  reg [8:0] clip_bottom;
+ // Screen bounds: |dx| <= 479, |dy| <= 271; signed error needs 11 bits.
+ reg signed [10:0] line_dx,line_dy,line_error;
+ reg line_left,line_up,line_last;
+ wire signed [10:0] delta_x = $signed({1'b0,clip_right})-$signed({2'b00,pen_x});
+ wire signed [10:0] delta_y = $signed({2'b00,clip_bottom})-$signed({2'b00,pen_y});
+ wire signed [10:0] abs_dx = delta_x<0 ? -delta_x : delta_x;
+ wire signed [10:0] abs_dy = delta_y<0 ? -delta_y : delta_y;
+ wire signed [11:0] twice_error = $signed({line_error,1'b0});
+ wire line_step_x = twice_error >= line_dy;
+ wire line_step_y = twice_error <= line_dx;
+ wire [20:0] line_address = ({12'd0,pen_y}<<9)-({12'd0,pen_y}<<5)+
+                            {12'd0,pen_x[8:4],4'b0000};
+ reg kind;
+ reg [1:0] font_id;
+ reg [7:0] flags;
  reg [15:0] foreground,background;
  reg [5:0] font_width,font_height;
  reg row_bytes_two;
@@ -84,7 +96,7 @@ module TextRenderer (
  assign command_take = state==DONE;
  assign flash_request = state==FETCH_REQUEST && flash_ready;
  assign flash_address = glyph_byte_address[16:2];
- assign update_valid = state==ISSUE_BURST && update_mask!=0;
+ assign update_valid = (state==ISSUE_BURST || state==LINE_FLUSH) && update_mask!=0;
 
  always @(posedge clk or negedge rst_n) begin
    if(!rst_n) begin
@@ -95,6 +107,7 @@ module TextRenderer (
      decode_remaining<=0;glyph_index<=0;glyph_base<=0;glyph_row<=0;glyph_bits<=0;
      second_burst<=0;burst_x<=0;pixel_index<=0;update_address<=0;
      update_data<=0;update_mask<=0;row_visible<=0;kind<=0;
+     line_dx<=0;line_dy<=0;line_error<=0;line_left<=0;line_up<=0;line_last<=0;
    end else case(state)
      // Un riempimento non tocca la User Flash, quindi resta disponibile
      // anche quando i font mancano o non superano il CRC.
@@ -116,7 +129,11 @@ module TextRenderer (
          1:begin font_width<=12;font_height<=24;row_bytes_two<=1;end
          default:begin font_width<=16;font_height<=32;row_bytes_two<=1;end
        endcase
-       state<=command_kind?FILL_PREP:CHAR_ADDR;
+       if(command_kind && command_font_id==1) begin
+         // Reuse clipping registers for inclusive endpoint x1/y1.
+         clip_right<=command_box_width;clip_bottom<=command_box_height;
+         state<=LINE_INIT;
+       end else state<=command_kind?FILL_PREP:CHAR_ADDR;
      end
      CHAR_ADDR: begin
        if(byte_index>=length) begin
@@ -198,6 +215,36 @@ module TextRenderer (
        else glyph_bits<={flash_data[7:0],flash_data[15:8]};
        state<=PREP_BURST;
      end
+     LINE_INIT:begin
+       line_dx<=abs_dx;line_dy<=-abs_dy;line_error<=abs_dx-abs_dy;
+       line_left<=delta_x<0;line_up<=delta_y<0;line_last<=0;
+       state<=LINE_START;
+     end
+     LINE_START:begin
+       update_address<=line_address;update_data<={16{foreground}};
+       update_mask<=0;state<=LINE_PIXEL;
+     end
+     LINE_PIXEL:begin
+       update_mask<=update_mask | (16'h0001<<pen_x[3:0]);
+       if(pen_x==clip_right && pen_y==clip_bottom) begin
+         line_last<=1;state<=LINE_FLUSH;
+       end else begin
+         // Both decisions use the same old error, including exact ties.
+         line_error<=line_error+(line_step_x?line_dy:11'sd0)+
+                                  (line_step_y?line_dx:11'sd0);
+         if(line_step_x) pen_x<=line_left?pen_x-9'd1:pen_x+9'd1;
+         if(line_step_y) pen_y<=line_up?pen_y-9'd1:pen_y+9'd1;
+         state<=LINE_CHECK;
+       end
+     end
+     LINE_CHECK:begin
+       // Merge consecutive pixels in the same aligned burst/row.
+       // Otherwise hold payload stable until the memory consumer accepts it.
+       state<=line_address==update_address?LINE_PIXEL:LINE_FLUSH;
+     end
+     LINE_FLUSH:if(update_take)state<=LINE_RELEASE;
+     // TOP uses a four-phase CDC handshake: wait for acknowledge release.
+     LINE_RELEASE:if(!update_take)state<=line_last?DONE:LINE_START;
      FILL_PREP:begin
        row_visible<=pen_y<clip_bottom;
        update_address<=render_row_address+burst_x;

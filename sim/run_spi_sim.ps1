@@ -7,7 +7,7 @@ $root = Split-Path -Parent $PSScriptRoot
 . (Join-Path $root 'tools\Invoke-LoggedProcess.ps1')
 $build = Join-Path $PSScriptRoot 'build'
 New-Item -ItemType Directory -Force $build | Out-Null
-foreach ($top in @('tb_spi_slave', 'tb_spi_diagnostic', 'tb_spi_directions', 'tb_spi_framebuffer', 'tb_font_store', 'tb_text_renderer')) {
+foreach ($top in @('tb_spi_slave', 'tb_spi_diagnostic', 'tb_spi_directions', 'tb_spi_framebuffer', 'tb_font_store', 'tb_text_renderer', 'tb_line_renderer')) {
 $vvp = Join-Path $build ($top + '.vvp')
 $compileLog = Join-Path $build ($top + '_compile.log')
 $runLog = Join-Path $build ($top + '_run.log')

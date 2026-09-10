@@ -45,7 +45,9 @@ module SpiFramebuffer (
  wire text_commit_index = selected_text && index==(7'd19+text_length);
  // Il pacchetto forma e' a lunghezza fissa: 18 byte, commit all'indice 16.
  wire shape_commit_index = selected_shape && index==7'd16;
- wire shape_fields_valid = !text_invalid && text_x<480 && text_y<272;
+ wire shape_fields_valid = !text_invalid && text_x<480 && text_y<272 &&
+                           (text_font_id==0 ||
+                            (text_font_id==1 && text_box_width<480 && text_box_height<272));
  wire text_fields_valid = !text_invalid && text_font_id<=2 && text_flags[7:2]==0 &&
                           text_x<480 && text_y<272 && text_length<=64;
 
@@ -100,11 +102,12 @@ module SpiFramebuffer (
      text_background<=0;text_length<=0;text_kind<=0;
    end else if(push) begin
     // Il tipo si fissa sull'opcode, prima di qualunque campo.
-    if(index==0) begin
-      if(rx==8'hB8) text_kind<=0;
+    if(index==0 && text_available) begin
+      if(rx==8'hB8 && text_enabled2) text_kind<=0;
       if(rx==8'hB9) begin text_kind<=1;text_length<=0;end
     end
     if(selected_shape && accept_shape) case(index)
+       2:text_font_id<=rx[1:0]; // B9: 0 fill, 1 inclusive-endpoint line.
        3:text_flags<=rx;
        4:text_x[8]<=rx[0];5:text_x[7:0]<=rx;
        6:text_y[8]<=rx[0];7:text_y[7:0]<=rx;
@@ -190,7 +193,7 @@ module SpiFramebuffer (
      end
      if(selected_shape && accept_shape) begin
        if(index>=2 && index<=13) text_crc<=crc16_byte(text_crc,rx);
-       if(index==2 && rx!=0)text_invalid<=1;   // solo il rettangolo
+       if(index==2 && rx>1)text_invalid<=1;   // rettangolo o linea
        if(index==3 && rx!=0)text_invalid<=1;   // flags riservati
        if((index==4 || index==6 || index==10) && rx>1)text_invalid<=1;
        if(index==8 && rx>3)text_invalid<=1;

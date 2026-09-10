@@ -51,7 +51,7 @@ module tb_text_renderer;
 
    // --- Riempimento B9: rettangolo disallineato rispetto ai gruppi da 16 ---
    for(i=0;i<130560;i=i+1) framebuffer[i]=16'hDEAD;
-   kind=1;x=5;y=7;box_width=30;box_height=5;foreground=16'h07E0;
+   kind=1;font_id=0;x=5;y=7;box_width=30;box_height=5;foreground=16'h07E0;
    @(negedge clk);command_valid=1;wait(command_take);@(negedge clk);command_valid=0;
    repeat(4)@(posedge clk);
    for(row=0;row<5;row=row+1) for(column=0;column<30;column=column+1)
