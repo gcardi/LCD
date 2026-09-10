@@ -12,15 +12,18 @@ from pathlib import Path
 
 
 FLASH_BYTES = 304 * 64 * 4
-# Tre uscite per la stessa immagine, e non sono intercambiabili:
-#   .bin  immagine grezza, la vuole openFPGALoader in --user-flash;
-#   .fi   testo ASCII nel formato Gowin, lo vuole programmer_cli in --fiFile;
-#   .mem  parole esadecimali per il ramo SIMULATION di UserFlashReader.
-# Passare il .fi a openFPGALoader non da' errore: non ha un parser per quel
-# formato, scrive il testo byte per byte e la scheda si ritrova font non validi.
-# E' costato una diagnosi sbagliata il 10 settembre 2026, perche' il .fi occupa
-# circa quattro volte il payload e sopra i ~18 KB di font sfonda la User Flash,
-# il che sembrava un limite di capacita' condivisa col bitstream. Non lo era.
+# The image has one canonical form, the raw .bin, and two transcriptions:
+#   .bin  what openFPGALoader wants in --user-flash, and what everything else
+#         is derived from;
+#   .mem  hexadecimal words for the SIMULATION branch of UserFlashReader;
+#   .fi   Gowin's ASCII text, the only thing programmer_cli's --fiFile parses.
+#         Produced on demand by --fi-from, not kept on disk: see write_fi.
+# The two programmers do not accept each other's format, and neither complains
+# when given the wrong one. Handing the .fi to openFPGALoader cost a wrong
+# diagnosis on 10 September 2026: it writes the text byte for byte, so the fonts
+# came out invalid, and since the text runs about four times the payload it also
+# overflowed the User Flash past ~18 KB, which looked like a capacity limit
+# shared with the bitstream. It was not one.
 HEADER_BYTES = 64
 MAGIC = b"LCDF"
 VERSION = 1
@@ -147,15 +150,37 @@ def write_fi(path: Path, image: bytes) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("source_dir", type=Path)
-    parser.add_argument("output_dir", type=Path)
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("source_dir", type=Path, nargs="?",
+                        help="directory holding the Terminus BDF sources")
+    parser.add_argument("output_dir", type=Path, nargs="?",
+                        help="where to write the .bin, .mem and .json")
+    parser.add_argument("--fi-from", type=Path, metavar="IMAGE.bin",
+                        help="skip generation and transcribe an existing image "
+                             "into the Gowin .fi text that programmer_cli wants")
+    parser.add_argument("--fi-out", type=Path, metavar="OUT.fi",
+                        help="destination of --fi-from")
     args = parser.parse_args()
+
+    # The .fi is not a source file: it is a transcription of the image, so it is
+    # produced on demand next to the programmer that needs it rather than kept
+    # in the repository where it could go stale or be handed to the wrong tool.
+    if args.fi_from or args.fi_out:
+        if not (args.fi_from and args.fi_out):
+            parser.error("--fi-from and --fi-out go together")
+        image = args.fi_from.read_bytes()
+        if image[:4] != MAGIC:
+            parser.error(f"{args.fi_from} does not start with {MAGIC.decode()}")
+        write_fi(args.fi_out, image)
+        print(f"transcribed {len(image)} bytes into {args.fi_out}")
+        return
+
+    if not (args.source_dir and args.output_dir):
+        parser.error("source_dir and output_dir are required")
     args.output_dir.mkdir(parents=True, exist_ok=True)
     image, manifest = build_image(args.source_dir)
     (args.output_dir / "user_flash_fonts.bin").write_bytes(image)
     write_mem(args.output_dir / "user_flash_fonts.mem", image)
-    write_fi(args.output_dir / "user_flash_fonts.fi", image)
     (args.output_dir / "user_flash_fonts.json").write_text(
         json.dumps(manifest, indent=2) + "\n", encoding="ascii", newline="\n")
     print(f"generated {len(image)} bytes; {FLASH_BYTES-len(image)} bytes free")

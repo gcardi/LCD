@@ -13,8 +13,10 @@ l'interfaccia di burst mascherato già esistente. Il comando SPI è l'opcode
 I font sono tre Terminus a cella fissa (8x16, 12x24, 16x32), 196 glifi
 ciascuno: ASCII stampabile, Latin-1, euro e quattro frecce. Occupano 25.152 dei
 77.824 byte della User Flash. `tools/generate_user_flash_fonts.py` li ricava in
-modo riproducibile dai BDF sotto `third_party` (SIL OFL 1.1) ed emette `.fi`,
-`.mem`, `.bin` e un manifest JSON.
+modo riproducibile dai BDF sotto `third_party` (SIL OFL 1.1) ed emette il
+`.bin`, il `.mem` per le simulazioni e un manifest JSON. Il `.fi` di Gowin non
+e' versionato: lo trascrive `program_tang_nano_flash.ps1` quando serve, cosi'
+c'e' un solo file dei font e non se ne puo' passare uno sbagliato.
 
 Il 16x32 è stato tolto e rimesso il 10 settembre 2026: sembrava non entrare in
 flash accanto al bitstream, ma la misura che lo diceva era viziata dal formato

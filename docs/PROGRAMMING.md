@@ -65,9 +65,12 @@ Per rendere persistenti sia il bitstream sia i tre font della User Flash:
 .\program_tang_nano_flash.ps1
 ```
 
-Questo passa `impl/pnr/LCD.fs` e i font insieme. Con `-UseGowinProgrammer` usa
-l'operazione Gowin 6 (`embFlash Erase,Program,Verify`) e il file `.fi`;
-altrimenti openFPGALoader e il file `.bin`, che non sono intercambiabili.
+Questo passa `impl/pnr/LCD.fs` e i font insieme, e con `-UseGowinProgrammer`
+usa l'operazione Gowin 6 (`embFlash Erase,Program,Verify`) invece di
+openFPGALoader. In entrambi i casi il file dei font e' `user_flash_fonts.bin`:
+lo script controlla che cominci per `LCDF` prima di scrivere, e per il percorso
+Gowin ne trascrive un `.fi` temporaneo, perche' `programmer_cli` legge solo
+quello.
 Il build imposta `-bit_security 0`, necessario per consentire la verifica della
 Embedded Flash durante lo sviluppo. La compressione del bitstream si disattiva
 con `.\build.ps1 -NoCompress`, ma non serve a superare la verifica: provata il
@@ -117,8 +120,11 @@ entrambi i file.
 Per rimettere in funzione la scheda subito, senza aspettare,
 `program_tang_nano_sram.ps1` la configura in pochi secondi in modo volatile.
 
-Gli indirizzi del `.fi` sono esadecimali senza prefisso, e il generatore emette
-anche `.mem`, `.bin` e un manifest JSON.
+Il generatore emette `user_flash_fonts.bin`, il `.mem` per le simulazioni e un
+manifest JSON. Il `.fi` non c'e' piu' fra i file versionati: e' una
+trascrizione dell'immagine, non un sorgente, e lo script se lo produce quando
+serve con `--fi-from`. Gli indirizzi al suo interno sono esadecimali senza
+prefisso.
 
 ## Embedded Flash e User Flash sono lo stesso array
 
@@ -159,7 +165,8 @@ openFPGALoader -b tangnano9k impl\pnr\LCD.fs
 ```
 
 Il file dei font da passare è **`user_flash_fonts.bin`**, l'immagine binaria
-grezza. Passare `user_flash_fonts.fi` compila e stampa pure `CRC check:
+grezza — ed è l'unico artefatto dei font versionato, proprio perché non ci sia
+un secondo file da sbagliare. Passare un `.fi` stampa pure `CRC check:
 Success`, ma non funziona: openFPGALoader non ha un parser per il formato `.fi`
 di Gowin — nel binario esistono solo `FsParser` e `RawParser` — e scrive il file
 byte per byte così com'è. Il `.fi` è testo ASCII che comincia con dieci righe
@@ -175,6 +182,35 @@ verificarla resta il CRC-32 che `FontStore` calcola a runtime.
 Vale la pena notare che con lo stesso comando il programmer stampa due barre di
 avanzamento distinte, una per il bitstream e una molto più breve per la User
 Flash: se la seconda manca, i font non sono stati scritti.
+
+## Un solo file dei font, e perché
+
+I due programmatori vogliono formati diversi e nessuno dei due si accorge di
+ricevere quello sbagliato: scrivono e basta, e il guasto si manifesta soltanto
+come font non validi a bordo. Per non lasciare la scelta a chi programma, nel
+repository c'è **un solo artefatto dei font**, `fonts/user_flash_fonts.bin`, e
+il `.fi` per Gowin viene trascritto al volo in un file temporaneo:
+
+```powershell
+python .\tools\generate_user_flash_fonts.py --fi-from .\fonts\user_flash_fonts.bin --fi-out out.fi
+```
+
+La trascrizione è deterministica e verificata byte per byte contro il `.fi` che
+era versionato prima. In più, `program_tang_nano_flash.ps1` controlla che
+l'immagine cominci per `LCDF` prima di scrivere: è lo stesso controllo che
+`FontStore` fa a bordo, ma prima del danno anziché dopo.
+
+Che `programmer_cli` non possa mangiare il binario è accertato dentro
+`JTAGLoading.exe`, il modulo che fa il lavoro: espone una classe
+`UserFlashFile` con un attributo `comments`, un parser a righe (`readlines`,
+`startswith`) e il riconoscimento della riga `//File Format`. È un parser
+ASCII. La riga `//File Format: Hex` ha come alternativa `Bin`, che però non è
+binario grezzo: sono i 32 bit scritti come 32 caratteri `0` e `1`.
+
+Attenzione infine a una conseguenza del cambio di driver: con il WinUSB di
+Zadig installato, `programmer_cli` non fallisce con un errore ma **resta
+appeso**, anche solo per leggere i codici del dispositivo. Se succede, il
+driver è quello sbagliato per lui.
 
 ## Nota su utilizzo di Zadig
 

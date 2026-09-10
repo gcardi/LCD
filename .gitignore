@@ -22,6 +22,9 @@
 # ...tranne l'immagine font: e' il file che openFPGALoader vuole in
 # --user-flash, quindi va versionata come il .fi e il .mem.
 !/fonts/user_flash_fonts.bin
+# Il .fi e' una trascrizione dell'immagine, non un sorgente: lo genera
+# program_tang_nano_flash.ps1 in un temporaneo quando serve a Gowin.
+*.fi
 
 # Simulation: build artefacts, and pre-fix sources that run_sim.ps1 regenerates
 # from git rather than keeping a second divergent copy of them here.
