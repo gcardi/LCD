@@ -1,4 +1,4 @@
-# Collaudo prolungato SPI e grafica — 9 settembre 2026
+# Collaudo prolungato SPI e grafica â€” 9 settembre 2026
 
 ## Esito
 

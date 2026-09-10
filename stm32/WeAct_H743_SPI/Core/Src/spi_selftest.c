@@ -32,6 +32,7 @@ static void reset_transaction_after_config(void)
     io.Mode=GPIO_MODE_AF_PP;io.Alternate=GPIO_AF5_SPI2;io.Speed=GPIO_SPEED_FREQ_MEDIUM;
     HAL_GPIO_Init(GPIOB,&io);
 }
+#if SPI_GPIO_PROBE
 static void probe_gpio(void)
 {
     GPIO_InitTypeDef io = {0};
@@ -62,6 +63,7 @@ static void probe_gpio(void)
     io.Pull=GPIO_NOPULL; io.Speed=GPIO_SPEED_FREQ_MEDIUM;
     io.Alternate=GPIO_AF5_SPI2; HAL_GPIO_Init(GPIOB,&io);
 }
+#endif
 
 void HAL_SPI_TxRxCpltCallback(SPI_HandleTypeDef *hspi)
 {
@@ -92,6 +94,47 @@ int SPI_Exchange_DMA(const uint8_t *send,uint8_t *receive,uint16_t length)
     __DSB();memcpy(receive,rx,length);return 1;
 }
 
+// Readiness handshake over the existing link, in place of a blind delay.
+//
+// Only B7 and B8 are opcodes; any other leading byte takes the plain echo path,
+// which answers A5 and then echoes the previous byte. An unconfigured FPGA
+// cannot produce that: its pins are inputs with weak pull-ups, so MISO reads FF.
+// Matching the echo therefore proves the device is configured, its PLLs are
+// locked and the SPI slave is running, which a fixed HAL_Delay only assumed.
+static int fpga_answers(void)
+{
+    // 0x00 is deliberately not an opcode, so this probe draws nothing.
+    static const uint8_t probe[3] = {0x00, 0x5A, 0xC3};
+    uint8_t reply[3] = {0};
+    HAL_GPIO_WritePin(FPGA_CS_GPIO_Port, FPGA_CS_Pin, GPIO_PIN_RESET);
+    HAL_Delay(1);
+    int ok = SPI_Exchange_DMA(probe, reply, sizeof(probe));
+    HAL_Delay(1);
+    HAL_GPIO_WritePin(FPGA_CS_GPIO_Port, FPGA_CS_Pin, GPIO_PIN_SET);
+    if(!ok) return 0;
+    return reply[0]==0xA5 && reply[1]==probe[0] && reply[2]==probe[1];
+}
+
+int SPI_Setup(void)
+{
+    __HAL_RCC_D2SRAM1_CLK_ENABLE();
+    uint32_t start = HAL_GetTick();
+    uint32_t attempts = 0;
+    HAL_GPIO_WritePin(FPGA_CS_GPIO_Port, FPGA_CS_Pin, GPIO_PIN_SET);
+    int ready = 0;
+    do {
+        // The two SCK pulses suppress the anomaly seen after an FPGA load, and
+        // must precede the first real transaction. Repeating them is harmless
+        // and covers an FPGA that finished configuring only after the first try.
+        reset_transaction_after_config();
+        attempts++;
+        ready = fpga_answers();
+    } while(!ready && HAL_GetTick()-start < SPI_SETUP_TIMEOUT_MS);
+    g_spi_test.ready_ms = HAL_GetTick()-start;
+    g_spi_test.ready_attempts = attempts;
+    return ready;
+}
+
 void SPI_SelfTest_Run(void)
 {
 #if SPI_DIAG_MATRIX
@@ -99,16 +142,18 @@ void SPI_SelfTest_Run(void)
     return;
 #endif
     static const uint16_t lengths[] = {1, 2, 17, 257, 4097};
-    __HAL_RCC_D2SRAM1_CLK_ENABLE();
+    // SPI_Setup() has already deselected, pulsed SCK and waited for the FPGA;
+    // its measurements are preserved here rather than overwritten.
+    uint32_t ready_ms=g_spi_test.ready_ms, ready_attempts=g_spi_test.ready_attempts;
     g_spi_test = (SpiTestResult){.magic=0x53504954, .version=1, .state=1,
         .first_bad_index=0xFFFFFFFF,
+        .ready_ms=ready_ms, .ready_attempts=ready_attempts,
         .sck_hz=HAL_RCCEx_GetPeriphCLKFreq(RCC_PERIPHCLK_SPI2) /
             (2u << (hspi2.Init.BaudRatePrescaler >> SPI_CFG1_MBR_Pos))};
     uint32_t start=HAL_GetTick();
-    HAL_GPIO_WritePin(FPGA_CS_GPIO_Port, FPGA_CS_Pin, GPIO_PIN_SET);
-    HAL_Delay(100); // FPGA configuration/PLL startup and initial CS reset.
-    reset_transaction_after_config();
+#if SPI_GPIO_PROBE
     probe_gpio();
+#endif
     for(uint32_t round=0;round<SPI_SELFTEST_ROUNDS;round++) {
         for(uint32_t t=0;t<sizeof(lengths)/sizeof(lengths[0]);t++) {
             uint16_t length=lengths[t];

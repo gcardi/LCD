@@ -48,6 +48,38 @@ Rimossa `src/framebuffer_fifo/`: era l'IP Gowin già sostituito da
 `FramebufferFifo.sv`. Rebuild dopo la rimozione: stessi Fmax, nessuna
 differenza.
 
+### Avvio: SPI_Setup() e attesa adattiva della FPGA
+
+La preparazione del collegamento è uscita da `SPI_SelfTest_Run()` ed è ora
+`SPI_Setup()`, chiamata per prima in `main()`. Fa le tre cose che servono sempre:
+deseleziona, emette i due impulsi SCK che sopprimono l'anomalia GPIO dopo il
+caricamento della FPGA, e **aspetta che la FPGA risponda davvero** invece di
+fidarsi di un `HAL_Delay(100)` alla cieca.
+
+L'attesa sfrutta una proprietà del protocollo: solo `B7` e `B8` sono opcode,
+quindi un primo byte qualunque, qui `00`, finisce nel percorso di eco, che
+risponde `A5` seguito dall'eco del byte precedente. Una FPGA non configurata non
+può produrre quella sequenza, perché i suoi pin sono ingressi con pull-up deboli
+e MISO si legge `FF`. Far tornare l'eco dimostra quindi configurazione avvenuta,
+PLL agganciati e slave SPI in funzione. Il ciclo ripete impulsi e sonda fino a
+`SPI_SETUP_TIMEOUT_MS`, cioè 2 secondi.
+
+Due campi nuovi in coda a `SpiTestResult`, `ready_ms` e `ready_attempts`,
+registrano quanto è costata l'attesa; il runner li legge (56 byte invece di 48,
+la parte iniziale è invariata). Misura sul banco: **12 ms e un solo tentativo**,
+cioè la FPGA era già pronta all'arrivo della MCU.
+
+La prova GPIO è diventata opzionale, `SPI_GPIO_PROBE`, perché costa circa 790 ms
+misurati procedendo un bit alla volta con `HAL_Delay(1)`. Resta indispensabile
+per diagnosticare, ed è quella che ha risolto il guasto del 10 settembre, quindi
+`test-hardware.ps1` la pretende e rifiuta di partire senza.
+
+Bilancio dell'avvio, misurato: **8.821 ms all'origine, 1.165 dopo la riduzione
+dei round, 45 adesso** — 12 ms di attesa FPGA più 33 di verifica eco. Il round
+di eco è rimasto di proposito: `g_spi_test.state = 2` deve restare un verdetto
+dimostrato, non un'assegnazione, perché è ciò che impedisce di disegnare su un
+collegamento rotto e che il 10 settembre ha reso immediata la diagnosi.
+
 ### Punti aperti
 
 - ~~La scheda ha in Embedded Flash un bitstream più vecchio di quello su disco.~~

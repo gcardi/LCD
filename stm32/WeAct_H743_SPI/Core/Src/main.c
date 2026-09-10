@@ -99,6 +99,8 @@ int main(void)
   MX_DMA_Init();
   MX_SPI2_Init();
   /* USER CODE BEGIN 2 */
+  // Bring up the link and wait for the FPGA before anything else touches SPI.
+  SPI_Setup();
   SPI_SelfTest_Run();
 #if LCD_TEXT_DEMO
   if (g_spi_test.state == 2) LCD_TextDemo_Run();

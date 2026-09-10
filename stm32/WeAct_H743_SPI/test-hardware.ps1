@@ -24,6 +24,11 @@ if($RequireFPGAText -and
    (Get-Content (Join-Path $PSScriptRoot 'Core/Inc/spi_diag_config.h') -Raw) -match '#define LCD_FPGA_TEXT_DEMO 0') {
     throw 'Demo testo FPGA disabilitata: impostare LCD_FPGA_TEXT_DEMO 1 in Core/Inc/spi_diag_config.h e ricompilare/caricare.'
 }
+# Il gate finale pretende gpio_probe.all_match, ma la prova GPIO costa ~800 ms
+# ed e' disattivabile: senza di essa il collaudo fallirebbe senza spiegazione.
+if((Get-Content (Join-Path $PSScriptRoot 'Core/Inc/spi_diag_config.h') -Raw) -match '#define SPI_GPIO_PROBE 0') {
+    throw 'Prova GPIO disabilitata: impostare SPI_GPIO_PROBE 1 in Core/Inc/spi_diag_config.h e ricompilare/caricare; rimetterlo a 0 per un avvio rapido.'
+}
 # -RequireStress pretende oltre 1.000.000 di byte di eco e ogni round ne vale
 # 4374, quindi servono almeno 229 round. Va detto prima di compilare e caricare.
 if($RequireStress) {
@@ -59,10 +64,10 @@ $dump=Join-Path $build 'hardware-result.bin'
 $timer=[Diagnostics.Stopwatch]::StartNew()
 do {
     if(Test-Path $dump) {Remove-Item -LiteralPath $dump}
-    Invoke-LoggedProcess -FilePath $ProgrammerPath -Arguments @('-c','port=SWD',"sn=$SerialNumber",'mode=HOTPLUG','freq=1000','-u',$address,'48',$dump) -LogPath (Join-Path $build 'hardware-read.log') -TimeoutSeconds $TimeoutSeconds
+    Invoke-LoggedProcess -FilePath $ProgrammerPath -Arguments @('-c','port=SWD',"sn=$SerialNumber",'mode=HOTPLUG','freq=1000','-u',$address,'56',$dump) -LogPath (Join-Path $build 'hardware-read.log') -TimeoutSeconds $TimeoutSeconds
     $bytes=[IO.File]::ReadAllBytes($dump)
-    if($bytes.Length -ne 48) {throw 'Dump risultato troncato'}
-    $names=@('magic','version','state','transfers','checked_bytes','mismatches','first_bad_index','expected','actual','hal_error','elapsed_ms','sck_hz')
+    if($bytes.Length -ne 56) {throw 'Dump risultato troncato'}
+    $names=@('magic','version','state','transfers','checked_bytes','mismatches','first_bad_index','expected','actual','hal_error','elapsed_ms','sck_hz','ready_ms','ready_attempts')
     $result=[ordered]@{}
     for($i=0;$i -lt $names.Count;$i++) {$result[$names[$i]]=[BitConverter]::ToUInt32($bytes,4*$i)}
     if($result.magic -eq 0x53504954 -and $result.version -eq 1 -and $result.state -in @(2,3)) {break}
