@@ -5,7 +5,7 @@ Tang Nano 9K.
 
 Il progetto inizializza la PSRAM integrata con un frame buffer RGB565 nero, lo
 legge a burst attraverso una FIFO dual-clock e genera i segnali di timing del
-display. Tramite SPI può aggiornare rettangoli o renderizzare testo usando due
+display. Tramite SPI può aggiornare rettangoli o renderizzare testo usando tre
 font bitmap residenti nella User Flash. Pattern diagnostici e barre colore
 restano disponibili nei test.
 
@@ -37,6 +37,26 @@ e degli accessi a burst nel frame buffer.
 - `sim/`: testbench di risincronizzazione del frame e prove negative;
 - `src/gowin_rpll/`, `src/psram_memory_interface_hs/`: IP generati da Gowin EDA
   per i due PLL e per il controller PSRAM;
+
+## Strumenti necessari
+
+| Strumento | A cosa serve | Dove |
+|---|---|---|
+| **Gowin EDA** | sintesi e place-and-route | installazione locale, cercata sotto `C:\Program Files\Gowin` |
+| **oss-cad-suite** | `openFPGALoader` per programmare, Icarus Verilog per simulare | <https://github.com/YosysHQ/oss-cad-suite-build/releases> |
+| **Python 3** | generazione dei font e trascrizione del `.fi` | qualunque installazione nel PATH |
+| STM32CubeCLT | build e caricamento del firmware STM32, letture SWD | solo per la parte MCU |
+
+`oss-cad-suite` va scompattata e la sua `bin` resa raggiungibile; qui sta in
+`C:\oss-cad-suite\bin`. Serve inoltre che l'interfaccia 0 del cavo JTAG abbia
+il driver **WinUSB**, messo con Zadig: senza, `openFPGALoader` non vede la
+scheda. Procedura in [PROGRAMMING.md](docs/PROGRAMMING.md).
+
+**Apicula non serve.** Il flusso di sintesi qui è quello Gowin, e di
+oss-cad-suite si usano soltanto `openFPGALoader` e Icarus Verilog. Apicula,
+Yosys e nextpnr-gowin servirebbero solo per un flusso interamente open-source,
+che questo progetto non usa: il controller PSRAM è un IP Gowin e andrebbe
+prima sostituito con un'implementazione compatibile.
 
 ## Build e programmazione
 
@@ -110,6 +130,23 @@ con `-TimeoutSeconds`; resta attivo anche un timeout di 200 ms simulati.
 
 Misure del raster, risultati e limiti della verifica sono in
 [VERIFICATION.md](docs/VERIFICATION.md).
+
+## Documentazione
+
+| Documento | Contenuto |
+|---|---|
+| [GRAPHICS_COMMANDS.md](docs/GRAPHICS_COMMANDS.md) | **elenco completo dei comandi grafici**: i due opcode SPI, l'API C dell'STM32, i byte di stato e ciò che non esiste |
+| [PROGRAMMING.md](docs/PROGRAMMING.md) | come si programma la scheda, quale programmatore funziona e perché, driver USB, trappole della flash |
+| [VERIFICATION.md](docs/VERIFICATION.md) | comandi di verifica riproducibili, misure del raster, limiti di ciò che i test dimostrano |
+| [SPI_SLAVE.md](docs/SPI_SLAVE.md) | il trasporto SPI mode 0 in `SpiSlave.sv`, indipendente dal protocollo |
+| [SPI_FRAMEBUFFER.md](docs/SPI_FRAMEBUFFER.md) | protocollo dell'opcode `B7` byte per byte, arbitraggio PSRAM e CDC, diario delle prove |
+| [SPI_TEXT.md](docs/SPI_TEXT.md) | protocollo dell'opcode `B8`, formato dei font in User Flash |
+| [SPI_DIAGNOSTIC_RESULTS.md](docs/SPI_DIAGNOSTIC_RESULTS.md) | diagnosi dei fronti che ha portato a 12.5 MHz con GPIO `MEDIUM` |
+| [SPI_STRESS.md](docs/SPI_STRESS.md) | qualifica prolungata del collegamento, e perché 25 MHz non passa |
+| [SPI_PERFORMANCE.md](docs/SPI_PERFORMANCE.md) | cronologia della salita in frequenza con GPIO `VERY_HIGH`; non è la configurazione attuale |
+| [LVGL_IMPL.md](docs/LVGL_IMPL.md) | studio speculativo su un controller grafico per LVGL; non descrive codice esistente |
+| [RIPRESA.md](docs/RIPRESA.md) | punto di ripresa del lavoro: stato corrente, verifiche superate, punti ancora aperti |
+| [README STM32](stm32/WeAct_H743_SPI/README.md) | cablaggio, firmware, comando unico di build, upload e collaudo |
 
 ## Sviluppi futuri
 

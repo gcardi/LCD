@@ -66,8 +66,10 @@ python tools\generate_user_flash_fonts.py third_party\terminus-font-4.49.1-maste
 .\program_tang_nano_flash.ps1
 ```
 
-L’ultima operazione programma e verifica sia la configurazione FPGA nella
-Embedded Flash sia i font nella User Flash. Per i normali aggiornamenti
+L’ultima operazione programma sia la configurazione FPGA nella Embedded Flash
+sia i font nella User Flash. Non li verifica: la User Flash non viene riletta
+da nessuno, e l’unica prova che i font siano buoni è il CRC-32 che `FontStore`
+calcola a runtime. Vedi [PROGRAMMING.md](PROGRAMMING.md). Per i normali aggiornamenti
 volatili del solo bitstream resta disponibile `program_tang_nano_sram.ps1`.
 
 Il test hardware completo, incluso lo stato finale del renderer FPGA, è:

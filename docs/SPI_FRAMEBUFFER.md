@@ -23,16 +23,11 @@ Per provarli impostare LCD_BOOT_TESTS=1 in spi_diag_config.h e ricompilare/caric
 riportare a 0 per l'avvio uniforme. Il runner rifiuta -RequireGraphics/-RequireStress
 se i test grafici sono disabilitati nella configurazione locale.
 
-| Livello | Operazione implementata |
-|---|---|
-| SPI | B7 00: verifica spazio nella coda, ritorna A5 e C3 oppure 00 |
-| SPI | B7 + indirizzo + maschera + 16 pixel + 5A: scrittura di un burst mascherato; dummy finale per leggere AC/E1 |
-| SPI diagnostico | Eco A5, poi byte precedente, con opcode iniziale diverso da B7 |
-| API STM32 | LCD_WriteRect(x,y,w,h,pixels): rettangolo di pixel RGB565, anche non allineato |
-| API STM32 | LCD_FillRect(x,y,w,h,color): riempimento uniforme RGB565 |
-| API STM32 | LCD_Clear(color): riempimento uniforme di tutto il display 480x272 |
-| API STM32 | LCD_DrawCodepoint(...): glifo opaco fixed 12x24 RGB565 |
-| API STM32 | LCD_DrawText(...): stringa UTF-8 fixed 12x24, anche multilinea |
+L'elenco completo e aggiornato di tutto cio' che si puo' disegnare, opcode SPI
+e API STM32, sta in **[GRAPHICS_COMMANDS.md](GRAPHICS_COMMANDS.md)**: la tabella
+che stava qui e' stata spostata li' per non avere due elenchi da tenere
+allineati. Questo documento resta il riferimento del protocollo `B7` byte per
+byte, piu' il diario delle prove al banco.
 
 Il comando di scrittura usa un indirizzo lineare allineato a 16 pixel. Coordinate,
 righe e bordi del rettangolo vengono gestiti dalla funzione STM32.
@@ -52,6 +47,10 @@ if (!LCD_FillRect(20, 30, 100, 60, 0xF800)) { /* errore: rettangolo rosso */ }
 Con `LCD_TEXT_DEMO=1`, la prova corrente chiama clear e testo automaticamente.
 Riportandolo a 0 nessuna primitiva grafica viene chiamata all'avvio.
 LCD_Demo_Run e LCD_Stress_Run restano programmi di collaudo separati.
+
+Nota di cronologia: il paragrafo che segue descrive il prototipo testo lato
+CPU, scritto prima che il rendering passasse alla FPGA. Resta valido per
+`lcd_text.h`, ma la via da usare oggi e' `LCD_DrawTextFPGA` con l'opcode `B8`.
 
 Il prototipo testo usa una tabella 12x24 nella flash interna STM32: 196 glifi,
 9408 byte bitmap, ASCII stampabile, Latin-1, euro e frecce. `LCD_DrawText`
