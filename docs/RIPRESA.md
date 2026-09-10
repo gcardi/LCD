@@ -5,16 +5,17 @@
 Il rendering del testo è passato dall'STM32 alla FPGA. Tre moduli nuovi:
 `src/UserFlashReader.sv` incapsula il primitivo `FLASH608K` in una lettura a
 word di sola lettura; `src/FontStore.sv` valida l'immagine (magic `LCDF`,
-versione, lunghezza, CRC-32 sui 25.152 byte) e poi espone le word ai client;
+versione, lunghezza, CRC-32 sui 12.608 byte) e poi espone le word ai client;
 `src/TextRenderer.sv` decodifica UTF-8 e disegna a cella fissa sopra
 l'interfaccia di burst mascherato già esistente. Il comando SPI è l'opcode
 `B8`, documentato in `SPI_TEXT.md` con pacchetto, CRC16 e byte di stato.
 
-I font sono tre Terminus a cella fissa (8x16, 12x24, 16x32), 196 glifi
-ciascuno: ASCII stampabile, Latin-1, euro e quattro frecce. Occupano 25.152 dei
-77.824 byte della User Flash. `tools/generate_user_flash_fonts.py` li ricava in
-modo riproducibile dai BDF sotto `third_party` (SIL OFL 1.1) ed emette `.fi`,
-`.mem`, `.bin` e un manifest JSON.
+I font sono due Terminus a cella fissa (8x16 e 12x24), 196 glifi ciascuno:
+ASCII stampabile, Latin-1, euro e quattro frecce. Occupano 12.608 byte.
+`tools/generate_user_flash_fonts.py` li ricava in modo riproducibile dai BDF
+sotto `third_party` (SIL OFL 1.1) ed emette `.fi`, `.mem`, `.bin` e un manifest
+JSON. Il 16x32 c'era ed è stato tolto: tutti e tre facevano 25.152 byte, troppi
+per stare in flash accanto al bitstream (vedi `SPI_TEXT.md`).
 
 Verifiche superate:
 
@@ -121,16 +122,19 @@ collegamento rotto e che il 10 settembre ha reso immediata la diagnosi.
   L'accertamento è asimmetrico, ed è la cosa utile scoperta quel giorno. La
   **User Flash si verifica a runtime**, senza togliere corrente: si configura la
   logica da SRAM, si resetta la MCU e si guarda il testo, perché `FontStore`
-  verifica il CRC-32 dei 25.152 byte prima di accettare comandi, e
+  verifica il CRC-32 dei 12.608 byte prima di accettare comandi, e
   `g_lcd_error.phase = 11` segnala l'immagine non valida. Il **bitstream** invece
   richiede un ciclo di alimentazione: subito dopo la programmazione il
   dispositivo resta non configurato e leggere i codici non prova nulla.
 
-  Non è ancora spiegato perché la verifica fallisca sempre, né perché la
-  scrittura riesca solo a volte. Escluse con prove: la compressione del
-  bitstream, la presenza dei font e la dimensione dell'immagine combinata
-  (fallisce anche il solo bitstream), e le frequenze JTAG più basse, che fanno
-  crashare `programmer_cli` durante la cancellazione.
+  Non è ancora spiegato perché la verifica fallisca sempre. Il perché la
+  scrittura riuscisse solo a volte invece ora si sa, ed è quello che smentisce
+  una riga che stava qui: **la dimensione dell'immagine combinata non era
+  esclusa affatto, era la causa.** Bitstream e User Flash condividono l'array e
+  insieme sfondavano la capacità; con i font scesi a 12.608 byte l'avvio da
+  flash è riproducibile. Restano escluse con prove la compressione del
+  bitstream e le frequenze JTAG più basse, che fanno crashare `programmer_cli`
+  durante la cancellazione.
 - **`programmer_cli` non parte se l'ambiente definisce `PYTHONIOENCODING`.** È
   un eseguibile Python congelato e muore con `0xC0000409` e
   `LookupError: unknown encoding: utf-8:surrogateescape` prima di toccare la

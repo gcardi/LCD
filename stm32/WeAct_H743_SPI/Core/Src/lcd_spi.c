@@ -80,7 +80,7 @@ int LCD_DrawTextFPGA(uint16_t x,uint16_t y,uint16_t box_width,
     uint8_t tx[85]={0},rx[85];
     unsigned length=0;
     if(!utf8 || x>=480 || y>=272 || box_width>480 || box_height>272 ||
-       font_id>LCD_FONT_16X32 || (flags&~3u)) return 0;
+       font_id>LCD_FONT_12X24 || (flags&~3u)) return 0;
     while(length<=64 && utf8[length]) length++;
     if(length>64) return 0;
 
@@ -113,7 +113,7 @@ void LCD_FPGATextDemo_Run(void)
 {
     g_lcd_fpga_text_demo_state=1;
     if(!LCD_Clear(0x0000) ||
-       !LCD_DrawTextFPGA(16,12,0,0,LCD_FONT_16X32,0,0x07FF,0,"Tang Nano 9K") ||
+       !LCD_DrawTextFPGA(16,12,0,0,LCD_FONT_12X24,0,0x07FF,0,"Tang Nano 9K") ||
        !LCD_DrawTextFPGA(20,54,0,0,LCD_FONT_12X24,0,0xFFFF,0,
                          "STM32 -> FPGA @ 12.5 MHz") ||
        !LCD_DrawTextFPGA(20,88,0,0,LCD_FONT_8X16,0,0x07E0,0,
@@ -122,7 +122,7 @@ void LCD_FPGATextDemo_Run(void)
                          0xFFE0,0,"Wrap automatico dentro un box stretto") ||
        !LCD_DrawTextFPGA(20,210,0,0,LCD_FONT_8X16,LCD_TEXT_TRANSPARENT,
                          0xFD20,0,"Font bitmap residenti nella User Flash") ||
-       !LCD_DrawTextFPGA(430,236,50,32,LCD_FONT_16X32,0,0xF81F,0,"CLIP")) {
+       !LCD_DrawTextFPGA(430,236,30,24,LCD_FONT_12X24,0,0xF81F,0,"CLIP")) {
         g_lcd_fpga_text_demo_state=3;return;
     }
     g_lcd_fpga_text_demo_state=2;

@@ -96,10 +96,12 @@ module TextRenderer (
        clip_bottom<=(command_box_height==0 ||
                      {1'b0,command_y}+command_box_height>272)?
                      9'd272:command_y+command_box_height;
+       // The image holds two faces since 16x32 was dropped. font_id 2 is still
+       // accepted by the packet parser, so it falls back to 12x24 here: that
+       // keeps every glyph fetch inside the image instead of reading past it.
        case(command_font_id)
          0:begin font_width<=8;font_height<=16;row_bytes_two<=0;end
-         1:begin font_width<=12;font_height<=24;row_bytes_two<=1;end
-         default:begin font_width<=16;font_height<=32;row_bytes_two<=1;end
+         default:begin font_width<=12;font_height<=24;row_bytes_two<=1;end
        endcase
        state<=CHAR_ADDR;
      end
@@ -157,9 +159,8 @@ module TextRenderer (
      GLYPH_BASE:begin
        case(font_id)
          0:glyph_base<=17'd64+({9'd0,glyph_index}<<4);
-         1:glyph_base<=17'd3200+({9'd0,glyph_index}<<5)+
+         default:glyph_base<=17'd3200+({9'd0,glyph_index}<<5)+
                                    ({9'd0,glyph_index}<<4);
-         default:glyph_base<=17'd12608+({9'd0,glyph_index}<<6);
        endcase
        state<=POSITION_CHAR;
      end

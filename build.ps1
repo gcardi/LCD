@@ -20,7 +20,10 @@ param(
     [switch]$Program,
     # Il bitstream compresso non supera la verifica della Embedded Flash:
     # -NoCompress lo disattiva quando si vuole programmare e verificare.
-    [switch]$NoCompress
+    [switch]$NoCompress,
+    # Sforzo del placer Gowin. Il default 1 e' quello qualificato; valori diversi
+    # spostano il piazzamento e servono a valutare percorsi al limite.
+    [ValidateRange(0,2)][int]$PlaceOption = 1
 )
 
 $ErrorActionPreference = "Stop"
@@ -67,9 +70,13 @@ $tcl = Join-Path ([System.IO.Path]::GetTempPath()) "lcd_build_$PID.tcl"
 # Le graffe impediscono a Tcl di interpretare i backslash del percorso.
 open_project {$project}
 set_option -gen_text_timing_rpt 1
-set_option -place_option 1
+set_option -place_option $PlaceOption
 set_option -route_option 1
 set_option -bit_security 0
+# Multi-Boot fa saltare il dispositivo a un secondo bitstream nella flash SPI
+# esterna, che su questa scheda e' vergine: il salto fallisce e la FPGA resta
+# non configurata all'accensione. Questo progetto non usa il multi-boot.
+set_option -multi_boot 0
 set_option -bit_compress $(if ($NoCompress) { 0 } else { 1 })
 run all
 "@ | Set-Content -LiteralPath $tcl -Encoding ascii

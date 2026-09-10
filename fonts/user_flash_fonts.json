@@ -3,9 +3,10 @@
   "magic": "LCDF",
   "version": 1,
   "flash_bytes": 77824,
-  "image_bytes": 25152,
-  "free_bytes": 52672,
-  "payload_crc32": "F7F9579A",
+  "flash_safe_bytes": 16384,
+  "image_bytes": 12608,
+  "free_bytes": 65216,
+  "payload_crc32": "563E8159",
   "glyph_count": 196,
   "encoding": "UTF-8 subset: ASCII printable, Latin-1, euro, arrows",
   "fonts": [
@@ -30,17 +31,6 @@
       "data_bytes": 9408,
       "source": "ter-u24n.bdf",
       "source_sha256": "FF640E9E097983355E8F70ED8FB645BD850184A0D590DE17F6FC9CEEC1BF8EAF"
-    },
-    {
-      "font_id": 2,
-      "width": 16,
-      "height": 32,
-      "row_bytes": 2,
-      "glyph_count": 196,
-      "data_offset": 12608,
-      "data_bytes": 12544,
-      "source": "ter-u32n.bdf",
-      "source_sha256": "5AD01972D58ADFEE75077E2C65BA5947E260043031664CB8AD8F98B5473B23A4"
     }
   ]
 }

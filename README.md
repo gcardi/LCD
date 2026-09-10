@@ -5,7 +5,7 @@ Tang Nano 9K.
 
 Il progetto inizializza la PSRAM integrata con un frame buffer RGB565 nero, lo
 legge a burst attraverso una FIFO dual-clock e genera i segnali di timing del
-display. Tramite SPI può aggiornare rettangoli o renderizzare testo usando tre
+display. Tramite SPI può aggiornare rettangoli o renderizzare testo usando due
 font bitmap residenti nella User Flash. Pattern diagnostici e barre colore
 restano disponibili nei test.
 
@@ -25,7 +25,7 @@ e degli accessi a burst nel frame buffer.
 - `src/FramebufferFifo.sv`: FIFO dual-clock con almost-full pipelined;
 - `src/PulseSynchronizer.sv`: trasporto di un impulso fra domini di clock;
 - `src/UserFlashReader.sv`, `src/FontStore.sv`, `src/TextRenderer.sv`: lettura,
-  validazione CRC e rendering dei font 8x16, 12x24 e 16x32;
+  validazione CRC e rendering dei font 8x16 e 12x24;
 - `src/LCD.cst`: assegnazione dei pin della Tang Nano 9K;
 - `src/LCD.sdc`: vincoli di timing e gruppi di clock asincroni;
 - `LCD.gprj`: progetto Gowin EDA;

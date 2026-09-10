@@ -52,7 +52,7 @@ per gestire due comportamenti scoperti il 10 settembre 2026:
 
 La programmazione SRAM viene persa quando la scheda viene spenta.
 
-Per rendere persistenti sia il bitstream sia i tre font della User Flash:
+Per rendere persistenti sia il bitstream sia i due font della User Flash:
 
 ```powershell
 .\program_tang_nano_flash.ps1
@@ -62,7 +62,7 @@ Questo usa l'operazione Gowin 6 (`embFlash Erase,Program,Verify`) passando
 insieme `impl/pnr/LCD.fs` e `fonts/user_flash_fonts.fi`.
 Il build imposta `-bit_security 0`, necessario per consentire la verifica della
 Embedded Flash durante lo sviluppo. La compressione del bitstream si disattiva
-con `.uild.ps1 -NoCompress`, ma non serve a superare la verifica: provata il
+con `.\build.ps1 -NoCompress`, ma non serve a superare la verifica: provata il
 10 settembre 2026, fallisce esattamente come quella compressa. Tenerla attiva.
 
 ## `Verify Failed`: non dice nulla, va accertato
@@ -88,7 +88,7 @@ la logica e guardare lo schermo:
 ```
 
 Se il testo compare, i font sono corretti byte per byte: `FontStore` ne verifica
-il CRC-32 sui 25.152 byte prima di accettare qualunque comando. Se invece
+il CRC-32 sui 12.608 byte prima di accettare qualunque comando. Se invece
 `g_lcd_error.phase` vale 11, l'immagine font non è valida.
 
 **Bitstream — solo con un ciclo di alimentazione.** Subito dopo la
@@ -134,5 +134,56 @@ Da qui discende l'unica regola operativa da rispettare:
 
 Dopo una programmazione andata a buon fine, il rendering del testo diventa
 disponibile qualche millisecondo dopo il reset: `FontStore` verifica in CRC-32
-i 25.152 byte dell'immagine prima di accettare comandi. Il firmware STM32
+i 12.608 byte dell'immagine prima di accettare comandi. Il firmware STM32
 attende già questa finestra, fino a un secondo, in `text_ready()`.
+
+## Programmare con openFPGALoader: serve il `.bin`, non il `.fi`
+
+openFPGALoader è l'alternativa a `programmer_cli` e il 10 settembre 2026 è
+quella che ha prodotto il primo avvio da flash riuscito con i font a bordo:
+
+```powershell
+openFPGALoader -b tangnano9k --write-flash impl\pnr\LCD.fs --user-flash fonts\user_flash_fonts.bin
+```
+
+Il file dei font da passare è **`user_flash_fonts.bin`**, l'immagine binaria
+grezza. Passare `user_flash_fonts.fi` compila e stampa pure `CRC check:
+Success`, ma non funziona: openFPGALoader non ha un parser per il formato `.fi`
+di Gowin — nel binario esistono solo `FsParser` e `RawParser` — e scrive il file
+byte per byte così com'è. Il `.fi` è testo ASCII che comincia con dieci righe
+`//Copyright...`, quindi in User Flash finisce quel commento al posto
+dell'intestazione `LCDF` e `FontStore` rifiuta l'immagine. Il sintomo è lo
+stesso della programmazione senza `--fiFile`: `g_lcd_error.phase = 11`.
+
+Il `CRC check: Success` finale non smentisce niente di tutto questo, perché
+copre **solo il bitstream**: `--verify` di openFPGALoader vale per le SPI flash
+esterne, e la User Flash interna non viene riletta da nessuno. L'unico modo di
+verificarla resta il CRC-32 che `FontStore` calcola a runtime.
+
+Vale la pena notare che con lo stesso comando il programmer stampa due barre di
+avanzamento distinte, una per il bitstream e una molto più breve per la User
+Flash: se la seconda manca, i font non sono stati scritti.
+
+## Nota su utilizzo di Zadig
+
+### Per passare da GowinProgrammer (programmer_cli) a openFPGALoader
+
+Il dispositivo da modificare è JTAG Debugger (Interface 0) — è l'interfaccia 0 (MI_00), quella JTAG. Se legata al driver FTDIBUS non va bene.
+
+- Chiudere eventuali strumenti Gowin aperti.
+- Avviare Zadig come amministratore.
+- Menu Options → List All Devices (mettere la spunta, altrimenti le due interfacce non compaiono).
+- Nel menu a tendina scegliere JTAG Debugger (Interface 0). Verificare sotto che il USB ID sia 0403 6010 e che l'interfaccia sia (Interface 0).
+- Come driver di destinazione selezionare WinUSB con le frecce.
+- Premere Replace Driver e confermare.
+
+⚠️ Non si deve toccare JTAG Debugger (Interface 1). È l'interfaccia 1, quella che fornisce la porta seriale COM3: se sostituisci quel driver si perde la seriale.
+
+Due effetti attesi, entrambi normali:
+
+- programmer_cli smetterà di vedere il cavo: da quel momento si programma solo con openFPGALoader.
+- Lo schermo potrebbe annerirsi durante la sostituzione, perché il dispositivo si ri-enumera.
+
+### Per tornare indietro (per usare di nuovo programmer_cli / Gowin Programmer)
+
+Zadig non sa reinstallare il driver FTDI, quindi si passa da Gestione dispositivi: trova il dispositivo WinUSB, Disinstalla dispositivo spuntando Elimina il software del driver, poi stacca e riattacca l'USB. Windows rimette il driver FTDI da solo e programmer_cli ricomincia a funzionare.
