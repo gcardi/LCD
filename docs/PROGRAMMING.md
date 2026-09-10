@@ -1,4 +1,4 @@
-# Programmazione Tang Nano 9K
+# Programmazione della Tang Nano 9K
 
 La configurazione verificata per questo progetto è:
 
