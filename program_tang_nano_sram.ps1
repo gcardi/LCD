@@ -1,8 +1,10 @@
 param(
     [string]$Bitstream = (Join-Path $PSScriptRoot "impl\pnr\LCD.fs"),
     [string]$ProgrammerPath,
-    # Torna a programmer_cli. Richiede che il driver FTDI sia quello originale:
-    # con WinUSB installato da Zadig, programmer_cli non vede il cavo.
+    # Indice del tipo di cavo per programmer_cli: 1 e' FT2CH, 5 e' WINUSB.
+    # Vedi docs/PROGRAMMING.md, che spiega quale serve con quale driver.
+    [int]$CableIndex = 1,
+    # Torna a programmer_cli invece di openFPGALoader.
     [switch]$UseGowinProgrammer
 )
 
@@ -22,7 +24,7 @@ if ($UseGowinProgrammer) {
     Invoke-GowinProgrammer -ProgrammerPath $ProgrammerPath -Arguments @(
         '--device', 'GW1NR-9C',
         '--operation_index', '2',
-        '--cable-index', '1',
+        '--cable-index', "$CableIndex",
         '--fsFile', $resolvedBitstream
     ) | Out-Null
 } else {

@@ -138,9 +138,15 @@ collegamento rotto e che il 10 settembre ha reso immediata la diagnosi.
   dell'immagine combinata (fallisce anche il solo bitstream) e le frequenze
   JTAG più basse, che fanno crashare `programmer_cli` durante la cancellazione.
 
-  In pratica la domanda ha perso urgenza: da openFPGALoader la flash si
-  programma e si avvia in modo riproducibile, font compresi, ed è il percorso
-  predefinito dei due script.
+  In pratica la domanda ha perso urgenza, perché il 10 settembre i due
+  programmatori sono stati messi a confronto cambiando driver apposta, e il
+  verdetto è netto: da openFPGALoader la flash si programma e si avvia in modo
+  riproducibile, font compresi; da `programmer_cli`, sulla stessa scheda e con
+  lo stesso driver WinUSB, i font non superano il CRC (`phase = 11`). Il
+  percorso Gowin resta negli script per altre macchine ma qui non va usato.
+  Prove e numeri in `PROGRAMMING.md`, sezione "Perché su questa macchina resta
+  solo openFPGALoader". Da lì viene anche il parametro `-CableIndex`: sotto
+  Zadig `programmer_cli` vuole il cavo 5 (WINUSB), non l'1 (FT2CH).
 - **`programmer_cli` non parte se l'ambiente definisce `PYTHONIOENCODING`.** È
   un eseguibile Python congelato e muore con `0xC0000409` e
   `LookupError: unknown encoding: utf-8:surrogateescape` prima di toccare la

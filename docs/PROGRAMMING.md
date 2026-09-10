@@ -4,16 +4,18 @@ La configurazione verificata per questo progetto è:
 
 - dispositivo: `GW1NR-9C` (part number `GW1NR-LV9QN88PC6/I5`);
 - ID JTAG rilevato: `0x1100481B`;
-- cavo per `programmer_cli`: `--cable-index 1`;
+- cavo per `programmer_cli`: `--cable-index 5` (WINUSB) sotto il driver Zadig,
+  `1` (FT2CH) sotto il driver FTDI;
 - operazione `2`: programmazione SRAM volatile;
-- bitstream: `impl/pnr/LCD.fs`.
+- bitstream: `impl/pnr/LCD.fs`;
+- driver dell'interfaccia 0: **WinUSB**, messo con Zadig.
 
 Dal 10 settembre 2026 i due script di programmazione usano **openFPGALoader**,
-non `programmer_cli`: è quello che ha prodotto il primo avvio da flash riuscito
-con i font a bordo. `programmer_cli` resta raggiungibile con
-`-UseGowinProgrammer`, ma richiede il driver FTDI originale — con il WinUSB
-installato da Zadig non vede proprio il cavo. Le due sezioni in fondo spiegano
-come passare dall'uno all'altro.
+ed è l'unico percorso che qui produce una scheda funzionante: `programmer_cli`
+resta raggiungibile con `-UseGowinProgrammer`, ma su questa macchina lascia in
+User Flash font che non superano il CRC. La sezione "Perché su questa macchina
+resta solo openFPGALoader" riporta le prove; quella su Zadig, come si cambia
+driver.
 
 Da PowerShell, nella directory del progetto:
 
@@ -207,10 +209,43 @@ Che `programmer_cli` non possa mangiare il binario è accertato dentro
 ASCII. La riga `//File Format: Hex` ha come alternativa `Bin`, che però non è
 binario grezzo: sono i 32 bit scritti come 32 caratteri `0` e `1`.
 
-Attenzione infine a una conseguenza del cambio di driver: con il WinUSB di
-Zadig installato, `programmer_cli` non fallisce con un errore ma **resta
-appeso**, anche solo per leggere i codici del dispositivo. Se succede, il
-driver è quello sbagliato per lui.
+## Perché su questa macchina resta solo openFPGALoader
+
+Il 10 settembre 2026 i due percorsi sono stati messi alla prova uno contro
+l'altro, cambiando driver apposta. L'esito è che `-UseGowinProgrammer` **non
+produce una scheda funzionante qui**. Resta nello script per altre macchine,
+ma su questa non va usato. I fatti, nell'ordine in cui sono emersi.
+
+**Tornare al driver FTDI peggiora le cose.** Disinstallando il WinUSB con
+"elimina il software del driver", Windows Update installa il driver FTDI
+*corrente*, non quello che c'era prima: qui è arrivato il 2.12.36.20 di ottobre
+2024. Gowin però si porta dietro una `ftd2xx.dll` versione 2.12.24 dell'ottobre
+2016, e le due non vanno d'accordo: `programmer_cli` con i cavi basati su FTDI
+non dà errore, **gira a vuoto per sempre** senza stampare una riga, bruciando
+CPU dentro `ftd2xx.dll`. Non è un indice di cavo sbagliato: gli indici che non
+usano FTDI rispondono in 0,15 s con un onesto `Cable failed to open`.
+
+**Il cavo WINUSB invece funziona, e apre la strada a un solo driver.** L'elenco
+dei tipi di cavo di `programmer_cli` è: 0 GWU2X, 1/3/4 basati su FTDI, 2 porta
+parallela, **5 WINUSB**. Con il WinUSB di Zadig installato e `--cable-index 5`,
+`programmer_cli` legge i codici in 0,26 s. Per questo gli script accettano
+`-CableIndex`: sotto Zadig serve 5, non 1.
+
+**Ma la scrittura in flash resta sbagliata.** Con quel percorso la
+programmazione gira fino in fondo, poi fallisce la verifica come sempre, e i
+font che lascia in User Flash non superano il CRC-32: `g_lcd_error.phase = 11`.
+La controprova è pulita, perché cambia una sola variabile: sulla stessa scheda,
+con lo stesso driver WinUSB e la stessa immagine `user_flash_fonts.bin`,
+openFPGALoader lascia `phase = 0` e il testo disegnato. Non è la scheda, non è
+il driver e non è l'immagine: è `programmer_cli`.
+
+Il comando per riprodurre la prova, se un domani si volesse ritentare:
+
+```powershell
+.\program_tang_nano_flash.ps1 -UseGowinProgrammer -CableIndex 5
+.\program_tang_nano_sram.ps1  -UseGowinProgrammer -CableIndex 5
+# poi rileggere g_lcd_error.phase via SWD
+```
 
 ## Nota su utilizzo di Zadig
 
@@ -234,4 +269,6 @@ Due effetti attesi, entrambi normali:
 
 ### Per tornare indietro (per usare di nuovo programmer_cli / Gowin Programmer)
 
-Zadig non sa reinstallare il driver FTDI, quindi si passa da Gestione dispositivi: trova il dispositivo WinUSB, Disinstalla dispositivo spuntando Elimina il software del driver, poi stacca e riattacca l'USB. Windows rimette il driver FTDI da solo e programmer_cli ricomincia a funzionare.
+Zadig non sa reinstallare il driver FTDI, quindi si passa da Gestione dispositivi: trova il dispositivo WinUSB, Disinstalla dispositivo spuntando Elimina il software del driver, poi stacca e riattacca l'USB. Windows rimette un driver FTDI da solo.
+
+⚠️ Attenzione, provato il 10 settembre 2026: **il driver che Windows rimette non e' quello che c'era prima**, e' quello corrente scaricato da Windows Update. Qui e' arrivato il 2.12.36.20 di ottobre 2024, che la `ftd2xx.dll` del 2016 inclusa in Gowin non regge: `programmer_cli` con i cavi FTDI resta a girare a vuoto. Tornare indietro quindi non ripristina lo stato di partenza, e per farlo davvero servirebbe installare a mano un driver FTDI d'epoca. Prima di intraprendere questa strada, leggere la sezione sul confronto fra i due programmatori: non porta da nessuna parte.
