@@ -1,13 +1,55 @@
 # Punto di ripresa — 10 settembre 2026
 
+## Stato verificato a fine sessione
+
+Sulla scheda gira tutto: `g_lcd_fpga_text_demo_state = 2`, `g_lcd_error` in
+fase 0, riscontro fotografico dell'utente con testi, rettangolo `B9`, cornici,
+stella a otto raggi e la scritta `CLIP` correttamente tagliata a `CLI`.
+
+**Prima misura del guadagno di `B9`:** `g_lcd_clear_ms16` vale 128 ms, cioe'
+**8 ms per un clear a schermo intero**, contro i circa 300 ms che la stessa
+operazione costa passando pixel per pixel da `B7`. Il collo di bottiglia si e'
+spostato dalla SPI al renderer, che costruisce i burst in serie a 27 MHz.
+
+### Una trappola che e' costata una diagnosi sbagliata
+
+La demo si fermava **sempre allo stesso comando** — i primi cinque testi
+disegnati, dal sesto in poi niente — registrando fase 9, cioe' primo byte `00`
+invece di `A5`. Quel byte e' una costante precaricata nello shift register
+della FPGA, quindi sembrava un guasto elettrico, e il sospetto era caduto sul
+filo appena cablato.
+
+Non lo era: sulla scheda c'era un bitstream **anteriore all'ultima modifica
+dell'RTL**, quindi firmware e logica si parlavano con due contratti diversi.
+Ricostruire e riprogrammare ha risolto senza toccare altro. Due regole da
+ricordare: confrontare le date di `impl/pnr/LCD.fs` e dei file sotto `src/`
+prima di ogni altra ipotesi, e diffidare dell'istinto quando il guasto e'
+**deterministico** — un cablaggio difettoso da' errori sparsi, non un blocco
+sempre nello stesso punto.
+
+Attenzione anche a come si legge lo stato via SWD: leggere subito dopo
+`--hardRst` restituisce zeri perche' la MCU non ha ancora eseguito nulla, e
+quegli zeri sembrano "demo mai partita". Serve attendere l'avvio, oppure
+leggere a regime senza resettare.
+
 ## Predisposizione IRQ per PRESENT
 
 L'utente ha collegato Tang Nano IO28 a STM32 PB0 e rigenerato da CubeMX.
 Configurazione allineata in `.ioc` e `gpio.c`: `FPGA_IRQ_N`, pull-up,
 EXTI0 fronte di discesa, priorità 5/subpriorità 0. Il generatore aveva lasciato
 fronte di salita e priorità 0, corretti durante la verifica.
-Double buffering, PRESENT, uscita FPGA IRQ e gestione applicativa dell'evento
-restano da implementare; il solo cablaggio non abilita lo scambio dei buffer.
+**Lato STM32 la linea e' ora consumata.** `HAL_GPIO_EXTI_Callback` e'
+ridefinita e fa solo cio' che serve, alzare un flag, come previsto dal disegno;
+tre variabili leggibili via SWD rendono il filo verificabile: `g_fpga_irq_count`
+(fronti osservati), `g_fpga_irq_pending` e `g_fpga_irq_level` (livello campionato
+all'avvio). Finche' la FPGA non pilota il pin 28 — oggi non assegnato in
+`LCD.cst` — il contratto e' **conteggio 0 e livello 1**, ed e' quello misurato
+sulla scheda: la linea sta alta e il pull-up tiene, quindi il cablaggio e' sano.
+Qualunque altro valore direbbe che il filo raccoglie disturbi o e' sul pin
+sbagliato, ed e' bene accorgersene prima di costruirci sopra un protocollo.
+
+Restano da implementare: **uscita IRQ lato FPGA**, double buffering e PRESENT.
+Il solo cablaggio non abilita lo scambio dei buffer.
 
 ## Ultima aggiunta: linee oblique FPGA
 
