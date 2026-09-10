@@ -8,6 +8,13 @@ La configurazione verificata per questo progetto è:
 - operazione `2`: programmazione SRAM volatile;
 - bitstream: `impl/pnr/LCD.fs`.
 
+Dal 10 settembre 2026 i due script di programmazione usano **openFPGALoader**,
+non `programmer_cli`: è quello che ha prodotto il primo avvio da flash riuscito
+con i font a bordo. `programmer_cli` resta raggiungibile con
+`-UseGowinProgrammer`, ma richiede il driver FTDI originale — con il WinUSB
+installato da Zadig non vede proprio il cavo. Le due sezioni in fondo spiegano
+come passare dall'uno all'altro.
+
 Da PowerShell, nella directory del progetto:
 
 ```powershell
@@ -58,8 +65,9 @@ Per rendere persistenti sia il bitstream sia i due font della User Flash:
 .\program_tang_nano_flash.ps1
 ```
 
-Questo usa l'operazione Gowin 6 (`embFlash Erase,Program,Verify`) passando
-insieme `impl/pnr/LCD.fs` e `fonts/user_flash_fonts.fi`.
+Questo passa `impl/pnr/LCD.fs` e i font insieme. Con `-UseGowinProgrammer` usa
+l'operazione Gowin 6 (`embFlash Erase,Program,Verify`) e il file `.fi`;
+altrimenti openFPGALoader e il file `.bin`, che non sono intercambiabili.
 Il build imposta `-bit_security 0`, necessario per consentire la verifica della
 Embedded Flash durante lo sviluppo. La compressione del bitstream si disattiva
 con `.\build.ps1 -NoCompress`, ma non serve a superare la verifica: provata il
@@ -139,11 +147,15 @@ attende già questa finestra, fino a un secondo, in `text_ready()`.
 
 ## Programmare con openFPGALoader: serve il `.bin`, non il `.fi`
 
-openFPGALoader è l'alternativa a `programmer_cli` e il 10 settembre 2026 è
-quella che ha prodotto il primo avvio da flash riuscito con i font a bordo:
+openFPGALoader è il percorso predefinito dei due script, ed è quello che il
+10 settembre 2026 ha prodotto il primo avvio da flash riuscito con i font a
+bordo. I comandi che gli script eseguono sono questi:
 
 ```powershell
+# flash: bitstream + font
 openFPGALoader -b tangnano9k --write-flash impl\pnr\LCD.fs --user-flash fonts\user_flash_fonts.bin
+# SRAM: senza --write-flash
+openFPGALoader -b tangnano9k impl\pnr\LCD.fs
 ```
 
 Il file dei font da passare è **`user_flash_fonts.bin`**, l'immagine binaria
