@@ -1,5 +1,10 @@
 # Collaudo prolungato SPI e grafica — 9 settembre 2026
 
+> Report storico: frequenze e vincoli sotto sono quelli delle prove del 9 settembre.
+> Stato corrente: [GRAPHICS_COMMANDS.md](GRAPHICS_COMMANDS.md) e
+> [RIPRESA.md](RIPRESA.md). Per ripetere lo stress abilitare GPIO probe,
+> 240 round eco e test grafici; l'avvio normale non li abilita.
+
 ## Esito
 
 La qualifica prolungata **non passa a 25 MHz**: l'eco DMA passa, ma il flusso

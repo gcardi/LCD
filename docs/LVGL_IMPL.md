@@ -25,6 +25,15 @@ modalita' normale, rasterizza autonomamente widget, testi e immagini.
 
 ## 2. Stato attuale del progetto
 
+**Nota del 10 settembre 2026:** questa sezione conserva la fotografia iniziale
+dello studio; le proposte successive non sono una specifica del protocollo corrente.
+Oggi sono implementati B7 (pixel), B8 (testo FPGA) e B9 (fill), con API per
+clear e linee orizzontali/verticali. Il framebuffer parte a nero e i font
+risiedono in User Flash. Stato e contratti correnti:
+[GRAPHICS_COMMANDS.md](GRAPHICS_COMMANDS.md). LVGL non è integrato.
+Per lo studio aggiornato di copie, framebuffer multipli e ROP vedere
+[BLITTING_ROP_STUDY.md](BLITTING_ROP_STUDY.md).
+
 Il progetto pilota un pannello RGB565 da 480 x 272 pixel:
 
 - `src/TOP.sv` integra clock, reset, PSRAM, FIFO e uscita LCD;

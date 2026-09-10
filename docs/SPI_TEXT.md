@@ -1,5 +1,11 @@
 # Comando testo SPI B8
 
+Riferimento dell'opcode testo. B8 condivide coda e renderer con il riempimento
+B9; durante l'esecuzione di uno dei due l'altro deve attendere. B9 resta
+disponibile anche senza font validi. Per tutti gli opcode e le API, incluse
+le linee orizzontali/verticali via B9, vedere
+[GRAPHICS_COMMANDS.md](GRAPHICS_COMMANDS.md).
+
 Il renderer FPGA usa tre font Terminus a cella fissa memorizzati nella User
 Flash del GW1NR-9C. L'immagine occupa 25.152 dei 77.824 byte disponibili e
 contiene 196 glifi per ciascuna dimensione:
@@ -73,6 +79,11 @@ calcola a runtime. Vedi [PROGRAMMING.md](PROGRAMMING.md). Per i normali aggiorna
 volatili del solo bitstream resta disponibile `program_tang_nano_sram.ps1`.
 
 Il test hardware completo, incluso lo stato finale del renderer FPGA, è:
+
+Prima abilitare `SPI_GPIO_PROBE=1` e `LCD_FPGA_TEXT_DEMO=1` nella
+configurazione MCU; il runner rifiuta il collaudo con GPIO probe disabilitato.
+Per Release aggiungere `-Preset Release`. Ripristinare poi la configurazione
+di avvio desiderata e ricompilare/caricare.
 
 ```powershell
 .\stm32\WeAct_H743_SPI\test-hardware.ps1 `

@@ -17,7 +17,7 @@ i precedenti pattern restano nel sorgente come strumenti diagnostici.
 Il colore iniziale non e' attualmente modificabile con un comando SPI.
 
 Lo STM32 usa `LCD_BOOT_TESTS=0`: demo e stress grafici non vengono eseguiti.
-La prova font corrente usa il flag separato `LCD_TEXT_DEMO=1` e modifica il
+La prova font corrente usa `LCD_FPGA_TEXT_DEMO=1`, con `LCD_TEXT_DEMO=0`, e modifica il
 framebuffer dopo che l'eco DMA di avvio e' terminata.
 Per provarli impostare LCD_BOOT_TESTS=1 in spi_diag_config.h e ricompilare/caricare;
 riportare a 0 per l'avvio uniforme. Il runner rifiuta -RequireGraphics/-RequireStress
@@ -31,21 +31,25 @@ byte, piu' il diario delle prove al banco.
 
 Il comando di scrittura usa un indirizzo lineare allineato a 16 pixel. Coordinate,
 righe e bordi del rettangolo vengono gestiti dalla funzione STM32.
-Non ci sono primitive FPGA per clear/fill rettangoli, linee, cerchi, testo,
-font, copia di aree o lettura dei pixel. Fill, clear e testo sono primitive software STM32, non nuovi comandi FPGA:
-riutilizzano LCD_WriteRect con una riga da 480 pixel (960 byte sullo stack).
-Non allocano un framebuffer completo. Sono sincrone, restituiscono 1 in caso
-di successo e 0 per errore. FillRect rifiuta dimensioni nulle e rettangoli fuori
-schermo senza clipping; in caso di errore di trasporto l'area puo' risultare
-aggiornata parzialmente. Non annullano scritture gia' accettate.
+Questo indirizzamento descrive solo B7. Il protocollo comprende anche B8
+(testo FPGA da User Flash) e B9 (riempimento hardware). `LCD_FillRect` e
+`LCD_Clear` inviano un pacchetto B9 di 18 byte più polling, senza buffer di
+pixel; `LCD_DrawHLine` e `LCD_DrawVLine` usano lo stesso comando con spessore 1.
+Le API sono sincrone, restituiscono 1 in caso di successo e 0 per errore.
+`LCD_DrawLine` aggiunge le linee oblique: B9 tipo 1 trasporta due estremi
+inclusi ed è eseguito con Bresenham nella FPGA. Richiede il bitstream aggiornato.
+FillRect e linee rifiutano dimensioni nulle o aree fuori schermo senza clipping.
+B8/B9 verificano il CRC prima del commit; B7 non ha CRC. Un errore rilevato
+dopo un commit non annulla il disegno. Copie e lettura pixel non sono implementate.
 
 ```c
 if (!LCD_Clear(0x0000)) { /* errore: pulizia a nero */ }
 if (!LCD_FillRect(20, 30, 100, 60, 0xF800)) { /* errore: rettangolo rosso */ }
 ```
 
-Con `LCD_TEXT_DEMO=1`, la prova corrente chiama clear e testo automaticamente.
-Riportandolo a 0 nessuna primitiva grafica viene chiamata all'avvio.
+Con `LCD_FPGA_TEXT_DEMO=1`, la prova corrente chiama clear, fill e testo FPGA.
+Per non disegnare all'avvio occorre tenere a 0 sia `LCD_TEXT_DEMO` sia
+`LCD_FPGA_TEXT_DEMO`, oltre a `LCD_BOOT_TESTS`.
 LCD_Demo_Run e LCD_Stress_Run restano programmi di collaudo separati.
 
 Nota di cronologia: il paragrafo che segue descrive il prototipo testo lato
@@ -55,7 +59,8 @@ CPU, scritto prima che il rendering passasse alla FPGA. Resta valido per
 Il prototipo testo usa una tabella 12x24 nella flash interna STM32: 196 glifi,
 9408 byte bitmap, ASCII stampabile, Latin-1, euro e frecce. `LCD_DrawText`
 decodifica UTF-8, usa celle monospaziate opache e sostituisce con `?` i glifi
-mancanti. Non esegue wrapping o clipping e verifica l'intero ingombro prima di
+mancanti. Gestisce `\n`, ignora `\r`, non esegue wrap automatico o clipping
+e verifica l'intero ingombro prima di
 disegnare. La tabella e' riproducibile dal BDF e dalla licenza conservati in
 `third_party/terminus-font-4.49.1-master`; non usa ancora la User Flash FPGA.
 
@@ -81,9 +86,10 @@ in una nuova transazione. La disponibilita' e' campionata alla fine dell'opcode.
 
 Il commit avviene alla ricezione completa di 5A, prima di alzare CS. Un aborto
 precedente non produce scritture; un aborto dopo il commit non le annulla.
-Byte successivi al byte 40 sono ignorati dal parser. Un opcode diverso da B7
-mantiene l'eco diagnostica A5, byte precedente. Non usare dati arbitrari che
-iniziano con B7 come prova eco quando l'endpoint grafico e' attivo.
+Byte successivi al byte 40 sono ignorati dal parser B7. Gli opcode diversi da
+B7, B8 e B9 mantengono l'eco diagnostica A5, byte precedente. Non usare dati
+arbitrari che iniziano con uno di questi tre opcode come prova eco quando
+l'endpoint grafico e' attivo.
 
 ## Arbitraggio e CDC
 
@@ -116,6 +122,10 @@ conferma da solo l'immagine sul pannello.
 ./stm32/WeAct_H743_SPI/test-hardware.ps1 -RequireGraphics -SerialNumber 35FF6C064D53373238602143
 ```
 
+Prima abilitare `LCD_BOOT_TESTS=1` e `SPI_GPIO_PROBE=1`; il runner verifica
+entrambi. Per usare l'ELF Release aggiungere `-Preset Release`. Ripristinare
+i flag di avvio dopo la prova e ricompilare/caricare.
+
 Richiede `localparam SPI_FRAMEBUFFER = 1` in TOP e `SPI_DIAG_MATRIX 0`.
 Il runner salva anche `graphics_state` nel risultato JSON e fallisce se diverso
 da 2. `diagnose-hardware.ps1` seleziona invece SPI_FRAMEBUFFER=0; anche
@@ -129,7 +139,7 @@ che acquisisce i burst e le maschere. Copre payload e ordine dei beat, pixel
 non selezionati, coda occupata, indirizzi invalidi, aborto di byte/pacchetto,
 riuso della coda e frame restart durante una scrittura.
 
-Non c'e' CRC prima del commit, rollback, readback o doppio framebuffer.
+Per B7 non c'e' CRC prima del commit. Non ci sono rollback, readback o doppio framebuffer.
 Un errore di trasmissione puo' essere segnalato dall'eco dopo che una scrittura
 e' stata accettata. Un rettangolo puo' apparire progressivamente (tearing).
 Questa e' la base funzionale per LVGL, non ancora la sua integrazione o una

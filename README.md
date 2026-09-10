@@ -148,7 +148,7 @@ Misure del raster, risultati e limiti della verifica sono in
 | [RIPRESA.md](docs/RIPRESA.md) | punto di ripresa del lavoro: stato corrente, verifiche superate, punti ancora aperti |
 | [README STM32](stm32/WeAct_H743_SPI/README.md) | cablaggio, firmware, comando unico di build, upload e collaudo |
 
-## Sviluppi futuri
+## Grafica implementata e sviluppi futuri
 
 Il modulo autonomo [SpiSlave](docs/SPI_SLAVE.md) implementa il trasporto SPI
 mode 0 per un master STM32 ed e' verificabile con `./sim/run_spi_sim.ps1`.
@@ -156,10 +156,18 @@ L'endpoint [SPI framebuffer](docs/SPI_FRAMEBUFFER.md) aggiunge una coda
 asincrona, burst mascherati e arbitraggio PSRAM per rettangoli RGB565.
 Il comando [SPI testo B8](docs/SPI_TEXT.md) aggiunge testo UTF-8 limitato,
 clipping, ritorno a capo opzionale e sfondo opaco o trasparente.
+Il comando B9 esegue riempimenti hardware, clear e linee orizzontali/verticali
+tramite le API STM32.
+`LCD_DrawLine` usa B9 tipo 1 per linee oblique con Bresenham nella FPGA.
+Riferimento completo:
+[GRAPHICS_COMMANDS.md](docs/GRAPHICS_COMMANDS.md).
 
 [LVGL_IMPL.md](docs/LVGL_IMPL.md) raccoglie uno studio speculativo su come
 trasformare la scheda in un controller grafico SPI pilotabile da un
 microcontrollore con LVGL. Non descrive funzionalità presenti nel codice.
+Lo studio [BLITTING_ROP_STUDY.md](docs/BLITTING_ROP_STUDY.md) valuta copie
+fra framebuffer, scroll, presentazione a confine frame e ROP come XOR;
+queste estensioni non sono implementate.
 
 ## Licenza e attribuzione
 

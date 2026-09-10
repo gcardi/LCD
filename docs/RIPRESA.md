@@ -1,5 +1,52 @@
 # Punto di ripresa — 10 settembre 2026
 
+## Ultima aggiunta: linee oblique FPGA
+
+`LCD_DrawLine(x0,y0,x1,y1,color)` implementata: B9 tipo 1, pacchetto di
+18 byte con CRC, Bresenham FPGA, estremi inclusi, tutte le direzioni e punto
+singolo. Coordinate fuori schermo rifiutate; niente clipping o antialiasing.
+Le linee H/V chiamate tramite questa API usano il fill tipo 0. I vecchi
+bitstream rifiutano tipo 1 con E1; sono stati aggiornati sia FPGA sia MCU.
+
+Sette testbench SPI/grafica superati, con 124 linee verificate pixel per pixel,
+backpressure/CDC e prove negative del protocollo. MCU Debug e Release compilate.
+Build FPGA finale con `build.ps1` default: zero violazioni setup/hold/recovery/removal,
+vincoli invariati (SPI 12.5 MHz, PSRAM 81 MHz). Una prima versione a registri
+più larghi falliva setup di 0.252 ns verso la PSRAM; ridotta la larghezza
+aritmetica e ricompilato con esito positivo, senza eccezioni al gate.
+
+Programmate Embedded Flash e User Flash FPGA tramite openFPGALoader (CRC
+bitstream riuscito), poi STM32 Release con verifica flash. Controllo SWD:
+eco e demo completate, nessun errore HAL/LCD; il testo completato conferma
+anche la disponibilità dei font validati a runtime. La demo contiene una
+stella a otto raggi colorati centrata a (350,193), sotto FILL B9.
+Log: `impl/oblique-build.log`, `impl/oblique-program.log`, e
+`stm32/WeAct_H743_SPI/build/Release/oblique-demo-result.json` (include hash
+ELF e bitstream). Nessuna rilettura hardware dei pixel o prova di power-cycle
+eseguita; la conferma visiva resta distinta dal controllo SWD.
+
+## Aggiornamento corrente: B9, Release e linee
+
+Il riferimento del protocollo e delle API è [GRAPHICS_COMMANDS.md](GRAPHICS_COMMANDS.md):
+B7 pixel arbitrari, B8 testo FPGA, B9 riempimenti hardware. `LCD_Clear` e
+`LCD_FillRect` usano B9; aggiunte `LCD_DrawHLine` e `LCD_DrawVLine`, spesse
+un pixel, senza clipping. Non richiedono nuovi opcode o modifiche RTL.
+Build Debug e Release delle API linea superate. Successivamente aggiunte alla
+demo FPGA otto linee: bordi orizzontali bianchi e verticali ciano dello schermo,
+cornice gialla/magenta attorno a FILL B9. Release caricata con verifica flash;
+controllo SWD superato (eco SPI, demo completata, nessun errore HAL/LCD).
+Risultati in `build/Release/lines-demo-result.json` sotto il progetto STM32;
+la verifica visiva del pannello resta distinta dal controllo software.
+Il confronto Debug/Release e i suoi collaudi sono in
+[MCU_RELEASE_COMPARISON.md](MCU_RELEASE_COMPARISON.md). Il build predefinito
+resta Debug: usare `-Preset Release` per Release.
+Configurazione di avvio: un round eco, GPIO probe disabilitato,
+`LCD_BOOT_TESTS=0`, `LCD_TEXT_DEMO=0`, `LCD_FPGA_TEXT_DEMO=1`.
+Copie, scroll, framebuffer multipli e ROP sono solo valutazioni in
+[BLITTING_ROP_STUDY.md](BLITTING_ROP_STUDY.md), non funzionalità presenti.
+Le sezioni sotto conservano le verifiche e la cronologia delle tappe precedenti;
+frequenze, flag e limitazioni storici non sostituiscono questo stato corrente.
+
 ## Ultimo stato: testo renderizzato dalla FPGA, font in User Flash
 
 Il rendering del testo è passato dall'STM32 alla FPGA. Tre moduli nuovi:

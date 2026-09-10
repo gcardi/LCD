@@ -1,5 +1,9 @@
 # Collaudo SPI - 2026-09-09
 
+> Cronologia delle misure SPI: le configurazioni citate appartengono alle
+> rispettive prove. Stato corrente in [RIPRESA.md](RIPRESA.md); confronto
+> MCU Debug/Release in [MCU_RELEASE_COMPARISON.md](MCU_RELEASE_COMPARISON.md).
+
 **Aggiornamento successivo:** la diagnosi dei fronti ha ottenuto PASS a
 12.5 MHz con GPIO STM32 MEDIUM, inclusi 1049760 byte nel test eco lungo.
 Configurazione corrente: prescaler 16, SDC 80 ns, GPIO MEDIUM. Vedere

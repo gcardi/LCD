@@ -2,6 +2,17 @@
 
 ## Comandi riproducibili
 
+Per il protocollo SPI e le primitive grafiche eseguire anche
+`./sim/run_spi_sim.ps1`. Comprende sette testbench, incluso `tb_line_renderer`:
+124 linee confrontate con un riferimento basato su arrotondamento razionale,
+tutte le direzioni, estremi e punti singoli, maschere e fusione dei burst,
+backpressure e rilascio ritardato dell'acknowledgement come nel CDC del TOP.
+`tb_spi_framebuffer` verifica inoltre B9 tipo 1: CRC, limiti, tipo/flags
+invalidi, aborto prima del commit, coda occupata e conservazione del comando
+pendente anche quando il master interroga B8. La regressione conserva B7,
+testo B8 e fill B9 tipo 0. Questi test verificano i pixel simulati; il controllo
+SWD al banco verifica stati ed errori del trasporto, senza rileggere la PSRAM.
+
 Da PowerShell, nella radice del repository:
 
 ```powershell
