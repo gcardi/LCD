@@ -143,7 +143,11 @@ collegamento rotto e che il 10 settembre ha reso immediata la diagnosi.
   verdetto è netto: da openFPGALoader la flash si programma e si avvia in modo
   riproducibile, font compresi; da `programmer_cli`, sulla stessa scheda e con
   lo stesso driver WinUSB, i font non superano il CRC (`phase = 11`). Il
-  percorso Gowin resta negli script per altre macchine ma qui non va usato.
+  percorso Gowin resta negli script per altre macchine ma qui non va usato:
+  la prova col ciclo di alimentazione dice che nemmeno il bitstream si salva,
+  `User Code 0x00000000` e CRC error. Funziona invece benissimo la sola
+  programmazione SRAM, che con `-UseGowinProgrammer -CableIndex 5` carica in
+  4,5 s e fa partire la logica.
   Prove e numeri in `PROGRAMMING.md`, sezione "Perché su questa macchina resta
   solo openFPGALoader". Da lì viene anche il parametro `-CableIndex`: sotto
   Zadig `programmer_cli` vuole il cavo 5 (WINUSB), non l'1 (FT2CH).

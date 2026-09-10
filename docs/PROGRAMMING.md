@@ -231,13 +231,25 @@ parallela, **5 WINUSB**. Con il WinUSB di Zadig installato e `--cable-index 5`,
 `programmer_cli` legge i codici in 0,26 s. Per questo gli script accettano
 `-CableIndex`: sotto Zadig serve 5, non 1.
 
-**Ma la scrittura in flash resta sbagliata.** Con quel percorso la
-programmazione gira fino in fondo, poi fallisce la verifica come sempre, e i
-font che lascia in User Flash non superano il CRC-32: `g_lcd_error.phase = 11`.
-La controprova è pulita, perché cambia una sola variabile: sulla stessa scheda,
-con lo stesso driver WinUSB e la stessa immagine `user_flash_fonts.bin`,
-openFPGALoader lascia `phase = 0` e il testo disegnato. Non è la scheda, non è
-il driver e non è l'immagine: è `programmer_cli`.
+**Ma la scrittura in flash e' sbagliata, in entrambe le meta'.** Con quel
+percorso la programmazione gira fino in fondo, poi fallisce la verifica come
+sempre. I font che lascia in User Flash non superano il CRC-32
+(`g_lcd_error.phase = 11`), e il bitstream non e' migliore: dopo un ciclo di
+alimentazione il dispositivo resta **non configurato**, `User Code 0x00000000`
+e status `0x00031421` col bit di CRC error. E' la prova che mancava, fatta il
+10 settembre 2026, e chiude la questione: non e' che si perdano solo i font.
+
+La controprova e' pulita, perche' cambia una sola variabile: sulla stessa
+scheda, con lo stesso driver WinUSB e la stessa immagine
+`user_flash_fonts.bin`, openFPGALoader lascia `phase = 0` e il testo disegnato.
+Non e' la scheda, non e' il driver e non e' l'immagine: e' `programmer_cli`.
+
+**Quello che invece funziona benissimo e' la programmazione SRAM.** Sempre via
+WinUSB e `--cable-index 5`, `program_tang_nano_sram.ps1 -UseGowinProgrammer`
+carica il bitstream in 4,5 secondi e la logica parte: la MCU trova la FPGA
+pronta al primo tentativo, zero mismatch. Quindi per un progetto che non scriva
+in flash il Gowin Programmer resta perfettamente utilizzabile su questa
+macchina; e' l'operazione 6 sulla Embedded Flash a non essere affidabile.
 
 Il comando per riprodurre la prova, se un domani si volesse ritentare:
 
