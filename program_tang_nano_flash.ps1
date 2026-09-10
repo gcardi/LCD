@@ -11,9 +11,9 @@ param(
 $ErrorActionPreference = 'Stop'
 
 if (-not $UserFlash) {
-    $UserFlash = Join-Path $PSScriptRoot (
-        if ($UseGowinProgrammer) { 'fonts\user_flash_fonts.fi' }
-        else { 'fonts\user_flash_fonts.bin' })
+    $fontFile = if ($UseGowinProgrammer) { 'fonts\user_flash_fonts.fi' }
+                else { 'fonts\user_flash_fonts.bin' }
+    $UserFlash = Join-Path $PSScriptRoot $fontFile
 }
 
 foreach ($file in @($Bitstream, $UserFlash)) {
