@@ -57,6 +57,9 @@ void Error_Handler(void);
 /* USER CODE END EFP */
 
 /* Private defines -----------------------------------------------------------*/
+#define FPGA_IRQ_N_Pin GPIO_PIN_0
+#define FPGA_IRQ_N_GPIO_Port GPIOB
+#define FPGA_IRQ_N_EXTI_IRQn EXTI0_IRQn
 #define FPGA_CS_Pin GPIO_PIN_12
 #define FPGA_CS_GPIO_Port GPIOB
 

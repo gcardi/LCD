@@ -47,6 +47,12 @@ Il cablaggio e' implementato nel TOP e nei vincoli del progetto LCD.
 | PB15 | 25 | MOSI |
 | PB14 | 26 | MISO |
 | PB12 / FPGA_CS | 27 | CS attivo basso |
+| PB0 / FPGA_IRQ_N | 28 | futura notifica PRESENT, attiva bassa |
+
+Collegamento IRQ IO28 -> PB0 confermato dall'utente. Lato MCU sono predisposti
+EXTI0 sul fronte di discesa, pull-up e priorità NVIC 5 (subpriorità 0).
+L'uscita IO28 e la logica PRESENT/IRQ non sono ancora implementate nella FPGA:
+questa riga descrive il cablaggio predisposto, non una funzione già operativa.
 
 Nessun D/C. READY non e' ancora implementato e non serve al primo test breve.
 Slot microSD TangNano vuoto (SCK IO36 condiviso). Alimentazione dalle rispettive USB,

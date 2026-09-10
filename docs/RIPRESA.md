@@ -1,5 +1,14 @@
 # Punto di ripresa — 10 settembre 2026
 
+## Predisposizione IRQ per PRESENT
+
+L'utente ha collegato Tang Nano IO28 a STM32 PB0 e rigenerato da CubeMX.
+Configurazione allineata in `.ioc` e `gpio.c`: `FPGA_IRQ_N`, pull-up,
+EXTI0 fronte di discesa, priorità 5/subpriorità 0. Il generatore aveva lasciato
+fronte di salita e priorità 0, corretti durante la verifica.
+Double buffering, PRESENT, uscita FPGA IRQ e gestione applicativa dell'evento
+restano da implementare; il solo cablaggio non abilita lo scambio dei buffer.
+
 ## Ultima aggiunta: linee oblique FPGA
 
 `LCD_DrawLine(x0,y0,x1,y1,color)` implementata: B9 tipo 1, pacchetto di
