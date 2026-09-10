@@ -59,7 +59,7 @@ per gestire due comportamenti scoperti il 10 settembre 2026:
 
 La programmazione SRAM viene persa quando la scheda viene spenta.
 
-Per rendere persistenti sia il bitstream sia i due font della User Flash:
+Per rendere persistenti sia il bitstream sia i tre font della User Flash:
 
 ```powershell
 .\program_tang_nano_flash.ps1
@@ -96,7 +96,7 @@ la logica e guardare lo schermo:
 ```
 
 Se il testo compare, i font sono corretti byte per byte: `FontStore` ne verifica
-il CRC-32 sui 12.608 byte prima di accettare qualunque comando. Se invece
+il CRC-32 sui 25.152 byte prima di accettare qualunque comando. Se invece
 `g_lcd_error.phase` vale 11, l'immagine font non è valida.
 
 **Bitstream — solo con un ciclo di alimentazione.** Subito dopo la
@@ -142,7 +142,7 @@ Da qui discende l'unica regola operativa da rispettare:
 
 Dopo una programmazione andata a buon fine, il rendering del testo diventa
 disponibile qualche millisecondo dopo il reset: `FontStore` verifica in CRC-32
-i 12.608 byte dell'immagine prima di accettare comandi. Il firmware STM32
+i 25.152 byte dell'immagine prima di accettare comandi. Il firmware STM32
 attende già questa finestra, fino a un secondo, in `text_ready()`.
 
 ## Programmare con openFPGALoader: serve il `.bin`, non il `.fi`

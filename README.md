@@ -25,7 +25,7 @@ e degli accessi a burst nel frame buffer.
 - `src/FramebufferFifo.sv`: FIFO dual-clock con almost-full pipelined;
 - `src/PulseSynchronizer.sv`: trasporto di un impulso fra domini di clock;
 - `src/UserFlashReader.sv`, `src/FontStore.sv`, `src/TextRenderer.sv`: lettura,
-  validazione CRC e rendering dei font 8x16 e 12x24;
+  validazione CRC e rendering dei font 8x16, 12x24 e 16x32;
 - `src/LCD.cst`: assegnazione dei pin della Tang Nano 9K;
 - `src/LCD.sdc`: vincoli di timing e gruppi di clock asincroni;
 - `LCD.gprj`: progetto Gowin EDA;

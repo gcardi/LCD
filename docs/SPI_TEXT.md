@@ -1,21 +1,26 @@
 # Comando testo SPI B8
 
-Il renderer FPGA usa due font Terminus a cella fissa memorizzati nella User
-Flash del GW1NR-9C. Il file `fonts/user_flash_fonts.fi` occupa 12.608 byte e
+Il renderer FPGA usa tre font Terminus a cella fissa memorizzati nella User
+Flash del GW1NR-9C. L'immagine occupa 25.152 dei 77.824 byte disponibili e
 contiene 196 glifi per ciascuna dimensione:
 
 | font_id | Cella | Byte/glifo |
 |---:|---:|---:|
 | 0 | 8x16 | 16 |
 | 1 | 12x24 | 48 |
+| 2 | 16x32 | 64 |
 
-La User Flash sarebbe da 77.824 byte, ma condivide l'array fisico con il
-bitstream e insieme non ci stanno. Misurato per bisezione il 10 settembre 2026:
-18.432 byte di font si avviano ancora, 19.456 no, e la FPGA resta non
-configurata. Per questo il font 16x32 è stato tolto — tutti e tre facevano
-25.152 byte — e il generatore rifiuta immagini oltre 16.384 byte. Il confine
-dipende però dalla dimensione del bitstream compresso, quindi si sposta quando
-il design cresce: vedi `PROGRAMMING.md`.
+Il 10 settembre 2026 questi tre font sono stati tolti e rimessi nel giro di
+poche ore, e la storia vale la pena di essere raccontata perché il primo
+verdetto era sbagliato. Una bisezione sembrava mostrare che bitstream e User
+Flash, condividendo l'array fisico, non ci stessero insieme oltre i 18.432 byte
+di font. In realtà quella bisezione passava a openFPGALoader dei file `.fi`, che
+è testo ASCII e occupa circa quattro volte il payload: la soglia misurata cade
+esattamente dove il testo del `.fi` supera i 77.824 byte della User Flash
+(18.432 → 76.173 byte, 19.456 → 80.461). Non era un conflitto di capacità, era
+il formato di file sbagliato — lo stesso problema che faceva fallire il CRC dei
+font. Passando l'immagine binaria grezza, i 25.152 byte si programmano e la
+FPGA si avvia da flash senza obiezioni. Vedi `PROGRAMMING.md`.
 
 Il subset comprende ASCII stampabile, Latin-1, euro e le quattro frecce. Un
 codepoint non presente viene sostituito da `?`. Le sorgenti BDF Terminus sono

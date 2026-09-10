@@ -12,26 +12,25 @@ from pathlib import Path
 
 
 FLASH_BYTES = 304 * 64 * 4
-# The User Flash shares one physical array with the configuration bitstream, and
-# together they do not fit. Measured on 10 September 2026 by bisection, writing
-# the same bitstream with growing User Flash payloads: 18432 bytes still boots,
-# 19456 does not, and the device comes up unconfigured with a CRC error. The cap
-# below leaves room under that boundary, but the boundary itself moves with the
-# compressed bitstream size, so a build that grows can invalidate it. If flashing
-# starts producing an unconfigured device, re-run that bisection before assuming
-# the programmer is at fault.
-FLASH_SAFE_BYTES = 16384
+# Tre uscite per la stessa immagine, e non sono intercambiabili:
+#   .bin  immagine grezza, la vuole openFPGALoader in --user-flash;
+#   .fi   testo ASCII nel formato Gowin, lo vuole programmer_cli in --fiFile;
+#   .mem  parole esadecimali per il ramo SIMULATION di UserFlashReader.
+# Passare il .fi a openFPGALoader non da' errore: non ha un parser per quel
+# formato, scrive il testo byte per byte e la scheda si ritrova font non validi.
+# E' costato una diagnosi sbagliata il 10 settembre 2026, perche' il .fi occupa
+# circa quattro volte il payload e sopra i ~18 KB di font sfonda la User Flash,
+# il che sembrava un limite di capacita' condivisa col bitstream. Non lo era.
 HEADER_BYTES = 64
 MAGIC = b"LCDF"
 VERSION = 1
 CODEPOINTS = tuple(range(0x20, 0x7F)) + tuple(range(0xA0, 0x100)) + (
     0x20AC, 0x2190, 0x2191, 0x2192, 0x2193
 )
-# 16x32 was dropped on 10 September 2026: all three came to 25152 bytes, well
-# past what fits alongside the bitstream. These two total 12608.
 FONT_SPECS = (
     (0, 8, 16, "ter-u16n.bdf"),
     (1, 12, 24, "ter-u24n.bdf"),
+    (2, 16, 32, "ter-u32n.bdf"),
 )
 
 
@@ -94,10 +93,6 @@ def build_image(source_dir: Path) -> tuple[bytes, dict[str, object]]:
 
     if len(image) > FLASH_BYTES:
         raise ValueError("font image exceeds FLASH608K")
-    if len(image) > FLASH_SAFE_BYTES:
-        raise ValueError(
-            f"font image is {len(image)} bytes, over the {FLASH_SAFE_BYTES} that fit "
-            "alongside the bitstream; the FPGA would stop configuring from flash")
     payload_crc = zlib.crc32(image[HEADER_BYTES:]) & 0xFFFFFFFF
     header = bytearray(HEADER_BYTES)
     header[0:4] = MAGIC
@@ -110,7 +105,6 @@ def build_image(source_dir: Path) -> tuple[bytes, dict[str, object]]:
         "magic": MAGIC.decode("ascii"),
         "version": VERSION,
         "flash_bytes": FLASH_BYTES,
-        "flash_safe_bytes": FLASH_SAFE_BYTES,
         "image_bytes": len(image),
         "free_bytes": FLASH_BYTES - len(image),
         "payload_crc32": f"{payload_crc:08X}",

@@ -11,10 +11,9 @@ int LCD_FillRect(uint16_t x, uint16_t y, uint16_t w, uint16_t h,
                  uint16_t color);
 int LCD_Clear(uint16_t color);
 
-// Two faces only. 16x32 was dropped because the three together did not fit in
-// the flash alongside the bitstream; see docs/PROGRAMMING.md.
 #define LCD_FONT_8X16  0u
 #define LCD_FONT_12X24 1u
+#define LCD_FONT_16X32 2u
 #define LCD_TEXT_TRANSPARENT 0x01u
 #define LCD_TEXT_WRAP        0x02u
 // Render a zero-terminated UTF-8 string in the FPGA. At most 64 encoded
