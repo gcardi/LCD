@@ -8,11 +8,12 @@
 #     the variable, so the crash only shows up under automation.
 #   - programmer_cli can exit 0 while printing "Error: ...", so the exit code
 #     alone is not a verdict.
-#   - On this project the Embedded Flash verify stage always fails, and drags
-#     "Error: Program failed" and sometimes exit 1 along with it, even though
-#     the write itself succeeded. Treating that as fatal would make flash
-#     programming permanently unusable, so it is reported as a warning that
-#     says how to confirm the real outcome. Anything else is still fatal.
+#   - On this project the Embedded Flash verify stage always fails, dragging
+#     "Error: Program failed" and often exit 1 along with it. It says nothing
+#     either way about whether the write landed: runs that printed it have both
+#     produced a device that boots from flash and one that does not. Treating it
+#     as fatal would make flash programming unusable, so it is a warning that
+#     says how to find out. Anything else is still fatal.
 $script:GowinBenignPattern = 'Verify\s+Failed|Program\s+failed'
 
 function Invoke-GowinProgrammer {
@@ -55,12 +56,19 @@ function Invoke-GowinProgrammer {
     }
     if ($problems.Count -gt 0) {
         Write-Warning (@(
-            'La verifica della Embedded Flash e'' fallita. Su questo progetto e'' un',
-            'falso allarme noto: la scrittura riesce comunque. NON riprogrammare.',
-            'Per accertarsene, stacca e riattacca l''alimentazione della Tang Nano,',
-            'poi rileggi i codici: a configurazione avvenuta il User Code non e'' piu''',
-            '0x00000000 e il bit di CRC error nello status sparisce. Il pulsante di',
-            'reset non serve: e'' un reset logico e non provoca riconfigurazione.',
+            'La verifica della Embedded Flash e'' fallita. Su questo progetto fallisce',
+            'sempre e NON dice se la scrittura sia andata a buon fine: sono stati',
+            'osservati sia esiti buoni sia flash che poi non si avvia. Va accertato.',
+            '',
+            'User Flash (font): verificabile subito, senza togliere corrente. Esegui',
+            'program_tang_nano_sram.ps1, resetta la MCU e guarda il testo. Se compare,',
+            'i font sono corretti: FontStore ne verifica il CRC-32 prima di accettare',
+            'comandi. Se g_lcd_error.phase vale 11, l''immagine font non e'' valida.',
+            '',
+            'Bitstream: serve un ciclo di alimentazione della Tang Nano, poi rileggi i',
+            'codici. Se il User Code non e'' piu'' 0x00000000 la flash e'' buona. Subito',
+            'dopo la programmazione la lettura non dice nulla, perche'' il dispositivo',
+            'resta non configurato. Il pulsante di reset non serve: e'' un reset logico.',
             'Dettagli in docs/PROGRAMMING.md.'
         ) -join "`n")
         return [pscustomobject]@{ Output = $text; VerifyWarning = $true }

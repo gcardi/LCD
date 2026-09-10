@@ -110,35 +110,27 @@ collegamento rotto e che il 10 settembre ha reso immediata la diagnosi.
   "programmate e verificate". Ora l'output viene ispezionato in
   `tools/Invoke-GowinProgrammer.ps1`, e il controllo si è dimostrato utile al
   primo impiego reale.
-- **`Verify Failed` sulla Embedded Flash è un falso allarme: la scrittura
-  riesce comunque.** `programmer_cli` fallisce sistematicamente lo stadio di
-  verifica e, quando lo fa, riporta anche `Error: Program failed` e talvolta
-  esce con codice 1. Nulla di tutto ciò indica una flash scritta male.
+- **`Verify Failed` sulla Embedded Flash non dice se la scrittura sia riuscita.**
+  Fallisce sempre, e trascina con sé `Error: Program failed` e spesso l'uscita 1.
+  Una nota precedente lo dichiarava un falso allarme innocuo: **era sbagliata**.
+  Il 10 settembre, dopo una di quelle programmazioni, la scheda non si è avviata
+  — FPGA non configurata, e la MCU ha registrato `ready_attempts = 167` in due
+  secondi senza mai una risposta. Altre volte, con lo stesso identico messaggio,
+  la flash si è avviata correttamente. Non correla: va accertato ogni volta.
 
-  Come è stato stabilito, il 10 settembre 2026: dopo una programmazione
-  conclusa con `Program failed` ed exit 1, un ciclo di alimentazione della Tang
-  Nano ha portato la FPGA a configurarsi da sola con `User Code 0x0000C765` e
-  status `0x0003B020` senza CRC error, e il collaudo hardware è tornato PASS
-  senza alcuna riprogrammazione in mezzo.
+  L'accertamento è asimmetrico, ed è la cosa utile scoperta quel giorno. La
+  **User Flash si verifica a runtime**, senza togliere corrente: si configura la
+  logica da SRAM, si resetta la MCU e si guarda il testo, perché `FontStore`
+  verifica il CRC-32 dei 25.152 byte prima di accettare comandi, e
+  `g_lcd_error.phase = 11` segnala l'immagine non valida. Il **bitstream** invece
+  richiede un ciclo di alimentazione: subito dopo la programmazione il
+  dispositivo resta non configurato e leggere i codici non prova nulla.
 
-  L'insidia sta nel come si legge lo stato subito dopo l'operazione: il
-  dispositivo resta non configurato, quindi `Read Device Codes` riporta
-  `User Code 0x00000000` e status `0x00031421` con il bit di CRC error. È facile
-  scambiarlo per una flash vuota, ma è solo un dispositivo che non si è ancora
-  riconfigurato. **Solo un ciclo di alimentazione dice la verità**; il pulsante
-  di reset non basta, perché in questo progetto è un reset logico e non provoca
-  riconfigurazione.
-
-  Una precedente annotazione sosteneva che la programmazione riuscisse solo al
-  primo tentativo dopo l'accensione: era sbagliata, nata dalla stessa
-  confusione. Anche l'ipotesi che la colpa fosse di `-bit_compress 1` è stata
-  smentita, perché un bitstream non compresso fallisce la verifica in modo
-  identico. La compressione resta attiva.
-
-  Resta aperto il perché la verifica fallisca, dato che la flash è corretta.
-  Sospetto da indagare: `bit_security`/`CRC_CHECK`, oppure una rilettura che
-  non tiene conto della User Flash accodata al bitstream.
-
+  Non è ancora spiegato perché la verifica fallisca sempre, né perché la
+  scrittura riesca solo a volte. Escluse con prove: la compressione del
+  bitstream, la presenza dei font e la dimensione dell'immagine combinata
+  (fallisce anche il solo bitstream), e le frequenze JTAG più basse, che fanno
+  crashare `programmer_cli` durante la cancellazione.
 - **`programmer_cli` non parte se l'ambiente definisce `PYTHONIOENCODING`.** È
   un eseguibile Python congelato e muore con `0xC0000409` e
   `LookupError: unknown encoding: utf-8:surrogateescape` prima di toccare la

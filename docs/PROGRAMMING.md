@@ -65,31 +65,52 @@ Embedded Flash durante lo sviluppo. La compressione del bitstream si disattiva
 con `.uild.ps1 -NoCompress`, ma non serve a superare la verifica: provata il
 10 settembre 2026, fallisce esattamente come quella compressa. Tenerla attiva.
 
-## `Verify Failed` non significa flash scritta male
+## `Verify Failed`: non dice nulla, va accertato
 
-`programmer_cli` fallisce sistematicamente la verifica della Embedded Flash su
-questo progetto, e quando lo fa stampa anche `Error: Program failed`, a volte
-uscendo con codice 1. **La scrittura però riesce.** Verificato il 10 settembre
-2026: dopo una programmazione conclusa così, un ciclo di alimentazione ha
-portato la FPGA a configurarsi da sola e il collaudo hardware a passare, senza
-riprogrammare nulla.
+`programmer_cli` fallisce **sempre** la verifica della Embedded Flash su questo
+progetto, e con essa stampa `Error: Program failed`, spesso uscendo con codice 1.
 
-Attenzione a come si controlla l'esito. Subito dopo l'operazione il dispositivo
-resta non configurato, quindi:
+Il 10 settembre 2026 avevo concluso che fosse un falso allarme innocuo. **Era
+sbagliato.** Dopo una di quelle programmazioni la scheda non si è più avviata:
+FPGA non configurata, `User Code 0x00000000`, e la MCU ha registrato
+`ready_attempts = 167` in due secondi senza mai ricevere risposta. Altre volte,
+con lo stesso messaggio, la flash si è avviata benissimo. Il messaggio quindi
+**non correla** con l'esito: va accertato ogni volta.
+
+Le due metà si accertano in modi diversi.
+
+**User Flash, cioè i font — subito, senza togliere corrente.** Basta configurare
+la logica e guardare lo schermo:
 
 ```powershell
-programmer_cli --device GW1NR-9C --operation_index 0 --cable-index 1
+.\program_tang_nano_sram.ps1
+# poi resetta la MCU
 ```
 
-riporta `User Code 0x00000000` e status `0x00031421` con il bit di CRC error, e
-sembra una flash vuota. Non lo è. **Stacca e riattacca l'alimentazione della
-Tang Nano, poi rileggi**: a configurazione avvenuta il User Code diventa quello
-del bitstream e il bit di CRC error sparisce. Il pulsante di reset non serve
-allo scopo, perché qui è un reset logico e non provoca riconfigurazione.
+Se il testo compare, i font sono corretti byte per byte: `FontStore` ne verifica
+il CRC-32 sui 25.152 byte prima di accettare qualunque comando. Se invece
+`g_lcd_error.phase` vale 11, l'immagine font non è valida.
+
+**Bitstream — solo con un ciclo di alimentazione.** Subito dopo la
+programmazione il dispositivo resta non configurato, quindi `Read Device Codes`
+riporta `User Code 0x00000000` e il bit di CRC error, che sembra una flash vuota
+ma non prova niente. Stacca e riattacca l'alimentazione, poi rileggi: se il
+User Code non è più `0x00000000`, la flash è buona. Il pulsante di reset non
+serve, perché qui è un reset logico e non provoca riconfigurazione.
+
+## Programmare senza `--fiFile` cancella i font
+
+Vale la pena ripeterlo perché è successo davvero: una programmazione del solo
+bitstream, fatta per isolare un problema, ha cancellato la User Flash. Il
+sintomo è preciso — `g_lcd_error.phase = 11`, byte di stato `E2` invece di `C3` —
+e si ripara riprogrammando con `program_tang_nano_flash.ps1`, che passa sempre
+entrambi i file.
 
 Per rimettere in funzione la scheda subito, senza aspettare,
-`program_tang_nano_sram.ps1` la configura in pochi secondi in modo volatile. Gli indirizzi del `.fi` sono esadecimali
-senza prefisso e il generatore emette anche `.mem`, `.bin` e un manifest JSON.
+`program_tang_nano_sram.ps1` la configura in pochi secondi in modo volatile.
+
+Gli indirizzi del `.fi` sono esadecimali senza prefisso, e il generatore emette
+anche `.mem`, `.bin` e un manifest JSON.
 
 ## Embedded Flash e User Flash sono lo stesso array
 
