@@ -4,6 +4,11 @@
 module TextRenderer (
  input wire clk,rst_n,fonts_ready,
  input wire command_valid,output wire command_take,
+ // 0 = testo con i font della User Flash, 1 = riempimento di un rettangolo.
+ // Le due forme condividono coda, registri di comando e percorso di burst:
+ // x, y, box_width, box_height e foreground sono gia' esattamente i campi che
+ // servono a un rettangolo, quindi il fill non aggiunge nessun registro.
+ input wire command_kind,
  input wire [1:0] command_font_id,input wire [7:0] command_flags,
  input wire [8:0] command_x,input wire [8:0] command_y,
  input wire [9:0] command_box_width,input wire [8:0] command_box_height,
@@ -19,8 +24,10 @@ module TextRenderer (
  localparam [3:0] IDLE=0,CHAR_ADDR=1,CHAR_WAIT=2,CHAR_CONSUME=3,
                   PROCESS_CHAR=4,GLYPH_BASE=5,POSITION_CHAR=6,
                   FETCH_REQUEST=7,FETCH_WAIT=8,PREP_BURST=9,
-                  BUILD_PIXEL=10,ISSUE_BURST=11,DONE=12,WAIT_CLEAR=13;
+                  BUILD_PIXEL=10,ISSUE_BURST=11,DONE=12,WAIT_CLEAR=13,
+                  FILL_PREP=14;
  reg [3:0] state;
+ reg kind;
  reg [1:0] font_id;
  reg [7:0] flags;
  reg [8:0] origin_x,pen_x,pen_y;
@@ -56,6 +63,10 @@ module TextRenderer (
  wire build_bit_on = build_inside && build_column<16 &&
                      glyph_bits[15-build_column[3:0]];
  wire build_selected = build_inside && (!flags[0] || build_bit_on);
+ // Il riempimento non ha glifo: la selezione e' il solo rettangolo, e i
+ // limiti sono gia' quelli calcolati per il box del testo.
+ wire fill_selected = row_visible && build_x>={1'b0,pen_x} &&
+                      build_x<clip_right;
 
  function automatic [7:0] map_glyph(input [20:0] cp);
    begin
@@ -83,9 +94,13 @@ module TextRenderer (
      text_read_address<=0;codepoint<=0;decode_value<=0;decode_minimum<=0;
      decode_remaining<=0;glyph_index<=0;glyph_base<=0;glyph_row<=0;glyph_bits<=0;
      second_burst<=0;burst_x<=0;pixel_index<=0;update_address<=0;
-     update_data<=0;update_mask<=0;row_visible<=0;
+     update_data<=0;update_mask<=0;row_visible<=0;kind<=0;
    end else case(state)
-     IDLE: if(command_valid && fonts_ready) begin
+     // Un riempimento non tocca la User Flash, quindi resta disponibile
+     // anche quando i font mancano o non superano il CRC.
+     IDLE: if(command_valid && (command_kind || fonts_ready)) begin
+       kind<=command_kind;glyph_row<=0;
+       burst_x<={1'b0,command_x[8:4],4'd0};
        font_id<=command_font_id;flags<=command_flags;origin_x<=command_x;
        pen_x<=command_x;pen_y<=command_y;foreground<=command_foreground;
        background<=command_background;length<=command_length;byte_index<=0;
@@ -101,7 +116,7 @@ module TextRenderer (
          1:begin font_width<=12;font_height<=24;row_bytes_two<=1;end
          default:begin font_width<=16;font_height<=32;row_bytes_two<=1;end
        endcase
-       state<=CHAR_ADDR;
+       state<=command_kind?FILL_PREP:CHAR_ADDR;
      end
      CHAR_ADDR: begin
        if(byte_index>=length) begin
@@ -183,6 +198,11 @@ module TextRenderer (
        else glyph_bits<={flash_data[7:0],flash_data[15:8]};
        state<=PREP_BURST;
      end
+     FILL_PREP:begin
+       row_visible<=pen_y<clip_bottom;
+       update_address<=render_row_address+burst_x;
+       update_data<=0;update_mask<=0;pixel_index<=0;state<=BUILD_PIXEL;
+     end
      PREP_BURST:begin
        burst_x<=candidate_burst_x;
        row_visible<=render_y<clip_bottom;
@@ -190,13 +210,24 @@ module TextRenderer (
        update_data<=0;update_mask<=0;pixel_index<=0;state<=BUILD_PIXEL;
      end
      BUILD_PIXEL:begin
-       update_data<={(build_bit_on?foreground:background),update_data[255:16]};
-       update_mask<={build_selected,update_mask[15:1]};
+       update_data<={((kind||build_bit_on)?foreground:background),
+                     update_data[255:16]};
+       update_mask<={(kind?fill_selected:build_selected),update_mask[15:1]};
        if(pixel_index==15)state<=ISSUE_BURST;
        else pixel_index<=pixel_index+1'b1;
      end
      ISSUE_BURST:if(update_mask==0 || update_take)begin
-       if(!second_burst && pen_x[3:0]+font_width>16 &&
+       // Riempimento: si avanza di un gruppo da 16 finche' la riga non e'
+       // coperta, poi si scende di una riga ripartendo dal gruppo allineato
+       // che contiene il bordo sinistro.
+       if(kind)begin
+         if(burst_x+10'd16<clip_right)begin
+           burst_x<=burst_x+10'd16;state<=FILL_PREP;
+         end else if(pen_y+9'd1>=clip_bottom)state<=DONE;
+         else begin
+           pen_y<=pen_y+9'd1;burst_x<={1'b0,pen_x[8:4],4'd0};state<=FILL_PREP;
+         end
+       end else if(!second_burst && pen_x[3:0]+font_width>16 &&
           ({1'b0,pen_x[8:4],4'd0}+10'd16)<480)begin
          second_burst<=1;state<=PREP_BURST;
        end else if(glyph_row+1>=font_height ||

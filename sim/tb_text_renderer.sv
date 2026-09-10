@@ -1,6 +1,6 @@
 `timescale 1ns/1ps
 module tb_text_renderer;
- reg clk=0,rst=0,command_valid=0;always #6 clk=~clk;
+ reg clk=0,rst=0,command_valid=0,kind=0;always #6 clk=~clk;
  reg [1:0] font_id=1;reg [7:0] flags=0;reg [8:0] x=5,y=7;
  reg [9:0] box_width=12;reg [8:0] box_height=24;
  reg [15:0] foreground=16'hF800,background=16'h001F;
@@ -14,7 +14,8 @@ module tb_text_renderer;
   .read_request(flash_request),.read_address(flash_address),.read_ready(flash_ready),
   .read_valid(flash_valid),.read_data(flash_data));
  TextRenderer renderer(.clk(clk),.rst_n(rst),.fonts_ready(fonts_ready),
-  .command_valid(command_valid),.command_take(command_take),.command_font_id(font_id),
+  .command_valid(command_valid),.command_take(command_take),.command_kind(kind),
+  .command_font_id(font_id),
   .command_flags(flags),.command_x(x),.command_y(y),.command_box_width(box_width),
   .command_box_height(box_height),.command_foreground(foreground),
   .command_background(background),.command_length(length),

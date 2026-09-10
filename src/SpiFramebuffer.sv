@@ -11,6 +11,8 @@ module SpiFramebuffer (
  output reg [15:0] mask,
  input wire text_clk,text_rst_n,text_enabled,
  output wire text_valid, input wire text_take,
+ // 0 = comando testo B8, 1 = forma B9. Le due condividono coda e registri.
+ output reg text_kind,
  output reg [1:0] text_font_id,
  output reg [7:0] text_flags,
  output reg [8:0] text_x,
@@ -27,7 +29,7 @@ module SpiFramebuffer (
  wire push;
  reg [7:0] echo_byte;
  reg [6:0] index;
- reg selected,selected_text,accept_packet,accept_text;
+ reg selected,selected_text,selected_shape,accept_packet,accept_text,accept_shape;
  reg [23:0] staging_addr;
  reg [15:0] staging_mask;
  reg [255:0] staging_pixels;
@@ -41,6 +43,9 @@ module SpiFramebuffer (
  wire available = request == ack2;
  wire text_available = text_request == text_ack2;
  wire text_commit_index = selected_text && index==(7'd19+text_length);
+ // Il pacchetto forma e' a lunghezza fissa: 18 byte, commit all'indice 16.
+ wire shape_commit_index = selected_shape && index==7'd16;
+ wire shape_fields_valid = !text_invalid && text_x<480 && text_y<272;
  wire text_fields_valid = !text_invalid && text_font_id<=2 && text_flags[7:2]==0 &&
                           text_x<480 && text_y<272 && text_length<=64;
 
@@ -92,8 +97,22 @@ module SpiFramebuffer (
    if(!rst_n) begin
      text_font_id<=0;text_flags<=0;text_x<=0;text_y<=0;
      text_box_width<=0;text_box_height<=0;text_foreground<=0;
-     text_background<=0;text_length<=0;
-   end else if(push && selected_text && accept_text) begin
+     text_background<=0;text_length<=0;text_kind<=0;
+   end else if(push) begin
+    // Il tipo si fissa sull'opcode, prima di qualunque campo.
+    if(index==0) begin
+      if(rx==8'hB8) text_kind<=0;
+      if(rx==8'hB9) begin text_kind<=1;text_length<=0;end
+    end
+    if(selected_shape && accept_shape) case(index)
+       3:text_flags<=rx;
+       4:text_x[8]<=rx[0];5:text_x[7:0]<=rx;
+       6:text_y[8]<=rx[0];7:text_y[7:0]<=rx;
+       8:text_box_width[9:8]<=rx[1:0];9:text_box_width[7:0]<=rx;
+       10:text_box_height[8]<=rx[0];11:text_box_height[7:0]<=rx;
+       12,13:text_foreground<={text_foreground[7:0],rx};
+    endcase
+    if(selected_text && accept_text) begin
      case(index)
        2:text_font_id<=rx[1:0];3:text_flags<=rx;
        4:text_x[8]<=rx[0];5:text_x[7:0]<=rx;
@@ -104,7 +123,8 @@ module SpiFramebuffer (
        14,15:text_background<={text_background[7:0],rx};
        16:text_length<=rx[6:0];
      endcase
-    if(index>=17 && index<=16+text_length) text_memory[index-17]<=rx;
+     if(index>=17 && index<=16+text_length) text_memory[index-17]<=rx;
+    end
    end
  end
  assign valid = req2 != ack;
@@ -124,12 +144,16 @@ module SpiFramebuffer (
      if(text_commit_index && accept_text && rx==8'hA6 && text_fields_valid &&
         text_expected_crc==text_crc)
        text_request<=!text_request;
+     if(shape_commit_index && accept_shape && rx==8'hA6 && shape_fields_valid &&
+        text_expected_crc==text_crc)
+       text_request<=!text_request;
    end
  end
 
  always @(posedge sck or negedge rst_n or posedge cs_n) begin
    if(!rst_n || cs_n) begin
-     index<=0;selected<=0;selected_text<=0;accept_packet<=0;accept_text<=0;
+     index<=0;selected<=0;selected_text<=0;selected_shape<=0;
+     accept_packet<=0;accept_text<=0;accept_shape<=0;
      echo_byte<=8'hA5;staging_addr<=0;staging_mask<=0;staging_pixels<=0;
      text_crc<=16'hFFFF;text_expected_crc<=0;text_invalid<=0;
    end else if(push) begin
@@ -138,23 +162,40 @@ module SpiFramebuffer (
        echo_byte<=available?8'hC3:8'h00;
      if(index==0 && rx==8'hB8)
        echo_byte<=!text_enabled2?8'hE2:(text_available?8'hC3:8'h00);
+     // Un riempimento non usa i font, quindi non dipende da text_enabled.
+     if(index==0 && rx==8'hB9)
+       echo_byte<=text_available?8'hC3:8'h00;
      if(selected && index==39)
        echo_byte<=(accept_packet && rx==8'h5A && staging_addr<24'd130560 &&
                    staging_addr[3:0]==0)?8'hAC:8'hE1;
      if(text_commit_index)
        echo_byte<=(accept_text && rx==8'hA6 && text_fields_valid &&
                    text_expected_crc==text_crc)?8'hAC:8'hE1;
+     if(shape_commit_index)
+       echo_byte<=(accept_shape && rx==8'hA6 && shape_fields_valid &&
+                   text_expected_crc==text_crc)?8'hAC:8'hE1;
      if(index!=127) index<=index+1'b1;
      if(index==0) begin
        selected<=rx==8'hB7;selected_text<=rx==8'hB8;
+       selected_shape<=rx==8'hB9;
        accept_packet<=available;
        accept_text<=text_available && text_enabled2;
+       accept_shape<=text_available;
        text_crc<=16'hFFFF;text_invalid<=0;
      end
      if(selected && accept_packet) begin
        if(index>=2 && index<=4) staging_addr<={staging_addr[15:0],rx};
        if(index==5 || index==6) staging_mask<={staging_mask[7:0],rx};
        if(index>=7 && index<=38) staging_pixels<={rx,staging_pixels[255:8]};
+     end
+     if(selected_shape && accept_shape) begin
+       if(index>=2 && index<=13) text_crc<=crc16_byte(text_crc,rx);
+       if(index==2 && rx!=0)text_invalid<=1;   // solo il rettangolo
+       if(index==3 && rx!=0)text_invalid<=1;   // flags riservati
+       if((index==4 || index==6 || index==10) && rx>1)text_invalid<=1;
+       if(index==8 && rx>3)text_invalid<=1;
+       if(index==14) text_expected_crc[15:8]<=rx;
+       if(index==15) text_expected_crc[7:0]<=rx;
      end
      if(selected_text && accept_text) begin
        if(index>=2 && index<=16+text_length)

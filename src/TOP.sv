@@ -60,6 +60,7 @@ module TOP
     wire fonts_ready,fonts_error,flash_request,flash_ready,flash_valid;
     wire [14:0] flash_address;
     wire [31:0] flash_data;
+    wire text_kind;
     wire text_update_valid_slow,text_update_valid_fast,text_update_take_slow;
     reg text_update_valid_fast1,text_update_valid_fast2,text_update_ack_fast;
     (* async_reg = "true" *) reg text_update_ack_slow1,text_update_ack_slow2;
@@ -74,7 +75,8 @@ module TOP
         .text_font_id(text_font_id),.text_flags(text_flags),.text_x(text_x),.text_y(text_y),
         .text_box_width(text_box_width),.text_box_height(text_box_height),
         .text_foreground(text_foreground),.text_background(text_background),
-        .text_length(text_length),.text_read_address(text_read_address),
+        .text_length(text_length),.text_kind(text_kind),
+        .text_read_address(text_read_address),
         .text_read_data(text_read_data)
     );
     FontStore font_store(
@@ -85,6 +87,7 @@ module TOP
     TextRenderer text_renderer(
         .clk(XTAL_IN),.rst_n(font_rst_n),.fonts_ready(fonts_ready),
         .command_valid(text_command_valid),.command_take(text_command_take),
+        .command_kind(text_kind),
         .command_font_id(text_font_id),.command_flags(text_flags),
         .command_x(text_x),.command_y(text_y),.command_box_width(text_box_width),
         .command_box_height(text_box_height),.command_foreground(text_foreground),
