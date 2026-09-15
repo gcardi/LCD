@@ -1,5 +1,9 @@
 # Studio: copie, scroll, framebuffer multipli e ROP
 
+**Aggiornamento 15 settembre:** double buffering, PRESENT e IRQ sono ora
+implementati e documentati in [DOUBLE_BUFFER.md](DOUBLE_BUFFER.md). Il seguito
+conserva lo studio del 10 settembre; copie, scroll e ROP restano da implementare.
+
 10 settembre 2026. **Solo valutazione: nessuna delle estensioni di questo
 documento è implementata, nessun opcode nuovo è assegnato.** La memoria
 attuale è PSRAM integrata, non un controller SDRAM esterno. Le considerazioni

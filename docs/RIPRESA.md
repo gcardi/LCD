@@ -1,4 +1,52 @@
-# Punto di ripresa — 10 settembre 2026
+# Punto di ripresa - 15 settembre 2026
+
+## Stato corrente: double buffering, PRESENT e IRQ
+
+Implementati e caricati in flash FPGA (insieme ai font) e STM32 Release.
+Due slot PSRAM da 256 KiB, front/back, B7/B8/B9 sul back dopo abilitazione.
+PRESENT aspetta tutte le scritture e scambia al nuovo confine di frame;
+FIFO drenata prima della conferma. IRQ IO28 -> PB0 basso fino ad ACK SPI.
+BA controlla enable/PRESENT/ACK; BB espone versione, capacita', stato e CRC.
+Sequenza a 16 bit: il duplicato dell'ultimo PRESENT non ripete lo swap.
+Riferimento completo: [DOUBLE_BUFFER.md](DOUBLE_BUFFER.md).
+
+Al banco: demo completata, **17 presentazioni e 17 fronti EXTI**, zero errori
+SPI/LCD/HAL, IRQ finale alto e flag azzerato. Front 1, sequenza 17 dopo avvio
+FPGA fresco. 4374 byte SPI a 12.5 MHz verificati senza mismatch.
+Clear ancora 128 ms per 16 operazioni (8 ms ciascuna); ultima attesa PRESENT
+12 ms, singola misura e non limite massimo. Utente: **immagine finale corretta**.
+
+Build FPGA: zero violazioni setup/hold/recovery/removal, PSRAM 81 MHz con
+Fmax riportata 84.277 MHz; 3760/8640 risorse logiche (44%), 2622 registri (39%),
+3 BSRAM. Una prima versione aveva -0.224 ns sul percorso di barriera;
+registrare la condizione di code svuotate ha risolto senza cambiare vincoli.
+MCU Release e Debug compilate. Bitstream CRC verificato; flash STM32 confrontata
+con l'ELF prima di interpretare i simboli RAM. Font validati a runtime.
+Risultato: `stm32/WeAct_H743_SPI/build/Release/double-buffer-result.json`.
+
+Verifiche: sette testbench SPI/grafica passati; integrazione TOP con PSRAM
+simulata e FIFO modello/reale, tre frame interi verificati pixel per pixel.
+La variante FIFO reale verifica anche B7 mascherato e B8 sul secondo target.
+Regressione underrun con FIFO reale passata: recupero immediato, quattro frame
+successivi integri. Log in `sim/build/`, dettagli in DOUBLE_BUFFER.md.
+
+La demo esegue un'animazione di 16 frame e termina sul campione grafico/testuale
+con la scritta `Double buffer + VSYNC + IRQ: OK`.
+
+```powershell
+# Solo lettura, controlla anche corrispondenza flash MCU / ELF:
+.\stm32\WeAct_H743_SPI\test-double-buffer.ps1 -ReadOnly -SerialNumber 35FF6C064D53373238602143
+```
+
+**Prossimo sviluppo:** valutare blitter COPY fra buffer per lo scroll.
+Il back non viene copiato o inizializzato automaticamente: cancellarlo o
+ricostruirlo prima del primo PRESENT e gestire la coerenza per redraw parziali.
+Triple buffering e ROP restano futuri. Nessuna prova fisica di spegnimento e
+riaccensione eseguita in questa sessione.
+
+## Cronologia precedente - 10 settembre 2026
+
+Le sezioni successive descrivono lo stato storico, superato dalla sintesi sopra.
 
 ## Stato verificato a fine sessione
 

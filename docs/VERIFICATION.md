@@ -1,5 +1,27 @@
 # Verifica del progetto
 
+## Double buffering - 15 settembre 2026
+
+Protocollo e comandi: [DOUBLE_BUFFER.md](DOUBLE_BUFFER.md).
+
+- Sette testbench SPI/grafica: PASS.
+- `run_double_buffer_sim.ps1`, FIFO modello e reale: PASS, tre frame interi
+  (391680 pixel) per esecuzione, due swap, CRC/aborti, barriera mentre B9 lavora,
+  blocco comandi concorrenti, isolamento del front, duplicati e ACK errati.
+  La variante reale include anche B7 mascherato e B8 nel back.
+- `run_sim.ps1 -Mode current`: PASS, dopo underrun quattro frame integri;
+  FIFO RTL reale, nessuna regressione del recupero al frame successivo.
+- Build FPGA: nessuna violazione setup/hold/recovery/removal, nessuna eccezione
+  di calibrazione usata. Fmax PSRAM 84.277 MHz per clock operativo 81 MHz.
+  Log/manifest: `impl/build.log`, `impl/verification.json`.
+- Build MCU Debug e Release: PASS; Release installata con verifica flash.
+- Banco: 17 PRESENT completati e 17 fronti EXTI, IRQ confermato e rilasciato,
+  4374 byte eco senza mismatch, nessun errore LCD/HAL. Clear 8 ms;
+  ultima attesa PRESENT 12 ms. Immagine finale confermata dall'utente.
+
+Il test PSRAM e' comportamentale. Non sono state eseguite rilettura fisica dei
+pixel del pannello, misura strumentale dei fronti VSYNC/IRQ o prova di power-cycle.
+
 ## Comandi riproducibili
 
 Per il protocollo SPI e le primitive grafiche eseguire anche

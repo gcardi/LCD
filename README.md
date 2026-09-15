@@ -135,7 +135,7 @@ Misure del raster, risultati e limiti della verifica sono in
 
 | Documento | Contenuto |
 |---|---|
-| [GRAPHICS_COMMANDS.md](docs/GRAPHICS_COMMANDS.md) | **elenco completo dei comandi grafici**: i due opcode SPI, l'API C dell'STM32, i byte di stato e ciò che non esiste |
+| [GRAPHICS_COMMANDS.md](docs/GRAPHICS_COMMANDS.md) | **elenco completo dei comandi grafici**: opcode SPI e API, l'API C dell'STM32, i byte di stato e ciò che non esiste |
 | [PROGRAMMING.md](docs/PROGRAMMING.md) | come si programma la scheda, quale programmatore funziona e perché, driver USB, trappole della flash |
 | [VERIFICATION.md](docs/VERIFICATION.md) | comandi di verifica riproducibili, misure del raster, limiti di ciò che i test dimostrano |
 | [SPI_SLAVE.md](docs/SPI_SLAVE.md) | il trasporto SPI mode 0 in `SpiSlave.sv`, indipendente dal protocollo |
@@ -145,10 +145,16 @@ Misure del raster, risultati e limiti della verifica sono in
 | [SPI_STRESS.md](docs/SPI_STRESS.md) | qualifica prolungata del collegamento, e perché 25 MHz non passa |
 | [SPI_PERFORMANCE.md](docs/SPI_PERFORMANCE.md) | cronologia della salita in frequenza con GPIO `VERY_HIGH`; non è la configurazione attuale |
 | [LVGL_IMPL.md](docs/LVGL_IMPL.md) | studio speculativo su un controller grafico per LVGL; non descrive codice esistente |
+| [DOUBLE_BUFFER.md](docs/DOUBLE_BUFFER.md) | double buffering, PRESENT, IRQ, protocollo BA/BB e collaudo |
 | [RIPRESA.md](docs/RIPRESA.md) | punto di ripresa del lavoro: stato corrente, verifiche superate, punti ancora aperti |
 | [README STM32](stm32/WeAct_H743_SPI/README.md) | cablaggio, firmware, comando unico di build, upload e collaudo |
 
 ## Grafica implementata e sviluppi futuri
+
+**Double buffering, PRESENT al confine del frame e IRQ sono implementati.**
+Due buffer PSRAM, disegno sul back e conferma dello swap su IO28 -> PB0.
+Protocollo BA/BB, API e collaudo: [DOUBLE_BUFFER.md](docs/DOUBLE_BUFFER.md).
+
 
 Il modulo autonomo [SpiSlave](docs/SPI_SLAVE.md) implementa il trasporto SPI
 mode 0 per un master STM32 ed e' verificabile con `./sim/run_spi_sim.ps1`.
@@ -166,8 +172,8 @@ Riferimento completo:
 trasformare la scheda in un controller grafico SPI pilotabile da un
 microcontrollore con LVGL. Non descrive funzionalità presenti nel codice.
 Lo studio [BLITTING_ROP_STUDY.md](docs/BLITTING_ROP_STUDY.md) valuta copie
-fra framebuffer, scroll, presentazione a confine frame e ROP come XOR;
-queste estensioni non sono implementate.
+fra framebuffer, scroll e ROP come XOR, ancora da implementare.
+La parte di presentazione ha ora un riferimento implementativo in DOUBLE_BUFFER.md.
 
 ## Licenza e attribuzione
 

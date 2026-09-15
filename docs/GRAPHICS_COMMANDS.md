@@ -1,13 +1,13 @@
 # Comandi grafici supportati
 
-Riferimento unico di tutto ciò che si può disegnare, aggiornato al 10 settembre
+Riferimento unico di tutto ciò che si può disegnare, aggiornato al 15 settembre
 2026. Verificato contro `src/SpiFramebuffer.sv`, `src/TextRenderer.sv` e le
 implementazioni in `stm32/WeAct_H743_SPI/Core/Src/`. Per il dettaglio byte per
 byte di B7 e B8 vedere [SPI_FRAMEBUFFER.md](SPI_FRAMEBUFFER.md) e
 [SPI_TEXT.md](SPI_TEXT.md); B9 è descritto qui. Qui c'è
 l'elenco completo, i limiti e ciò che **non** esiste.
 
-Il quadro si legge su due livelli: la FPGA espone **tre opcode grafici SPI**;
+Il quadro si legge su due livelli: la FPGA espone **tre opcode di disegno SPI e due di controllo/stato**;
 l'API STM32 prepara i pacchetti e gestisce attese, risposte ed errori.
 
 ## Livello FPGA: gli opcode SPI
@@ -17,9 +17,15 @@ l'API STM32 prepara i pacchetti e gestisce attese, risposte ed errori.
 | `B7` | scrive un burst mascherato di 16 pixel RGB565 in PSRAM |
 | `B8` | disegna una stringa UTF-8 con i font della User Flash |
 | `B9` | riempie un rettangolo o traccia una linea RGB565, senza trasferire i singoli pixel |
+| `BA` | abilita double buffering, richiede PRESENT o conferma IRQ |
+| `BB` | legge capacità e stato coerente con CRC |
 | altro | percorso di eco diagnostica: risponde `A5` e poi l'eco del byte precedente |
 
-Non ci sono altri opcode grafici. `B9` permette anche linee orizzontali o
+Double buffering e protocollo BA/BB sono descritti in [DOUBLE_BUFFER.md](DOUBLE_BUFFER.md).
+Le API sono `LCD_EnableDoubleBuffer`, `LCD_GetBufferStatus` e `LCD_Present(timeout_ms)`.
+Dopo l’abilitazione, B7/B8/B9 disegnano nel back; PRESENT aspetta le scritture,
+esegue lo swap al confine del frame e conferma IRQ via SPI.
+ `B9` permette anche linee orizzontali o
 verticali spesse un pixel tramite rettangoli di altezza o larghezza 1, e di cancellare tutto lo
 schermo riempiendolo con un colore. Non esistono comandi FPGA per tracciare
 cerchi, copiare aree, rileggere i pixel o cambiare il parametro del
@@ -142,7 +148,8 @@ Il protocollo non espone ancora una negoziazione delle capacità.
 Tipo, flags, coordinate o CRC non validi fanno rifiutare il comando prima
 del disegno. Dopo il commit accettato, alzare CS non annulla l'operazione.
 La verifica CRC non rende l'aggiornamento visivamente atomico: la FPGA
-scrive progressivamente, senza doppio framebuffer.
+scrive progressivamente nel target selezionato. Con double buffering abilitato
+le modifiche diventano visibili insieme dopo PRESENT.
 
 ## Livello STM32: l'API C e l'uso da C++
 
@@ -256,6 +263,13 @@ la prima volta, non l'ultima.
 | 19, 20 | `B9`, invio | primo byte non `A5`; secondo byte non `C3` |
 | 21 | `B9`, invio | eco non corrispondente: problema di trasporto |
 | 22 | `B9`, invio | esito `E1`: **la FPGA ha rifiutato la forma** |
+| 23–25 | `BB` | identità/versione, CRC o campi di stato errati |
+| 26 | controllo buffer | timeout in attesa di completamento |
+| 27–29 | `BA` | disponibilità, eco o commit errato |
+| 30–31 | ACK | risultato/IRQ pendente errato, oppure GPIO rimasto basso |
+| 32–33 | double buffering | stato incompatibile con enable o PRESENT |
+| 34–36 | PRESENT | esito/sequenza/front errati, GPIO IRQ non basso, timeout |
+| 37 | demo | conteggio fronti EXTI diverso dalle 16 presentazioni iniziali |
 
 La fase più informativa è la **22**. Significa che il pacchetto è arrivato
 integro ma il renderer non lo ha accettato, e le cause sono poche: CRC16
@@ -289,15 +303,14 @@ sparsi e irriproducibili.
 
 ## Cosa manca, in breve
 
-Utile averlo scritto per non ricercarlo ogni volta. Non esistono: cerchi,
-poligoni come comando dedicato, blit fra aree del framebuffer, rilettura dei pixel, doppio
-framebuffer, sincronizzazione con il vblank esposta al master, cambio del
-parametro di sfondo iniziale a runtime, font proporzionali, rotazione o scalatura dei
-glifi. Un rettangolo può comparire progressivamente, perché non c'è doppio
-buffer: il tearing è atteso.
+Non esistono ancora cerchi, poligoni come comando dedicato, blit fra aree,
+rilettura dei pixel, triple buffering, modifica del parametro di sfondo iniziale
+a runtime, font proporzionali, rotazione o scalatura dei glifi.
+Il disegno diretto nel buffer visibile al reset resta soggetto a tearing;
+abilita double buffering e usa PRESENT per aggiornamenti al confine del frame.
 Il contenuto di sfondo visibile si può invece cambiare a runtime con `LCD_Clear`.
 
 Le idee per superare parte di questi limiti sono raccolte in
 [LVGL_IMPL.md](LVGL_IMPL.md), che è però uno studio speculativo. Per copie,
-scroll, framebuffer multipli e ROP vedere [BLITTING_ROP_STUDY.md](BLITTING_ROP_STUDY.md),
+scroll e ROP vedere [BLITTING_ROP_STUDY.md](BLITTING_ROP_STUDY.md),
 anch'esso solo studio, senza implementazione.
