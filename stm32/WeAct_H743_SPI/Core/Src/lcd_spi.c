@@ -57,6 +57,111 @@ static uint16_t crc16_byte(uint16_t crc,uint8_t value)
     return crc;
 }
 
+volatile uint32_t g_lcd_present_count, g_lcd_present_ms;
+volatile uint32_t g_lcd_front_buffer, g_lcd_present_sequence;
+
+int LCD_GetBufferStatus(LcdBufferStatus *status)
+{
+    uint8_t tx[11]={0xBB},rx[11];
+    if(!status || !exchange(tx,rx,sizeof(tx))) return 0;
+    if(rx[0]!=0xA5 || rx[1]!=0xD2 || rx[2]!=1 || rx[3]!=2)
+        return bad(23,1,0xD2,rx[1]);
+    uint16_t crc=0xFFFF;
+    for(unsigned i=1;i<=8;i++) crc=crc16_byte(crc,rx[i]);
+    uint16_t received=(uint16_t)((uint16_t)rx[9]<<8)|rx[10];
+    if(crc!=received) return bad(24,9,crc,received);
+    if((rx[4]&0xF0) || rx[5]>1) return bad(25,4,0,rx[4]);
+    *status=(LcdBufferStatus){.enabled=rx[4]&1,.front=(rx[4]>>1)&1,
+        .draw=rx[5],.irq=(rx[4]>>2)&1,.busy=(rx[4]>>3)&1,
+        .result=rx[8],.sequence=(uint16_t)((uint16_t)rx[6]<<8)|rx[7]};
+    return 1;
+}
+
+static int buffer_idle(LcdBufferStatus *status,uint32_t timeout_ms)
+{
+    uint32_t start=HAL_GetTick();
+    do {
+        if(!LCD_GetBufferStatus(status)) return 0;
+        if(!status->busy) return 1;
+        HAL_Delay(1);
+    } while(HAL_GetTick()-start<timeout_ms);
+    return bad(26,0,0,1);
+}
+
+// AC acknowledges acceptance only. The BB mailbox reports completion.
+static int buffer_command(uint8_t op,uint8_t buffer,uint16_t sequence)
+{
+    uint8_t tx[10]={0xBA,0,op,buffer,(uint8_t)(sequence>>8),(uint8_t)sequence},rx[10];
+    uint16_t crc=0xFFFF;
+    for(unsigned i=2;i<=5;i++) crc=crc16_byte(crc,tx[i]);
+    tx[6]=(uint8_t)(crc>>8);tx[7]=(uint8_t)crc;tx[8]=0xA6;
+    if(!exchange(tx,rx,sizeof(tx))) return 0;
+    if(rx[0]!=0xA5 || rx[1]!=0xC3) return bad(27,1,0xC3,rx[1]);
+    for(unsigned i=2;i<=8;i++)
+        if(rx[i]!=tx[i-1]) return bad(28,i,tx[i-1],rx[i]);
+    if(rx[9]!=0xAC) return bad(29,9,0xAC,rx[9]);
+    return 1;
+}
+
+static int acknowledge_present(uint16_t sequence)
+{
+    LcdBufferStatus status;
+    if(!buffer_command(3,0,sequence) || !buffer_idle(&status,1000)) return 0;
+    if(status.result || status.irq) return bad(30,0,0,status.result?status.result:status.irq);
+    // No other caller can issue PRESENT between this ACK and flag clearing.
+    g_fpga_irq_pending=0;
+    g_fpga_irq_level=HAL_GPIO_ReadPin(FPGA_IRQ_N_GPIO_Port,FPGA_IRQ_N_Pin)==GPIO_PIN_SET;
+    if(!g_fpga_irq_level) return bad(31,0,1,0);
+    return 1;
+}
+
+int LCD_EnableDoubleBuffer(void)
+{
+    LcdBufferStatus status;
+    if(!buffer_idle(&status,1000)) return 0;
+    // Recover a completed presentation after an MCU-only reset.
+    if(status.irq && !acknowledge_present(status.sequence)) return 0;
+    if(!buffer_command(1,0,0) || !buffer_idle(&status,1000)) return 0;
+    if(status.result || !status.enabled || status.draw==status.front)
+        return bad(32,0,1,status.enabled);
+    g_lcd_front_buffer=status.front;g_lcd_present_sequence=status.sequence;
+    return 1;
+}
+
+int LCD_Present(uint32_t timeout_ms)
+{
+    LcdBufferStatus status;
+    if(!timeout_ms || !buffer_idle(&status,timeout_ms)) return 0;
+    if(!status.enabled || status.irq) return bad(33,0,1,status.enabled);
+    uint8_t target=status.draw;
+    uint16_t sequence=(uint16_t)(status.sequence+1u);
+    g_fpga_irq_pending=0;
+    if(!buffer_command(2,target,sequence)) return 0;
+    uint32_t start=HAL_GetTick(),last_poll=start;
+    do {
+        // EXTI is the normal wakeup; the level also covers a missed edge.
+        // Occasional status polls diagnose rejection or a disconnected wire.
+        uint32_t now=HAL_GetTick();
+        uint32_t low=HAL_GPIO_ReadPin(FPGA_IRQ_N_GPIO_Port,FPGA_IRQ_N_Pin)==GPIO_PIN_RESET;
+        if(g_fpga_irq_pending || low || now-last_poll>=5) {
+            last_poll=now;
+            if(!LCD_GetBufferStatus(&status)) return 0;
+            if(!status.busy) {
+                if(status.result || !status.irq || status.sequence!=sequence || status.front!=target)
+                    return bad(34,0,sequence,status.sequence);
+                if(!low) return bad(35,0,0,1);
+                g_lcd_present_ms=HAL_GetTick()-start;
+                g_lcd_front_buffer=status.front;g_lcd_present_sequence=status.sequence;
+                if(!acknowledge_present(sequence)) return 0;
+                g_lcd_present_count++;
+                return 1;
+            }
+        }
+        HAL_Delay(1);
+    } while(HAL_GetTick()-start<timeout_ms);
+    return bad(36,0,sequence,status.sequence);
+}
+
 static int text_ready(void)
 {
     uint8_t tx[2]={0xB8,0},rx[2];
@@ -133,6 +238,21 @@ volatile uint32_t g_lcd_clear_ms16;
 void LCD_FPGATextDemo_Run(void)
 {
     g_lcd_fpga_text_demo_state=1;
+    if(!LCD_EnableDoubleBuffer()) {g_lcd_fpga_text_demo_state=3;return;}
+    // Rebuild every back frame: partial redraws would retain older contents.
+    // Exercise both physical buffers and the IRQ/ACK cycle before the sample.
+    uint32_t irq_start=g_fpga_irq_count;
+    for(unsigned frame=0;frame<16;frame++) {
+        if(!LCD_Clear(0x0000) ||
+           !LCD_DrawTextFPGA(24,32,0,0,LCD_FONT_12X24,0,0x07FF,0,
+                            "Double buffer / VSYNC / IRQ") ||
+           !LCD_FillRect((uint16_t)(24+frame*24),112,40,64,(frame&1)?0x07E0:0xF800) ||
+           !LCD_Present(1000)) {g_lcd_fpga_text_demo_state=3;return;}
+        HAL_Delay(80);
+    }
+    if(g_fpga_irq_count-irq_start!=16) {
+        bad(37,0,16,g_fpga_irq_count-irq_start);g_lcd_fpga_text_demo_state=3;return;
+    }
     uint32_t clear_start=HAL_GetTick();
     for(unsigned i=0;i<16;i++)
         if(!LCD_Clear(0x0000)) {g_lcd_fpga_text_demo_state=3;return;}
@@ -171,7 +291,10 @@ void LCD_FPGATextDemo_Run(void)
        !LCD_DrawLine(350,193,385,208,0x001F) ||
        !LCD_DrawLine(350,193,365,211,0xF81F) ||
        !LCD_DrawLine(350,193,335,211,0xFFFF) ||
-       !LCD_DrawLine(350,193,315,208,0xFD20)) {
+       !LCD_DrawLine(350,193,315,208,0xFD20) ||
+       !LCD_DrawTextFPGA(20,244,0,0,LCD_FONT_8X16,0,0x07E0,0,
+                        "Double buffer + VSYNC + IRQ: OK") ||
+       !LCD_Present(1000)) {
         g_lcd_fpga_text_demo_state=3;return;
     }
     g_lcd_fpga_text_demo_state=2;

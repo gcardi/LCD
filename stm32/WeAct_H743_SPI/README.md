@@ -10,6 +10,22 @@ estremi inclusi e richiede anche il nuovo bitstream FPGA. API e protocollo:
 Release collaudata: [confronto dimensioni e tempi](../../docs/MCU_RELEASE_COMPARISON.md).
 Le sezioni datate sotto conservano la cronologia dei collaudi.
 
+## Double buffering e PRESENT
+
+Implementati BA/BB e `LCD_EnableDoubleBuffer`, `LCD_GetBufferStatus`, `LCD_Present`.
+La demo presenta 16 frame animati e il campione finale, con verifica degli IRQ.
+Protocollo e limiti: [DOUBLE_BUFFER.md](../../docs/DOUBLE_BUFFER.md).
+Collaudo da questa cartella:
+
+```powershell
+.\test-double-buffer.ps1 -SerialNumber 35FF6C064D53373238602143
+.\test-double-buffer.ps1 -ReadOnly -SerialNumber 35FF6C064D53373238602143
+```
+
+Default Release. Il primo comando richiede un bitstream già compilato e
+verificato, programma FPGA/font e MCU; il secondo verifica la corrispondenza
+della flash STM32 con l’ELF e legge i risultati senza reset.
+
 ## Build e upload
 
 Aprire questa cartella in VS Code. Servono CMake, Ninja, arm-none-eabi-gcc
@@ -47,12 +63,12 @@ Il cablaggio e' implementato nel TOP e nei vincoli del progetto LCD.
 | PB15 | 25 | MOSI |
 | PB14 | 26 | MISO |
 | PB12 / FPGA_CS | 27 | CS attivo basso |
-| PB0 / FPGA_IRQ_N | 28 | futura notifica PRESENT, attiva bassa |
+| PB0 / FPGA_IRQ_N | 28 | notifica PRESENT, attiva bassa fino ad ACK |
 
 Collegamento IRQ IO28 -> PB0 confermato dall'utente. Lato MCU sono predisposti
 EXTI0 sul fronte di discesa, pull-up e priorità NVIC 5 (subpriorità 0).
-L'uscita IO28 e la logica PRESENT/IRQ non sono ancora implementate nella FPGA:
-questa riga descrive il cablaggio predisposto, non una funzione già operativa.
+IO28 e' ora pilotato dalla FPGA: un fronte segnala lo swap completato.
+L'ISR alza un flag; `LCD_Present` legge BB e conferma l'evento via BA.
 
 Nessun D/C. READY non e' ancora implementato e non serve al primo test breve.
 Slot microSD TangNano vuoto (SCK IO36 condiviso). Alimentazione dalle rispettive USB,

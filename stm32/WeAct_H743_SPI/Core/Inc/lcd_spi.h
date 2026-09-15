@@ -2,6 +2,20 @@
 #define LCD_SPI_H
 #include <stdint.h>
 extern volatile uint32_t g_lcd_demo_state;
+typedef struct {
+    uint8_t enabled, front, draw, irq, busy, result;
+    uint16_t sequence;
+} LcdBufferStatus;
+// Single-caller APIs. Enable waits for previous drawing and selects the back
+// buffer. Its contents are undefined until explicitly cleared/redrawn.
+int LCD_GetBufferStatus(LcdBufferStatus *status);
+int LCD_EnableDoubleBuffer(void);
+// Wait for prior drawing, swap at vertical blanking, observe IRQ, then ACK it.
+// On timeout/transport error do not retry blindly: inspect status first.
+int LCD_Present(uint32_t timeout_ms);
+extern volatile uint32_t g_lcd_present_count, g_lcd_present_ms;
+extern volatile uint32_t g_lcd_front_buffer, g_lcd_present_sequence;
+extern volatile uint32_t g_fpga_irq_count, g_fpga_irq_pending, g_fpga_irq_level;
 int LCD_WriteRect(uint16_t x, uint16_t y, uint16_t w, uint16_t h,
                   const uint16_t *pixels);
 // RGB565 colors. Blocking, single-caller APIs: 1 on success, 0 on error.

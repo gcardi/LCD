@@ -51,9 +51,7 @@
 /* USER CODE BEGIN PV */
 // Linea FPGA_IRQ_N su PB0, attiva bassa, EXTI sul fronte di discesa.
 // La convenzione e': alto = nessun evento, basso = evento da confermare via
-// SPI. Il bitstream attuale non pilota ancora questa linea, quindi finche'
-// resta cosi' il conteggio deve restare a zero: se sale, il filo raccoglie
-// disturbi o e' collegato male, ed e' bene saperlo prima di costruirci sopra.
+// SPI con la sequenza PRESENT completata. La callback non usa la SPI.
 volatile uint32_t g_fpga_irq_count;   // fronti di discesa osservati
 volatile uint32_t g_fpga_irq_pending; // 1 = evento non ancora consumato
 volatile uint32_t g_fpga_irq_level;   // livello letto a regime: 1 atteso
@@ -70,9 +68,8 @@ static void MPU_Config(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-// Nella callback si fa solo il minimo: alzare un flag. La lettura dello stato
-// e la conferma sulla SPI andranno nel ciclo principale, quando la FPGA
-// sapra' generare l'evento.
+// La callback conta il fronte e alza un flag. LCD_Present legge lo stato e
+// conferma l'evento via SPI nel contesto chiamante, fuori dall'interrupt.
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 {
     if(GPIO_Pin==FPGA_IRQ_N_Pin) {
