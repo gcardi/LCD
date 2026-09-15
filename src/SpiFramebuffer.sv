@@ -23,7 +23,12 @@ module SpiFramebuffer (
  output reg [15:0] text_background,
  output reg [6:0] text_length,
  input wire [5:0] text_read_address,
- output reg [7:0] text_read_data
+ output reg [7:0] text_read_data,
+ // BA control mailbox. Payload stays stable until completion, not acceptance.
+ output wire control_valid, input wire control_take,
+ output reg [7:0] control_op, output reg control_buffer,
+ output reg [15:0] control_sequence,
+ input wire [26:0] control_status
 );
  wire [7:0] rx;
  wire push;
@@ -42,6 +47,70 @@ module SpiFramebuffer (
  reg [7:0] text_memory[0:63];
  wire available = request == ack2;
  wire text_available = text_request == text_ack2;
+ reg control_request,control_ack;
+ (* async_reg = "true" *) reg control_req1,control_req2,control_ack1,control_ack2;
+ (* async_reg = "true" *) reg text_mem_req1,text_mem_req2,text_mem_ack1,text_mem_ack2;
+ reg control_seen;
+ reg [26:0] status_snapshot,status_packet;
+ reg status_busy;
+ reg graphics_idle;
+ reg selected_control,selected_status,accept_control;
+ reg [7:0] staging_op,staging_buffer;
+ reg [15:0] staging_sequence,control_crc,control_expected_crc,status_crc;
+ wire control_available = control_request == control_seen;
+ wire graphics_available = control_available;
+ wire control_fields_valid = staging_op>=1 && staging_op<=3 &&
+     (staging_op==2 ? staging_buffer<=1 : staging_buffer==0) &&
+     (staging_op!=1 || staging_sequence==0);
+ wire control_commit = selected_control && accept_control && index==8 &&
+     rx==8'hA6 && control_fields_valid && control_crc==control_expected_crc;
+ // Both producers must finish before the memory controller sees the barrier.
+ assign control_valid = control_req2!=control_ack && graphics_idle;
+
+ // Status is bundled with the completion toggle: capture only after its
+ // two-stage synchronizer, when the source bus has already settled. Hold a
+ // second snapshot throughout each BB packet, including its CRC.
+ always @(posedge sck or negedge rst_n) begin
+   if(!rst_n) begin
+     control_ack1<=0;control_ack2<=0;control_seen<=0;status_snapshot<=0;
+     control_request<=0;control_op<=0;control_buffer<=0;control_sequence<=0;
+   end else begin
+     control_ack1<=control_ack;control_ack2<=control_ack1;
+     if(control_ack2!=control_seen) begin
+       status_snapshot<=control_status;control_seen<=control_ack2;
+     end
+     if(push && control_commit) begin
+       control_op<=staging_op;control_buffer<=staging_buffer[0];
+       control_sequence<=staging_sequence;control_request<=!control_request;
+     end
+   end
+ end
+ always @(posedge clk or negedge mem_rst_n) begin
+   if(!mem_rst_n) begin
+     control_req1<=0;control_req2<=0;control_ack<=0;
+     text_mem_req1<=0;text_mem_req2<=0;text_mem_ack1<=0;text_mem_ack2<=0;
+     graphics_idle<=0;
+   end else begin
+     control_req1<=control_request;control_req2<=control_req1;
+     text_mem_req1<=text_request;text_mem_req2<=text_mem_req1;
+     text_mem_ack1<=text_ack;text_mem_ack2<=text_mem_ack1;
+     graphics_idle<=req2==ack && text_mem_req2==text_mem_ack2;
+     if(control_valid && control_take) control_ack<=control_req2;
+   end
+ end
+ function automatic [7:0] status_byte(input [6:0] n);
+   case(n)
+     0:status_byte=8'hD2;
+     1:status_byte=8'h01; // protocol version
+     2:status_byte=8'h02; // buffer count
+     3:status_byte={4'd0,status_busy,status_packet[2:0]}; // busy, IRQ, front, enabled
+     4:status_byte={7'd0,(status_packet[0] && !status_packet[1])}; // draw buffer
+     5:status_byte=status_packet[26:19]; // last completed PRESENT sequence
+     6:status_byte=status_packet[18:11];
+     7:status_byte=status_packet[10:3]; // last control result: 00 / E1
+     default:status_byte=0;
+   endcase
+ endfunction
  wire text_commit_index = selected_text && index==(7'd19+text_length);
  // Il pacchetto forma e' a lunghezza fissa: 18 byte, commit all'indice 16.
  wire shape_commit_index = selected_shape && index==7'd16;
@@ -102,7 +171,7 @@ module SpiFramebuffer (
      text_background<=0;text_length<=0;text_kind<=0;
    end else if(push) begin
     // Il tipo si fissa sull'opcode, prima di qualunque campo.
-    if(index==0 && text_available) begin
+    if(index==0 && text_available && graphics_available) begin
       if(rx==8'hB8 && text_enabled2) text_kind<=0;
       if(rx==8'hB9) begin text_kind<=1;text_length<=0;end
     end
@@ -159,15 +228,33 @@ module SpiFramebuffer (
      accept_packet<=0;accept_text<=0;accept_shape<=0;
      echo_byte<=8'hA5;staging_addr<=0;staging_mask<=0;staging_pixels<=0;
      text_crc<=16'hFFFF;text_expected_crc<=0;text_invalid<=0;
+     selected_control<=0;selected_status<=0;accept_control<=0;
+     staging_op<=0;staging_buffer<=0;staging_sequence<=0;
+     control_crc<=16'hFFFF;control_expected_crc<=0;
+     status_packet<=0;status_busy<=0;status_crc<=16'hFFFF;
    end else if(push) begin
      echo_byte<=rx;
      if(index==0 && rx==8'hB7)
-       echo_byte<=available?8'hC3:8'h00;
+       echo_byte<=(available && graphics_available)?8'hC3:8'h00;
      if(index==0 && rx==8'hB8)
-       echo_byte<=!text_enabled2?8'hE2:(text_available?8'hC3:8'h00);
+       echo_byte<=!text_enabled2?8'hE2:((text_available && graphics_available)?8'hC3:8'h00);
      // Un riempimento non usa i font, quindi non dipende da text_enabled.
      if(index==0 && rx==8'hB9)
-       echo_byte<=text_available?8'hC3:8'h00;
+       echo_byte<=(text_available && graphics_available)?8'hC3:8'h00;
+     if(index==0 && rx==8'hBA) echo_byte<=control_available?8'hC3:8'h00;
+     if(index==0 && rx==8'hBB) begin
+       echo_byte<=8'hD2;status_packet<=status_snapshot;
+       status_busy<=!control_available;status_crc<=crc16_byte(16'hFFFF,8'hD2);
+     end
+     if(selected_status) begin
+       if(index>=1 && index<=7) begin
+         echo_byte<=status_byte(index);
+         status_crc<=crc16_byte(status_crc,status_byte(index));
+       end
+       if(index==8) echo_byte<=status_crc[15:8];
+       if(index==9) echo_byte<=status_crc[7:0];
+     end
+     if(selected_control && index==8) echo_byte<=control_commit?8'hAC:8'hE1;
      if(selected && index==39)
        echo_byte<=(accept_packet && rx==8'h5A && staging_addr<24'd130560 &&
                    staging_addr[3:0]==0)?8'hAC:8'hE1;
@@ -181,10 +268,20 @@ module SpiFramebuffer (
      if(index==0) begin
        selected<=rx==8'hB7;selected_text<=rx==8'hB8;
        selected_shape<=rx==8'hB9;
-       accept_packet<=available;
-       accept_text<=text_available && text_enabled2;
-       accept_shape<=text_available;
+       accept_packet<=available && graphics_available;
+       accept_text<=text_available && text_enabled2 && graphics_available;
+       accept_shape<=text_available && graphics_available;
+       selected_control<=rx==8'hBA;selected_status<=rx==8'hBB;
+       accept_control<=control_available;
        text_crc<=16'hFFFF;text_invalid<=0;
+     end
+     if(selected_control && accept_control) begin
+       if(index>=2 && index<=5) control_crc<=crc16_byte(control_crc,rx);
+       case(index)
+         2:staging_op<=rx;3:staging_buffer<=rx;
+         4:staging_sequence[15:8]<=rx;5:staging_sequence[7:0]<=rx;
+         6:control_expected_crc[15:8]<=rx;7:control_expected_crc[7:0]<=rx;
+       endcase
      end
      if(selected && accept_packet) begin
        if(index>=2 && index<=4) staging_addr<={staging_addr[15:0],rx};

@@ -7,6 +7,7 @@ module TOP
     input wire      SPI_CS_N,
     input wire      SPI_MOSI,
     output wire     SPI_MISO,
+    output wire     FPGA_IRQ_N,
 
 	output			LCD_CLK,
 	output			LCD_HYNC,
@@ -43,6 +44,10 @@ module TOP
     wire [20:0] update_addr;
     wire [255:0] update_data;
     wire [15:0] update_mask;
+    wire control_valid,control_take,control_buffer;
+    wire [7:0] control_op;
+    wire [15:0] control_sequence;
+    wire [26:0] control_status;
     localparam SPI_FRAMEBUFFER = 1;
     generate if (SPI_FRAMEBUFFER) begin : graphics
     wire direct_valid,direct_take,text_command_valid,text_command_take;
@@ -77,7 +82,10 @@ module TOP
         .text_foreground(text_foreground),.text_background(text_background),
         .text_length(text_length),.text_kind(text_kind),
         .text_read_address(text_read_address),
-        .text_read_data(text_read_data)
+        .text_read_data(text_read_data),
+        .control_valid(control_valid),.control_take(control_take),
+        .control_op(control_op),.control_buffer(control_buffer),
+        .control_sequence(control_sequence),.control_status(control_status)
     );
     FontStore font_store(
         .clk(XTAL_IN),.rst_n(font_rst_n),.fonts_ready(fonts_ready),
@@ -130,6 +138,10 @@ module TOP
     assign update_addr = 0;
     assign update_data = 0;
     assign update_mask = 0;
+    assign control_valid=0;
+    assign control_op=0;
+    assign control_buffer=0;
+    assign control_sequence=0;
     SpiDiagnostic #(.MODE(0)) spi_diagnostic (
         .rst_n(global_rst_n), .sck(SPI_SCK), .cs_n(SPI_CS_N),
         .mosi(SPI_MOSI), .miso(spi_miso_data), .miso_oe(spi_miso_enable)
@@ -254,7 +266,10 @@ module TOP
 		.frame_restart    (frame_restart_psram),
 		.fifo_flush       (fifo_flush),
         .update_valid(update_valid), .update_take(update_take),
-        .update_addr(update_addr), .update_data(update_data), .update_mask(update_mask)
+        .update_addr(update_addr), .update_data(update_data), .update_mask(update_mask),
+        .control_valid(control_valid),.control_take(control_take),
+        .control_op(control_op),.control_buffer(control_buffer),
+        .control_sequence(control_sequence),.control_status(control_status),.irq_n(FPGA_IRQ_N)
 	);
 
 	FramebufferFifo framebuffer_fifo_inst (

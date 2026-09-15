@@ -27,7 +27,14 @@ module FramebufferController #(
     input wire [20:0] update_addr,
     input wire [255:0] update_data,
     input wire [15:0] update_mask,
-    output wire update_take
+    output wire update_take,
+    input wire control_valid,
+    input wire [7:0] control_op,
+    input wire control_buffer,
+    input wire [15:0] control_sequence,
+    output logic control_take,
+    output wire [26:0] control_status,
+    output wire irq_n
 );
 
     localparam int unsigned FRAME_WIDTH     = 480;
@@ -57,6 +64,14 @@ module FramebufferController #(
       logic fifo_almost_full_q;
     logic [255:0] update_words;
     logic [15:0] update_masks;
+    // Pixel addresses: two disjoint 128K-pixel slots (256 KiB each).
+    // The first 130560 pixels of each slot are the 480x272 image.
+    logic double_enabled,front_buffer,irq_pending,present_pending,present_flushing;
+    logic [15:0] completed_sequence;
+    logic [7:0] control_result;
+    wire draw_buffer = double_enabled && !front_buffer;
+    assign irq_n = !irq_pending;
+    assign control_status = {completed_sequence,control_result,irq_pending,front_buffer,double_enabled};
       assign update_take = state == UPDATE_COMMAND;
       // Break the FIFO pointer/threshold path before it reaches the controller
       // state decoder. The FIFO threshold already reserves a full burst.
@@ -194,6 +209,9 @@ module FramebufferController #(
     always_ff @(posedge clk or negedge nRST) begin
         if (!nRST) begin
             restart_pending <= 0;
+            double_enabled<=0;front_buffer<=0;irq_pending<=0;
+            present_pending<=0;present_flushing<=0;
+            completed_sequence<=0;control_result<=0;control_take<=0;
             update_words <= 0;
             update_masks <= 0;
             state          <= WAIT_CALIBRATION;
@@ -216,6 +234,7 @@ module FramebufferController #(
             // Commands are single-cycle pulses. Write data is reloaded every
             // cycle so each beat of the burst carries its own pixels.
             cmd_en <= 1'b0;
+            control_take <= 1'b0;
             if (frame_restart) restart_pending <= 1;
 
             case (state)
@@ -311,7 +330,7 @@ module FramebufferController #(
                     else command_gap <= command_gap - 1'b1;
                 end
                 UPDATE_COMMAND: begin
-                        addr <= update_addr;
+                        addr <= {3'd0,draw_buffer,update_addr[16:0]};
                         cmd <= 1;
                         cmd_en <= 1;
                         wr_data <= update_data[31:0];
@@ -322,6 +341,30 @@ module FramebufferController #(
                         state <= UPDATE_DATA;
                 end
                 READ_COMMAND: begin
+                    // This state is reached after the final write's recovery
+                    // gap. The endpoint barrier has also drained both queues.
+                    if(control_valid && !control_take && !present_pending && !present_flushing) begin
+                        control_result<=0;
+                        case(control_op)
+                          1:begin double_enabled<=1;control_take<=1;end
+                          2:begin
+                            // Exact duplicate of the last completed presentation
+                            // is idempotent, including after its IRQ was ACKed.
+                            if(double_enabled && control_sequence==completed_sequence &&
+                               control_buffer==front_buffer) control_take<=1;
+                            else if(double_enabled && !irq_pending && control_buffer!=front_buffer &&
+                                    control_sequence==completed_sequence+16'd1)
+                              present_pending<=1;
+                            else begin control_result<=8'hE1;control_take<=1;end
+                          end
+                          3:begin
+                            if(control_sequence==completed_sequence) irq_pending<=0;
+                            else control_result<=8'hE1;
+                            control_take<=1;
+                          end
+                          default:begin control_result<=8'hE1;control_take<=1;end
+                        endcase
+                    end
                     if (fifo_almost_full_q && update_valid) begin
                         state <= UPDATE_COMMAND;
                     // ALMOST_FULL is asserted early enough to reserve the
@@ -329,7 +372,7 @@ module FramebufferController #(
                     // here is redundant and would reintroduce the raw Gray
                     // pointer into this timing-critical state decoder.
                     end else if (!fifo_almost_full_q) begin
-                        addr        <= memory_address;
+                        addr        <= {3'd0,front_buffer,memory_address[16:0]};
                         cmd         <= 1'b0;
                         cmd_en      <= 1'b1;
                         burst_beat  <= 3'd0;
@@ -365,6 +408,11 @@ module FramebufferController #(
 
                 FRAME_FLUSH: begin
                     if (flush_count == 6'd0) begin
+                        if(present_flushing) begin
+                            present_flushing<=0;present_pending<=0;
+                            completed_sequence<=control_sequence;
+                            irq_pending<=1;control_take<=1;
+                        end
                         fifo_flush  <= 1'b0;
                         command_gap <= 5'd0;
                         state       <= READ_COMMAND;
@@ -390,6 +438,12 @@ module FramebufferController #(
                 burst_beat     <= 3'd0;
                 cmd_en         <= 1'b0;
                 state          <= FRAME_FLUSH;
+                // Arm only after the write barrier, and use a NEW raster
+                // boundary (never a stale restart_pending from an old frame).
+                if(frame_restart && present_pending) begin
+                    front_buffer<=control_buffer;
+                    present_flushing<=1;
+                end
             end
         end
     end
