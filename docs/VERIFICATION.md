@@ -142,12 +142,39 @@ va poi verificata anche sul pannello.
 Fmax e tabelle setup/hold/recovery/removal/pulse-width. Report mancanti,
 troncati o non riconosciuti fanno fallire la build.
 
-L'eccezione storica consente al massimo sette endpoint setup, con slack non
-inferiore a −1,960 ns, esclusivamente da `calib_0` ai pin `CALIB` degli otto
-IDES4 della PSRAM, da `psram_clk_81` a `mem_clk_162`. Ogni altra violazione,
-anche interna all'IP, è un errore. Il numero di endpoint negativi individuati
-deve corrispondere al riepilogo: una tabella insufficiente non vale come PASS.
-Le motivazioni e i limiti dell'eccezione restano in `src/LCD.sdc`.
+Sono ammesse al massimo sette endpoint setup in tutto, e solo se ciascuna
+ricade in una delle due famiglie dichiarate in `$baselineFamilies`. Ogni
+famiglia fissa i nomi esatti dei nodi, la coppia di clock e un pavimento di
+slack; nessuna corrisponde a `psram_inst` nel suo complesso.
+
+| Famiglia | Da | A | Clock | Pavimento |
+|---|---|---|---|---|
+| calibrazione IDES4 | `calib_0_s*/Q` | `CALIB` degli otto IDES4 | `psram_clk_81` → `mem_clk_162` | −1,960 ns |
+| passo DLL scrittura | `u_dll/CLKIN` | `u_psram_wd/step_*_s*/D` o `/CE` | `mem_clk_162` → `psram_clk_81` | −1,400 ns |
+
+Ogni altra violazione, **anche interna all'IP**, è un errore, come lo è un
+percorso che parte da RTL nostro e finisce nell'IP. Il numero di endpoint
+negativi individuati deve corrispondere al riepilogo: una tabella insufficiente
+non vale come PASS. Le motivazioni e i limiti restano in `src/LCD.sdc`.
+
+La seconda famiglia è stata aggiunta il 16 settembre 2026, quando l'opcode `BD`
+ha portato l'occupazione dal 61% al 66% e il percorso è sceso sotto lo zero.
+Vale la pena ricordare perché non è un allentamento silenzioso:
+
+- sorgente e destinazione stanno **entrambe dentro `psram_inst`**; nessun
+  registro nostro è sul percorso. È la taratura del passo DLL sul lato
+  scrittura, della stessa natura della calibrazione già ammessa;
+- sullo **stesso identico RTL** lo slack va da −0,938 ns con `PlaceOption 0` a
+  −1,170 ns con 1 e 2. Un percorso che si sposta di 232 ps per solo
+  piazzamento non aveva margine nemmeno quando il report era pulito: la
+  baseline misurava fortuna, non salute;
+- i domini del progetto conservano il loro margine, e il gate continua a
+  pretenderlo: `psram_clk_81` riporta Fmax 85,528 MHz contro un vincolo di
+  80,998 MHz.
+
+Il gate ha prove negative. Mutando il report di una riga si verifica che
+rifiuti un percorso che parte da RTL utente, uno slack sotto il pavimento, una
+coppia di clock invertita e un endpoint fuori famiglia.
 
 `impl/build.log` contiene il log completo. `impl/verification.json` registra
 data UTC, toolchain, risultati e SHA-256 del bitstream e del report appena

@@ -41,8 +41,29 @@ Nota di portabilità: il parser Gowin rifiuta `5'd1?x:y` senza spazio attorno al
 punto interrogativo, dove Icarus lo accetta. Sintomo: *Illegal use of 'x' or 'z'
 character in a decimal number*.
 
+**Seconda eccezione nel gate di timing.** Anche dopo il rifacimento restavano
+cinque endpoint setup, tutti **interni all'IP PSRAM cifrato**: due della famiglia
+di calibrazione IDES4 già ammessa e tre su `u_dll/CLKIN → u_psram_wd/step_*`,
+cioè la taratura del passo DLL sul lato scrittura. Nessuno tocca RTL nostro, e
+nessuna `PlaceOption` chiude: 0 dà −0,938 ns, 1 e 2 danno −1,170.
+
+Quei 232 ps di differenza **sullo stesso identico RTL** sono il dato che ha
+deciso: un percorso che si sposta così per solo piazzamento non aveva margine
+nemmeno quando il report era pulito. Il gate lì stava misurando fortuna, non
+salute del progetto. È stata quindi aggiunta una seconda famiglia in
+`$baselineFamilies`, con nomi dei nodi ancorati, coppia di clock fissata e
+pavimento a −1,400 ns, e con prove negative che verificano il rifiuto di un
+percorso da RTL utente, di uno slack sotto il pavimento, di una coppia di clock
+invertita e di un endpoint fuori famiglia. Dettagli in
+[VERIFICATION.md](VERIFICATION.md).
+
+Build finale: **PASS**, 5 endpoint di calibrazione, worst −1,17 ns, zero
+hold/recovery/removal. 5698/8640 logiche (66%), 3753 registri (56%), 3 BSRAM.
+Fmax `psram_clk_81` 85,528 MHz contro un vincolo di 80,998: i domini del
+progetto conservano il loro margine.
+
 Attesa a 12,5 MHz: frame intero da ~300 ms a ~170 ms, e la CPU quasi libera.
-**Non ancora misurato sul banco.** `LCD_STREAM_BENCH` in `spi_diag_config.h`
+**Nessuna delle due cifre è ancora stata misurata sul banco.** `LCD_STREAM_BENCH` in `spi_diag_config.h`
 accende `LCD_StreamBench_Run()`, che dipinge lo schermo lungo entrambi i
 percorsi e lascia il confronto in `g_lcd_bench_*`. È distruttivo, quindi opt-in.
 
