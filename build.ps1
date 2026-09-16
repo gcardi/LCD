@@ -69,9 +69,14 @@ $tcl = Join-Path ([System.IO.Path]::GetTempPath()) "lcd_build_$PID.tcl"
 @"
 # Le graffe impediscono a Tcl di interpretare i backslash del percorso.
 open_project {$project}
+# I sorgenti .sv sono elencati nel .gprj come file.verilog: senza uno standard
+# esplicito una clean build parte in Verilog 2001 e rifiuta SystemVerilog.
+set_option -verilog_std sysv2017
 set_option -gen_text_timing_rpt 1
 set_option -place_option $PlaceOption
 set_option -route_option 1
+# Tre linee del display usano i pin dual-purpose SSPI della Tang Nano 9K.
+set_option -use_sspi_as_gpio 1
 set_option -bit_security 0
 # Multi-Boot fa saltare il dispositivo a un secondo bitstream nella flash SPI
 # esterna, che su questa scheda e' vergine: il salto fallisce e la FPGA resta
