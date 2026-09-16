@@ -17,6 +17,7 @@ l'API STM32 prepara i pacchetti e gestisce attese, risposte ed errori.
 | `B7` | scrive un burst mascherato di 16 pixel RGB565 in PSRAM |
 | `B8` | disegna una stringa UTF-8 con i font della User Flash |
 | `B9` | riempie un rettangolo o traccia una linea RGB565, senza trasferire i singoli pixel |
+| `BC` | COPY/SCROLL front → back, con riempimento RGB565; [protocollo](BLITTER.md) |
 | `BA` | abilita double buffering, richiede PRESENT o conferma IRQ |
 | `BB` | legge capacità e stato coerente con CRC |
 | altro | percorso di eco diagnostica: risponde `A5` e poi l'eco del byte precedente |
@@ -265,7 +266,8 @@ la prima volta, non l'ultima.
 | 22 | `B9`, invio | esito `E1`: **la FPGA ha rifiutato la forma** |
 | 23–25 | `BB` | identità/versione, CRC o campi di stato errati |
 | 26 | controllo buffer | timeout in attesa di completamento |
-| 27–29 | `BA` | disponibilità, eco o commit errato |
+| 27–29 | `BC` | COPY/SCROLL front → back, con riempimento RGB565; [protocollo](BLITTER.md) |
+| `BA` | disponibilità, eco o commit errato |
 | 30–31 | ACK | risultato/IRQ pendente errato, oppure GPIO rimasto basso |
 | 32–33 | double buffering | stato incompatibile con enable o PRESENT |
 | 34–36 | PRESENT | esito/sequenza/front errati, GPIO IRQ non basso, timeout |
@@ -281,6 +283,10 @@ verticali funzionano, è la FPGA a essere da riprogrammare, non il codice.
 
 La fase **11** ha un valore analogo per il testo: è la firma di una User Flash
 cancellata o scritta male. Vedi [PROGRAMMING.md](PROGRAMMING.md).
+
+Errori del blitter: 38 versione BB senza BC; 39 ruoli front/back incompatibili;
+40 header/disponibilità BC; 41 echo; 42 commit rifiutato; 43 risultato di
+esecuzione; 44 numero IRQ della demo scroll. Un timeout usa la fase 26.
 
 ### Quando firmware e bitstream non sono della stessa versione
 
@@ -303,7 +309,8 @@ sparsi e irriproducibili.
 
 ## Cosa manca, in breve
 
-Non esistono ancora cerchi, poligoni come comando dedicato, blit fra aree,
+COPY e SCROLL fra front/back sono descritti in [BLITTER.md](BLITTER.md).
+Non esistono ancora cerchi, poligoni come comando dedicato,
 rilettura dei pixel, triple buffering, modifica del parametro di sfondo iniziale
 a runtime, font proporzionali, rotazione o scalatura dei glifi.
 Il disegno diretto nel buffer visibile al reset resta soggetto a tearing;
@@ -311,6 +318,6 @@ abilita double buffering e usa PRESENT per aggiornamenti al confine del frame.
 Il contenuto di sfondo visibile si può invece cambiare a runtime con `LCD_Clear`.
 
 Le idee per superare parte di questi limiti sono raccolte in
-[LVGL_IMPL.md](LVGL_IMPL.md), che è però uno studio speculativo. Per copie,
-scroll e ROP vedere [BLITTING_ROP_STUDY.md](BLITTING_ROP_STUDY.md),
-anch'esso solo studio, senza implementazione.
+[LVGL_IMPL.md](LVGL_IMPL.md), che è però uno studio speculativo. Lo studio storico
+[BLITTING_ROP_STUDY.md](BLITTING_ROP_STUDY.md) conserva le alternative per ROP
+e copie; il contratto implementato di COPY/SCROLL è in [BLITTER.md](BLITTER.md).

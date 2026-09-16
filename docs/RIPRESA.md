@@ -1,6 +1,53 @@
-# Punto di ripresa - 15 settembre 2026
+# Punto di ripresa - 16 settembre 2026
 
-## Stato corrente: double buffering, PRESENT e IRQ
+## Stato corrente: COPY, SCROLL e demo terminale
+
+Implementati e caricati in flash FPGA/font e STM32 Release. Protocollo e API:
+[BLITTER.md](BLITTER.md). BB versione 2; BC copia front → back o esegue scroll
+di viewport con riempimento RGB565 automatico. PRESENT resta separato per
+aggiungere il testo prima dello swap. Il resto dello schermo resta invariato.
+
+**Banco, 16 settembre:** demo completata, una COPY a schermo intero, 32 SCROLL,
+50 PRESENT e 50 fronti EXTI complessivi; zero errori SPI/LCD/HAL, IRQ finale
+alto e flag azzerato. Front 0, sequenza 50 dopo avvio FPGA fresco.
+COPY 480x272: **14 ms**; ultimo SCROLL 442x176 di -16 righe: **8 ms**;
+ultimo PRESENT: 16 ms; clear sempre 8 ms. Tempi MCU inclusivi di invio/polling,
+risoluzione 1 ms, singole misure. Risultati in
+`stm32/WeAct_H743_SPI/build/Release/scroll-result.json`.
+
+FPGA: **zero violazioni setup/hold/recovery/removal**, nessuna eccezione di
+calibrazione usata. Fmax PSRAM 81.909 MHz, clock operativo 81 MHz. 5209/8640
+risorse logiche (61%), 3659 registri (55%), 3 BSRAM. Build qualificata:
+`.\build.ps1 -NoCompress` (PlaceOption 1, vincoli invariati).
+Timing chiuso con controller one-hot, risposta PSRAM registrata, Full FIFO
+anticipato e confronti separati, selezione pixel in due stadi e carry anticipati.
+Il confine di frame sincronizzato è registrato un ulteriore ciclo a 81 MHz.
+
+Nove testbench SPI/grafica/FIFO passati: 99 casi blitter, 10.000 parole FIFO,
+124 linee, più regressioni precedenti. Integrazione: 12 casi COPY/SCROLL,
+quattro PRESENT e otto frame completi. Risincronizzazione dopo underrun:
+quattro frame successivi integri. Anche l'ultima esecuzione con FIFO reale
+sulla versione caricata è PASS: 12 casi, quattro swap e otto frame completi
+(1.044.480 pixel); monitor del confine allineato al ciclo registrato.
+MCU Debug e Release compilate, bitstream CRC verificato, flash MCU riletta e
+confrontata con ELF prima delle letture SWD.
+
+La demo termina con “Terminale FPGA”, righe 22–32 in un viewport nero e
+cornice verde. L’utente ha osservato lo scorrimento e il successivo arresto:
+è il comportamento previsto dopo le 32 righe della demo. Non ha segnalato
+una verifica dettagliata dei pixel o della cornice.
+Nessun ciclo fisico di spegnimento/riaccensione eseguito.
+
+```powershell
+.\stm32\WeAct_H743_SPI\test-double-buffer.ps1 -RequireScroll -ReadOnly -SerialNumber 35FF6C064D53373238602143
+```
+
+Triple buffering, ROP e copie nello stesso buffer restano futuri. Il back
+non viene aggiornato automaticamente fuori dal viewport: inizializzare i due
+buffer con lo stesso sfondo/cornice, come nella demo, oppure ricostruire quelle
+aree prima di PRESENT quando cambiano.
+
+## Cronologia - double buffering, PRESENT e IRQ (15 settembre)
 
 Implementati e caricati in flash FPGA (insieme ai font) e STM32 Release.
 Due slot PSRAM da 256 KiB, front/back, B7/B8/B9 sul back dopo abilitazione.
@@ -38,7 +85,7 @@ con la scritta `Double buffer + VSYNC + IRQ: OK`.
 .\stm32\WeAct_H743_SPI\test-double-buffer.ps1 -ReadOnly -SerialNumber 35FF6C064D53373238602143
 ```
 
-**Prossimo sviluppo:** valutare blitter COPY fra buffer per lo scroll.
+**Prossimo sviluppo previsto allora (ora completato):** blitter COPY e scroll.
 Il back non viene copiato o inizializzato automaticamente: cancellarlo o
 ricostruirlo prima del primo PRESENT e gestire la coerenza per redraw parziali.
 Triple buffering e ROP restano futuri. Nessuna prova fisica di spegnimento e

@@ -101,7 +101,7 @@ TX: `BB` seguito da dieci dummy `00`.
 |---:|---|
 | 0 | `A5` |
 | 1 | firma `D2` |
-| 2 | versione protocollo `01` |
+| 2 | versione protocollo `02` (`01` prima del blitter) |
 | 3 | numero di buffer `02` |
 | 4 | bit 0 double abilitato; bit 1 front; bit 2 IRQ pendente; bit 3 controllo occupato |
 | 5 | buffer di disegno, 0 o 1 |
@@ -154,7 +154,7 @@ Le prime 16 presentazioni verificano anche 16 fronti EXTI. Risultati leggibili S
 
 Il test hardware normale programma flash FPGA e font, poi MCU Release; richiede
 un bitstream già compilato e corrispondente al manifest di timing. Il runner
-salva `build/Release/double-buffer-result.json` e pretende 17 presentazioni,
+con `LCD_SCROLL_DEMO=0` salva `build/Release/double-buffer-result.json` e pretende 17 presentazioni,
 17 fronti IRQ, demo completata, IRQ rilasciato e nessun errore SPI/LCD.
 Il default della build MCU generale resta Debug; quello di questo runner è Release.
 
@@ -163,3 +163,17 @@ CRC, aborti, barriera durante fill, blocco delle scritture nel front, duplicati,
 ACK errati, entrambi gli slot, padding e tre frame interi rispetto alla memoria.
 La variante `-RealFifo` usa anche la FIFO RTL del progetto. Il modello PSRAM
 non sostituisce la qualifica elettrica al banco; SWD non rilegge i pixel del pannello.
+
+## Estensione COPY/SCROLL (16 settembre)
+
+Con il default corrente `LCD_SCROLL_DEMO=1`, dopo il campione precedente viene
+eseguita la demo terminale: 50 PRESENT/IRQ complessivi, una COPY e 32 SCROLL.
+Il runner rileva il flag e salva `scroll-result.json`; `-RequireScroll` richiede
+esplicitamente anche la demo scroll. Protocollo BC, API e coerenza dei viewport
+sono descritti in [BLITTER.md](BLITTER.md). BB mantiene il layout e passa a
+versione 2; il risultato riguarda l'ultimo controllo BA o BC concluso.
+
+Dal 16 settembre il controller registra il segnale di confine del frame
+sincronizzato prima dell'arbitraggio: lo swap segue quel segnale di un ciclo
+PSRAM aggiuntivo (circa 12 ns), all'interno dello stesso blanking verticale.
+Il test controlla questa latenza con un proprio registro di riferimento.

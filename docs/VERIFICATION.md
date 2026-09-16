@@ -1,5 +1,28 @@
 # Verifica del progetto
 
+## COPY e SCROLL — 16 settembre 2026
+
+Protocollo e demo: [BLITTER.md](BLITTER.md).
+
+- Nove testbench SPI/grafica/FIFO passati: aggiunti 99 casi COPY/SCROLL
+  e 10.000 parole FIFO, inclusi full/empty, overflow, wrap e clock concorrenti.
+- Integrazione TOP finale con FIFO RTL reale: PASS, 12 casi blitter, quattro
+  PRESENT e otto frame completi (1.044.480 pixel);
+  verifica di CRC/aborti, barriera, busy, geometrie errate, maschere, padding,
+  isolamento front/back e delle risposte PSRAM dal flusso video.
+- Risincronizzazione con FIFO reale: recupero al frame successivo, 0/4 frame
+  danneggiati dopo l'underrun indotto.
+- FPGA: zero violazioni setup/hold/recovery/removal, Fmax PSRAM 81.909 MHz
+  per clock 81 MHz; 5209 risorse logiche, 3659 registri, 3 BSRAM.
+  Build `-NoCompress`, PlaceOption 1, vincoli invariati.
+- MCU Debug e Release compilate. FPGA/font e MCU Release caricati; CRC del
+  bitstream verificato e flash MCU confrontata con l'ELF.
+- Banco: una COPY, 32 SCROLL, 50 PRESENT/IRQ; zero errori e IRQ finale alto.
+  COPY completa 14 ms, ultimo SCROLL del viewport 8 ms, ultimo PRESENT 16 ms.
+  Risultato: `stm32/WeAct_H743_SPI/build/Release/scroll-result.json`.
+
+Le sezioni seguenti conservano i risultati delle tappe precedenti.
+
 ## Double buffering - 15 settembre 2026
 
 Protocollo e comandi: [DOUBLE_BUFFER.md](DOUBLE_BUFFER.md).
@@ -25,7 +48,7 @@ pixel del pannello, misura strumentale dei fronti VSYNC/IRQ o prova di power-cyc
 ## Comandi riproducibili
 
 Per il protocollo SPI e le primitive grafiche eseguire anche
-`./sim/run_spi_sim.ps1`. Comprende sette testbench, incluso `tb_line_renderer`:
+`./sim/run_spi_sim.ps1`. Comprende nove testbench, incluso `tb_line_renderer`:
 124 linee confrontate con un riferimento basato su arrotondamento razionale,
 tutte le direzioni, estremi e punti singoli, maschere e fusione dei burst,
 backpressure e rilascio ritardato dell'acknowledgement come nel CDC del TOP.

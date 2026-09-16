@@ -1,8 +1,9 @@
 # Studio: copie, scroll, framebuffer multipli e ROP
 
-**Aggiornamento 15 settembre:** double buffering, PRESENT e IRQ sono ora
-implementati e documentati in [DOUBLE_BUFFER.md](DOUBLE_BUFFER.md). Il seguito
-conserva lo studio del 10 settembre; copie, scroll e ROP restano da implementare.
+**Aggiornamento 16 settembre:** double buffering, PRESENT e IRQ sono implementati
+([DOUBLE_BUFFER.md](DOUBLE_BUFFER.md)); COPY e SCROLL con riempimento RGB565
+usano ora BC ([BLITTER.md](BLITTER.md)). ROP e triple buffering restano futuri.
+Il seguito conserva lo studio storico del 10 settembre, precedente a queste implementazioni.
 
 10 settembre 2026. **Solo valutazione: nessuna delle estensioni di questo
 documento è implementata, nessun opcode nuovo è assegnato.** La memoria

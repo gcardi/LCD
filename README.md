@@ -6,7 +6,8 @@ Tang Nano 9K.
 Il progetto inizializza la PSRAM integrata con un frame buffer RGB565 nero, lo
 legge a burst attraverso una FIFO dual-clock e genera i segnali di timing del
 display. Tramite SPI può aggiornare rettangoli o renderizzare testo usando tre
-font bitmap residenti nella User Flash. Pattern diagnostici e barre colore
+font bitmap residenti nella User Flash. Supporta double buffering, PRESENT con
+IRQ e copie/scroll di viewport con riempimento RGB565 automatico. Pattern diagnostici e barre colore
 restano disponibili nei test.
 
 ![Barre orizzontali visualizzate sul pannello LCD](docs/assets/images/HBars.jpg)
@@ -20,6 +21,7 @@ e degli accessi a burst nel frame buffer.
 
 - `src/TOP.sv`: integrazione di clock, PSRAM, frame buffer, FIFO e display;
 - `src/FramebufferController.sv`: scrittura e lettura del frame buffer in PSRAM;
+- `src/BlitRenderer.sv`: COPY e SCROLL fra front e back, con colore di riempimento;
 - `src/VGA_Timing.sv`: timing RGB 480×272 e conversione RGB565;
 - `src/ResetSynchronizer.sv`: reset asincrono in assert, sincrono in rilascio;
 - `src/FramebufferFifo.sv`: FIFO dual-clock con almost-full pipelined;
@@ -145,6 +147,7 @@ Misure del raster, risultati e limiti della verifica sono in
 | [SPI_STRESS.md](docs/SPI_STRESS.md) | qualifica prolungata del collegamento, e perché 25 MHz non passa |
 | [SPI_PERFORMANCE.md](docs/SPI_PERFORMANCE.md) | cronologia della salita in frequenza con GPIO `VERY_HIGH`; non è la configurazione attuale |
 | [LVGL_IMPL.md](docs/LVGL_IMPL.md) | studio speculativo su un controller grafico per LVGL; non descrive codice esistente |
+| [BLITTER.md](docs/BLITTER.md) | COPY, SCROLL con riempimento, protocollo BC e demo terminale |
 | [DOUBLE_BUFFER.md](docs/DOUBLE_BUFFER.md) | double buffering, PRESENT, IRQ, protocollo BA/BB e collaudo |
 | [RIPRESA.md](docs/RIPRESA.md) | punto di ripresa del lavoro: stato corrente, verifiche superate, punti ancora aperti |
 | [README STM32](stm32/WeAct_H743_SPI/README.md) | cablaggio, firmware, comando unico di build, upload e collaudo |
