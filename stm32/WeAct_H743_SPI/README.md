@@ -26,6 +26,21 @@ Default Release. Il primo comando richiede un bitstream già compilato e
 verificato, programma FPGA/font e MCU; il secondo verifica la corrispondenza
 della flash STM32 con l’ELF e legge i risultati senza reset.
 
+## COPY, scroll e terminale
+
+`LCD_CopyRect` e `LCD_ScrollRect` usano BC (BB versione 2). Lo scroll include
+il colore RGB565 con cui riempire l'area scoperta; PRESENT resta separato per
+consentire di aggiungere testo prima dello swap.
+`LCD_SCROLL_DEMO=1` aggiunge 32 righe scorrevoli in un viewport, conservando
+cornice e sfondo. Totale: 50 PRESENT/IRQ, una COPY e 32 SCROLL.
+
+```powershell
+.\test-double-buffer.ps1 -RequireScroll -SerialNumber 35FF6C064D53373238602143
+```
+
+Il runner rileva automaticamente il flag della demo; `-RequireScroll` lo
+richiede esplicitamente. Dettagli: [BLITTER.md](../../docs/BLITTER.md).
+
 ## Build e upload
 
 Aprire questa cartella in VS Code. Servono CMake, Ninja, arm-none-eabi-gcc
