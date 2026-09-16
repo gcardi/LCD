@@ -28,7 +28,9 @@ module SpiFramebuffer (
  output wire control_valid, input wire control_take,
  output reg [7:0] control_op, output reg control_buffer,
  output reg [15:0] control_sequence,
- input wire [26:0] control_status
+ input wire [26:0] control_status,
+ output reg blit_source,
+ output reg [15:0] blit_x,blit_y,blit_width,blit_height,blit_arg_x,blit_arg_y,blit_color
 );
  wire [7:0] rx;
  wire push;
@@ -55,6 +57,7 @@ module SpiFramebuffer (
  reg status_busy;
  reg graphics_idle;
  reg selected_control,selected_status,accept_control;
+ reg selected_blit,blit_invalid,blit_scroll,blit_destination;
  reg [7:0] staging_op,staging_buffer;
  reg [15:0] staging_sequence,control_crc,control_expected_crc,status_crc;
  wire control_available = control_request == control_seen;
@@ -64,6 +67,8 @@ module SpiFramebuffer (
      (staging_op!=1 || staging_sequence==0);
  wire control_commit = selected_control && accept_control && index==8 &&
      rx==8'hA6 && control_fields_valid && control_crc==control_expected_crc;
+ wire blit_commit = selected_blit && accept_control && index==22 &&
+     rx==8'hA6 && !blit_invalid && control_crc==control_expected_crc;
  // Both producers must finish before the memory controller sees the barrier.
  assign control_valid = control_req2!=control_ack && graphics_idle;
 
@@ -83,6 +88,10 @@ module SpiFramebuffer (
        control_op<=staging_op;control_buffer<=staging_buffer[0];
        control_sequence<=staging_sequence;control_request<=!control_request;
      end
+     if(push && blit_commit) begin
+       control_op<=blit_scroll?8'd5:8'd4;control_buffer<=blit_destination;
+       control_sequence<=0;control_request<=!control_request;
+     end
    end
  end
  always @(posedge clk or negedge mem_rst_n) begin
@@ -101,7 +110,7 @@ module SpiFramebuffer (
  function automatic [7:0] status_byte(input [6:0] n);
    case(n)
      0:status_byte=8'hD2;
-     1:status_byte=8'h01; // protocol version
+     1:status_byte=8'h02; // version 2 adds BC COPY/SCROLL
      2:status_byte=8'h02; // buffer count
      3:status_byte={4'd0,status_busy,status_packet[2:0]}; // busy, IRQ, front, enabled
      4:status_byte={7'd0,(status_packet[0] && !status_packet[1])}; // draw buffer
@@ -111,6 +120,21 @@ module SpiFramebuffer (
      default:status_byte=0;
    endcase
  endfunction
+ // Descriptor is bundled with the control mailbox and immutable while busy.
+ always @(posedge sck or negedge rst_n) begin
+   if(!rst_n) begin
+     blit_source<=0;blit_x<=0;blit_y<=0;blit_width<=0;blit_height<=0;
+     blit_arg_x<=0;blit_arg_y<=0;blit_color<=0;
+   end else if(push && selected_blit && accept_control) begin
+     case(index)
+       3:blit_source<=rx[0];
+       6,7:blit_x<={blit_x[7:0],rx};8,9:blit_y<={blit_y[7:0],rx};
+       10,11:blit_width<={blit_width[7:0],rx};12,13:blit_height<={blit_height[7:0],rx};
+       14,15:blit_arg_x<={blit_arg_x[7:0],rx};16,17:blit_arg_y<={blit_arg_y[7:0],rx};
+       18,19:blit_color<={blit_color[7:0],rx};
+     endcase
+   end
+ end
  wire text_commit_index = selected_text && index==(7'd19+text_length);
  // Il pacchetto forma e' a lunghezza fissa: 18 byte, commit all'indice 16.
  wire shape_commit_index = selected_shape && index==7'd16;
@@ -229,6 +253,7 @@ module SpiFramebuffer (
      echo_byte<=8'hA5;staging_addr<=0;staging_mask<=0;staging_pixels<=0;
      text_crc<=16'hFFFF;text_expected_crc<=0;text_invalid<=0;
      selected_control<=0;selected_status<=0;accept_control<=0;
+     selected_blit<=0;blit_invalid<=0;blit_scroll<=0;blit_destination<=0;
      staging_op<=0;staging_buffer<=0;staging_sequence<=0;
      control_crc<=16'hFFFF;control_expected_crc<=0;
      status_packet<=0;status_busy<=0;status_crc<=16'hFFFF;
@@ -242,6 +267,7 @@ module SpiFramebuffer (
      if(index==0 && rx==8'hB9)
        echo_byte<=(text_available && graphics_available)?8'hC3:8'h00;
      if(index==0 && rx==8'hBA) echo_byte<=control_available?8'hC3:8'h00;
+     if(index==0 && rx==8'hBC) echo_byte<=control_available?8'hC3:8'h00;
      if(index==0 && rx==8'hBB) begin
        echo_byte<=8'hD2;status_packet<=status_snapshot;
        status_busy<=!control_available;status_crc<=crc16_byte(16'hFFFF,8'hD2);
@@ -255,6 +281,7 @@ module SpiFramebuffer (
        if(index==9) echo_byte<=status_crc[7:0];
      end
      if(selected_control && index==8) echo_byte<=control_commit?8'hAC:8'hE1;
+     if(selected_blit && index==22) echo_byte<=blit_commit?8'hAC:8'hE1;
      if(selected && index==39)
        echo_byte<=(accept_packet && rx==8'h5A && staging_addr<24'd130560 &&
                    staging_addr[3:0]==0)?8'hAC:8'hE1;
@@ -272,8 +299,20 @@ module SpiFramebuffer (
        accept_text<=text_available && text_enabled2 && graphics_available;
        accept_shape<=text_available && graphics_available;
        selected_control<=rx==8'hBA;selected_status<=rx==8'hBB;
+       selected_blit<=rx==8'hBC;
        accept_control<=control_available;
        text_crc<=16'hFFFF;text_invalid<=0;
+     end
+     if(selected_blit && accept_control) begin
+       if(index>=2 && index<=19)control_crc<=crc16_byte(control_crc,rx);
+       case(index)
+         2:begin blit_scroll<=rx[0];if(rx>1)blit_invalid<=1;end
+         3:if(rx>1)blit_invalid<=1;
+         4:begin blit_destination<=rx[0];if(rx>1 || rx[0]==blit_source)blit_invalid<=1;end
+         5:if(rx!=0)blit_invalid<=1;
+         18,19:if(!blit_scroll && rx!=0)blit_invalid<=1;
+         20:control_expected_crc[15:8]<=rx;21:control_expected_crc[7:0]<=rx;
+       endcase
      end
      if(selected_control && accept_control) begin
        if(index>=2 && index<=5) control_crc<=crc16_byte(control_crc,rx);

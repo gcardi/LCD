@@ -34,7 +34,11 @@ module FramebufferController #(
     input wire [15:0] control_sequence,
     output logic control_take,
     output wire [26:0] control_status,
-    output wire irq_n
+    output wire irq_n,
+    output logic blit_start,input wire blit_done,blit_error,
+    input wire blit_read_valid,output wire blit_read_take,
+    input wire [20:0] blit_read_address,
+    output logic blit_read_done,output logic [255:0] blit_read_pixels
 );
 
     localparam int unsigned FRAME_WIDTH     = 480;
@@ -56,12 +60,29 @@ module FramebufferController #(
         READ_COMMAND,
         READ_DATA,
         READ_GAP,
-        FRAME_FLUSH, UPDATE_COMMAND, UPDATE_DATA, UPDATE_GAP
+        FRAME_FLUSH, UPDATE_COMMAND, UPDATE_DATA, UPDATE_GAP,
+        BLIT_READ_COMMAND, BLIT_READ_DATA, BLIT_READ_GAP
     } state_t;
 
-      state_t state;
+      // One-hot encoding avoids a long shared clock-enable decoder as the
+      // read/write/blit arbitration grows. Simulation keeps the enum values.
+      (* syn_encoding = "onehot" *) state_t state;
       logic restart_pending;
-      logic fifo_almost_full_q;
+      logic frame_restart_q;
+      always_ff @(posedge clk or negedge nRST) begin
+          if(!nRST) frame_restart_q<=0;
+          else frame_restart_q<=frame_restart;
+      end
+      logic fifo_almost_full_q,init_calib_q;
+      logic rd_valid_q;
+      logic [31:0] rd_data_q;
+      // Capture the IP response as a pair before FIFO/blitter arbitration.
+      // This cuts the IP's combinational valid gating out of those paths.
+      always_ff @(posedge clk or negedge nRST) begin
+          if(!nRST) begin rd_valid_q<=0;rd_data_q<=0;end
+          else begin rd_valid_q<=rd_data_valid;rd_data_q<=rd_data;end
+      end
+      logic update_pending_q,blit_read_pending_q;
     logic [255:0] update_words;
     logic [15:0] update_masks;
     // Pixel addresses: two disjoint 128K-pixel slots (256 KiB each).
@@ -69,6 +90,17 @@ module FramebufferController #(
     logic double_enabled,front_buffer,irq_pending,present_pending,present_flushing;
     logic [15:0] completed_sequence;
     logic [7:0] control_result;
+    logic blit_active,blit_read_active;
+    logic sequence_same_q,sequence_next_q;
+    // Payload is stable before control_valid crosses the mailbox barrier.
+    always_ff @(posedge clk or negedge nRST) begin
+        if(!nRST) begin sequence_same_q<=0;sequence_next_q<=0;end
+        else begin
+            sequence_same_q<=control_sequence==completed_sequence;
+            sequence_next_q<=control_sequence==completed_sequence+16'd1;
+        end
+    end
+    assign blit_read_take = state==BLIT_READ_COMMAND;
     wire draw_buffer = double_enabled && !front_buffer;
     assign irq_n = !irq_pending;
     assign control_status = {completed_sequence,control_result,irq_pending,front_buffer,double_enabled};
@@ -76,8 +108,13 @@ module FramebufferController #(
       // Break the FIFO pointer/threshold path before it reaches the controller
       // state decoder. The FIFO threshold already reserves a full burst.
       always_ff @(posedge clk or negedge nRST) begin
-          if (!nRST) fifo_almost_full_q <= 1'b0;
-          else       fifo_almost_full_q <= fifo_almost_full;
+          if (!nRST) begin
+              fifo_almost_full_q <= 1'b0;init_calib_q<=0;update_pending_q<=0;blit_read_pending_q<=0;
+          end else begin
+              fifo_almost_full_q <= fifo_almost_full;
+              init_calib_q<=init_calib;
+              update_pending_q<=update_valid;blit_read_pending_q<=blit_read_valid;
+          end
       end
     function automatic [3:0] pixel_mask(input [1:0] enabled);
         pixel_mask = {{2{!enabled[1]}}, {2{!enabled[0]}}};
@@ -200,10 +237,10 @@ module FramebufferController #(
     endfunction
 
     always_comb begin
-        fifo_write_data   = rd_data;
+        fifo_write_data   = rd_data_q;
         // Nothing is admitted while the FIFO is being flushed: beats still
         // draining from an abandoned burst belong to the previous frame.
-        fifo_write_enable = rd_data_valid && !fifo_full && !fifo_flush;
+        fifo_write_enable = rd_valid_q && !fifo_full && !fifo_flush && !blit_read_active;
     end
 
     always_ff @(posedge clk or negedge nRST) begin
@@ -212,6 +249,8 @@ module FramebufferController #(
             double_enabled<=0;front_buffer<=0;irq_pending<=0;
             present_pending<=0;present_flushing<=0;
             completed_sequence<=0;control_result<=0;control_take<=0;
+            blit_start<=0;blit_active<=0;blit_read_active<=0;
+            blit_read_done<=0;blit_read_pixels<=0;
             update_words <= 0;
             update_masks <= 0;
             state          <= WAIT_CALIBRATION;
@@ -235,11 +274,12 @@ module FramebufferController #(
             // cycle so each beat of the burst carries its own pixels.
             cmd_en <= 1'b0;
             control_take <= 1'b0;
-            if (frame_restart) restart_pending <= 1;
+            blit_start<=0;blit_read_done<=0;
+            if (frame_restart_q) restart_pending <= 1;
 
             case (state)
                 WAIT_CALIBRATION: begin
-                    if (init_calib) begin
+                    if (init_calib_q) begin
                         memory_address <= 21'd0;
                         init_x         <= 9'd0;
                         init_y         <= 9'd0;
@@ -343,30 +383,42 @@ module FramebufferController #(
                 READ_COMMAND: begin
                     // This state is reached after the final write's recovery
                     // gap. The endpoint barrier has also drained both queues.
-                    if(control_valid && !control_take && !present_pending && !present_flushing) begin
+                    if(blit_active) begin
+                        if(blit_done && !blit_start) begin
+                            blit_active<=0;control_take<=1;
+                            control_result<=blit_error?8'hE1:8'h00;
+                        end
+                    end else if(control_valid && !control_take && !present_pending && !present_flushing) begin
                         control_result<=0;
                         case(control_op)
                           1:begin double_enabled<=1;control_take<=1;end
                           2:begin
                             // Exact duplicate of the last completed presentation
                             // is idempotent, including after its IRQ was ACKed.
-                            if(double_enabled && control_sequence==completed_sequence &&
+                            if(double_enabled && sequence_same_q &&
                                control_buffer==front_buffer) control_take<=1;
                             else if(double_enabled && !irq_pending && control_buffer!=front_buffer &&
-                                    control_sequence==completed_sequence+16'd1)
+                                    sequence_next_q)
                               present_pending<=1;
                             else begin control_result<=8'hE1;control_take<=1;end
                           end
                           3:begin
-                            if(control_sequence==completed_sequence) irq_pending<=0;
+                            if(sequence_same_q) irq_pending<=0;
                             else control_result<=8'hE1;
                             control_take<=1;
+                          end
+                          4,5:begin
+                            if(double_enabled && control_buffer!=front_buffer)begin
+                              blit_start<=1;blit_active<=1;
+                            end else begin control_result<=8'hE1;control_take<=1;end
                           end
                           default:begin control_result<=8'hE1;control_take<=1;end
                         endcase
                     end
-                    if (fifo_almost_full_q && update_valid) begin
+                    if (fifo_almost_full_q && update_pending_q) begin
                         state <= UPDATE_COMMAND;
+                    end else if(fifo_almost_full_q && blit_read_pending_q)begin
+                        state<=BLIT_READ_COMMAND;
                     // ALMOST_FULL is asserted early enough to reserve the
                     // complete eight-word read burst, so a second FULL test
                     // here is redundant and would reintroduce the raw Gray
@@ -385,7 +437,7 @@ module FramebufferController #(
                     if (command_gap != 5'd0)
                         command_gap <= command_gap - 5'd1;
 
-                    if (rd_data_valid) begin
+                    if (rd_valid_q) begin
                         if (burst_beat == 3'd7) begin
                             if (memory_address == LAST_BURST_ADDR)
                                 memory_address <= 21'd0;
@@ -404,6 +456,25 @@ module FramebufferController #(
                         state <= READ_COMMAND;
                     else
                         command_gap <= command_gap - 5'd1;
+                end
+
+                BLIT_READ_COMMAND:begin
+                    addr<=blit_read_address;cmd<=0;cmd_en<=1;
+                    burst_beat<=0;command_gap<=17;blit_read_active<=1;
+                    state<=BLIT_READ_DATA;
+                end
+                BLIT_READ_DATA:begin
+                    if(command_gap!=0)command_gap<=command_gap-1'b1;
+                    if(rd_valid_q)begin
+                        blit_read_pixels<={rd_data_q,blit_read_pixels[255:32]};
+                        if(burst_beat==7)state<=BLIT_READ_GAP;
+                        else burst_beat<=burst_beat+1'b1;
+                    end
+                end
+                BLIT_READ_GAP:begin
+                    if(command_gap==0)begin
+                        blit_read_done<=1;blit_read_active<=0;state<=READ_COMMAND;
+                    end else command_gap<=command_gap-1'b1;
                 end
 
                 FRAME_FLUSH: begin
@@ -428,7 +499,7 @@ module FramebufferController #(
             // is applied last and overrides the assignments above. The initial
             // write pass is exempt: it must complete before anything is worth
             // displaying.
-            if ((frame_restart || restart_pending) && (state == READ_COMMAND ||
+            if ((frame_restart_q || restart_pending) && (state == READ_COMMAND ||
                                   state == READ_DATA    ||
                                   state == READ_GAP)) begin
                 restart_pending <= 0;
@@ -440,7 +511,7 @@ module FramebufferController #(
                 state          <= FRAME_FLUSH;
                 // Arm only after the write barrier, and use a NEW raster
                 // boundary (never a stale restart_pending from an old frame).
-                if(frame_restart && present_pending) begin
+                if(frame_restart_q && present_pending) begin
                     front_buffer<=control_buffer;
                     present_flushing<=1;
                 end

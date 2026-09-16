@@ -48,9 +48,17 @@ module TOP
     wire [7:0] control_op;
     wire [15:0] control_sequence;
     wire [26:0] control_status;
+    wire blit_start,blit_done,blit_error,blit_read_valid,blit_read_take,blit_read_done;
+    wire [20:0] blit_read_address;
+    wire [255:0] blit_read_pixels;
     localparam SPI_FRAMEBUFFER = 1;
     generate if (SPI_FRAMEBUFFER) begin : graphics
     wire direct_valid,direct_take,text_command_valid,text_command_take;
+    wire blit_source,blit_update_valid;
+    wire [15:0] blit_x,blit_y,blit_width,blit_height,blit_arg_x,blit_arg_y,blit_color;
+    wire [20:0] blit_update_address;
+    wire [255:0] blit_update_pixels;
+    wire [15:0] blit_update_mask;
     wire [20:0] direct_addr,text_update_addr;
     wire [255:0] direct_data,text_update_data;
     wire [15:0] direct_mask,text_update_mask;
@@ -85,8 +93,20 @@ module TOP
         .text_read_data(text_read_data),
         .control_valid(control_valid),.control_take(control_take),
         .control_op(control_op),.control_buffer(control_buffer),
-        .control_sequence(control_sequence),.control_status(control_status)
+        .control_sequence(control_sequence),.control_status(control_status),
+        .blit_source(blit_source),.blit_x(blit_x),.blit_y(blit_y),
+        .blit_width(blit_width),.blit_height(blit_height),
+        .blit_arg_x(blit_arg_x),.blit_arg_y(blit_arg_y),.blit_color(blit_color)
     );
+    BlitRenderer blitter(
+        .clk(psram_clk),.rst_n(psram_rst_n),.start(blit_start),.scroll(control_op==5),
+        .source_buffer(blit_source),.x(blit_x),.y(blit_y),.width(blit_width),.height(blit_height),
+        .arg_x(blit_arg_x),.arg_y(blit_arg_y),.fill_color(blit_color),
+        .done(blit_done),.error(blit_error),
+        .read_valid(blit_read_valid),.read_take(blit_read_take),.read_address(blit_read_address),
+        .read_done(blit_read_done),.read_pixels(blit_read_pixels),
+        .update_valid(blit_update_valid),.update_take(update_take && blit_update_valid),
+        .update_address(blit_update_address),.update_pixels(blit_update_pixels),.update_mask(blit_update_mask));
     FontStore font_store(
         .clk(XTAL_IN),.rst_n(font_rst_n),.fonts_ready(fonts_ready),
         .fonts_error(fonts_error),.read_request(flash_request),
@@ -113,7 +133,7 @@ module TOP
       end else begin
         text_update_valid_fast1<=text_update_valid_slow;
         text_update_valid_fast2<=text_update_valid_fast1;
-        if(!text_update_ack_fast && text_update_valid_fast2 && update_take && !direct_valid)
+        if(!text_update_ack_fast && text_update_valid_fast2 && update_take && !direct_valid && !blit_update_valid)
           text_update_ack_fast<=1;
         else if(text_update_ack_fast && !text_update_valid_fast2)
           text_update_ack_fast<=0;
@@ -128,11 +148,11 @@ module TOP
     end
     assign text_update_valid_fast=text_update_valid_fast2 && !text_update_ack_fast;
     assign text_update_take_slow=text_update_ack_slow2;
-    assign update_valid=direct_valid || text_update_valid_fast;
-    assign update_addr=direct_valid?direct_addr:text_update_addr;
-    assign update_data=direct_valid?direct_data:text_update_data;
-    assign update_mask=direct_valid?direct_mask:text_update_mask;
-    assign direct_take=update_take && direct_valid;
+    assign update_valid=blit_update_valid || direct_valid || text_update_valid_fast;
+    assign update_addr=blit_update_valid?blit_update_address:(direct_valid?direct_addr:text_update_addr);
+    assign update_data=blit_update_valid?blit_update_pixels:(direct_valid?direct_data:text_update_data);
+    assign update_mask=blit_update_valid?blit_update_mask:(direct_valid?direct_mask:text_update_mask);
+    assign direct_take=update_take && direct_valid && !blit_update_valid;
     end else begin : diagnostic
     assign update_valid = 0;
     assign update_addr = 0;
@@ -142,6 +162,7 @@ module TOP
     assign control_op=0;
     assign control_buffer=0;
     assign control_sequence=0;
+    assign blit_done=0;assign blit_error=0;assign blit_read_valid=0;assign blit_read_address=0;
     SpiDiagnostic #(.MODE(0)) spi_diagnostic (
         .rst_n(global_rst_n), .sck(SPI_SCK), .cs_n(SPI_CS_N),
         .mosi(SPI_MOSI), .miso(spi_miso_data), .miso_oe(spi_miso_enable)
@@ -269,7 +290,10 @@ module TOP
         .update_addr(update_addr), .update_data(update_data), .update_mask(update_mask),
         .control_valid(control_valid),.control_take(control_take),
         .control_op(control_op),.control_buffer(control_buffer),
-        .control_sequence(control_sequence),.control_status(control_status),.irq_n(FPGA_IRQ_N)
+        .control_sequence(control_sequence),.control_status(control_status),.irq_n(FPGA_IRQ_N),
+        .blit_start(blit_start),.blit_done(blit_done),.blit_error(blit_error),
+        .blit_read_valid(blit_read_valid),.blit_read_take(blit_read_take),
+        .blit_read_address(blit_read_address),.blit_read_done(blit_read_done),.blit_read_pixels(blit_read_pixels)
 	);
 
 	FramebufferFifo framebuffer_fifo_inst (
