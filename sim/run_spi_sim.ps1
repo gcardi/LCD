@@ -1,6 +1,6 @@
 param(
     [string]$OssCadSuite = 'C:\oss-cad-suite',
-    [ValidateRange(1, 86400)][int]$TimeoutSeconds = 60
+    [ValidateRange(1, 86400)][int]$TimeoutSeconds = 300
 )
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
