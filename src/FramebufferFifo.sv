@@ -69,6 +69,8 @@ module FramebufferFifo
     logic [WIDTH-1:0] mem [0:DEPTH-1];
 
     wire write_now = WrEn && !Full;
+    wire [ADDR_BITS:0] wbin_next = wbin + 1'b1;
+    wire [ADDR_BITS:0] wgray_next = bin2gray(wbin_next);
     wire read_now  = RdEn && !Empty;
 
     always_ff @(posedge WrClk)
@@ -90,8 +92,8 @@ module FramebufferFifo
             wbin  <= '0;
             wgray <= '0;
         end else if (write_now) begin
-            wbin  <= wbin + 1'b1;
-            wgray <= bin2gray(wbin + 1'b1);
+            wbin  <= wbin_next;
+            wgray <= wgray_next;
         end
     end
 
@@ -100,9 +102,18 @@ module FramebufferFifo
         else         {rgray_w2, rgray_w1} <= {rgray_w1, rgray};
     end
 
-    // Full: the pointers meet with the two top Gray bits inverted.
-    assign Full = (wgray == {~rgray_w2[ADDR_BITS:ADDR_BITS-1],
-                              rgray_w2[ADDR_BITS-2:0]});
+    // Keep the two pointer comparisons separate from write-enable selection:
+    // otherwise synthesis can pull the high-fanout enable into the comparator.
+    (* syn_keep = 1 *) wire full_at_current =
+        wgray == {~rgray_w2[ADDR_BITS:ADDR_BITS-1], rgray_w2[ADDR_BITS-2:0]};
+    (* syn_keep = 1 *) wire full_after_write =
+        wgray_next == {~rgray_w2[ADDR_BITS:ADDR_BITS-1], rgray_w2[ADDR_BITS-2:0]};
+    // Predict Full for the pointer after this edge. A newly observed read
+    // can release Full a cycle late, which is conservative.
+    always_ff @(posedge WrClk or negedge wrst_n) begin
+        if(!wrst_n) Full<=1'b0;
+        else Full <= write_now ? full_after_write : full_at_current;
+    end
 
     // The pipelined almost-full. Stage one undoes the Gray coding, stage two
     // does the subtract and the compare.
