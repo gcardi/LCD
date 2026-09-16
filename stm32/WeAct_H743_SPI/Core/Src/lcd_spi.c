@@ -4,6 +4,7 @@
 #include "main.h"
 #include <stdint.h>
 #include <stdio.h>
+#include <string.h>
 // State: 0 diagnostic endpoint, 1 running, 2 submitted, 3 failure.
 volatile uint32_t g_lcd_demo_state;
 volatile uint32_t g_lcd_fpga_text_demo_state;
@@ -68,6 +69,8 @@ static int ready(void)
 // bytes per row: measured on the bench, it spent 183 ms per full screen in the
 // CRC alone and gave back the whole 150 ms the new transport had saved.
 // Each entry is one byte pushed through the shift register from crc = i << 8.
+// Moving it to RAM was tried and measured: no change at all, 226 ms against
+// 225. The remaining assembly cost is not flash latency on the table.
 static const uint16_t crc16_table[256] = {
     0x0000, 0x1021, 0x2042, 0x3063, 0x4084, 0x50A5, 0x60C6, 0x70E7,
     0x8108, 0x9129, 0xA14A, 0xB16B, 0xC18C, 0xD1AD, 0xE1CE, 0xF1EF,
@@ -503,13 +506,18 @@ static int stream_row(uint16_t y,uint16_t x,uint16_t count,const uint16_t *row)
     p[10]=(uint8_t)(crc>>8);p[11]=(uint8_t)crc;p[12]=0xA6;p[13]=0;
     crc=0xFFFF;
     unsigned n=14;
-    // Whole groups only; the ragged ends are padded here and masked there.
-    for(unsigned g=0;g<groups;g++) for(unsigned slot=0;slot<16;slot++) {
-        unsigned column=(first+g)*16u+slot;
-        uint16_t pixel=(column>=x && column<=last_column)?row[column-x]:0;
-        p[n]=(uint8_t)pixel;p[n+1]=(uint8_t)(pixel>>8);
-        crc=crc16_byte(crc,p[n]);crc=crc16_byte(crc,p[n+1]);n+=2u;
-    }
+    // Whole groups only, built as three contiguous runs instead of a decision
+    // per pixel: pad, the source row verbatim, pad. RGB565 low byte first is
+    // exactly how a uint16_t already sits in memory here, so the body is a
+    // straight copy. Then one tight pass for the CRC over the whole payload.
+    unsigned pad_head=x-first*16u;
+    unsigned pad_tail=(first+groups)*16u-1u-last_column;
+    unsigned payload=n;
+    if(pad_head) {memset(p+n,0,pad_head*2u);n+=pad_head*2u;}
+    memcpy(p+n,row,count*2u);n+=count*2u;
+    if(pad_tail) {memset(p+n,0,pad_tail*2u);n+=pad_tail*2u;}
+    for(unsigned i=payload;i<n;i++)
+        crc=(uint16_t)((crc<<8)^crc16_table[(uint8_t)((crc>>8)^p[i])]);
     p[n]=(uint8_t)(crc>>8);p[n+1]=(uint8_t)crc;p[n+2]=0xA6;p[n+3]=0;
     n+=4u;
     // Split the two costs the way the B7 path does, so the payload CRC and

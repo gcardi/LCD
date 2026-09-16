@@ -62,15 +62,18 @@ hold/recovery/removal. 5698/8640 logiche (66%), 3753 registri (56%), 3 BSRAM.
 Fmax `psram_clk_81` 85,528 MHz contro un vincolo di 80,998: i domini del
 progetto conservano il loro margine.
 
-**Misurato al banco:** schermo intero **383 ms con `B7`, 249 ms con `BD`**,
-cioè **1,54x**. Il solo trasporto fa 1,83x (334,5 -> 183,0 ms); il resto se lo
+**Misurato al banco:** schermo intero **383 ms con `B7`, 225 ms con `BD`**,
+cioè **1,71x**. Il solo trasporto fa 1,83x (334,5 -> 183,0 ms); il resto se lo
 prende l'assemblaggio del pacchetto. La stima a tavolino diceva ~170 ms ed era
 sbagliata. Dettaglio e lezioni in [SPI_STREAM.md](SPI_STREAM.md).
 
 La prima misura dava `BD` a un inutile 3% dal `B7`: il CRC software bit per bit
 costava 334 cicli per byte e su 960 byte per riga annullava tutto il guadagno
-del trasporto. Sostituito con una tabella da 256 voci. Restano 61 ms di
-assemblaggio da aggredire, verosimilmente nel loop di padding. `LCD_STREAM_BENCH` in `spi_diag_config.h`
+del trasporto. Sostituito con una tabella da 256 voci, e il loop per pixel con tre blocchi
+contigui (`memset`/`memcpy`/`memset` più una passata di CRC): assemblaggio da
+183,4 a 61,4 a 38,8 ms. Gli ultimi 38,8 ms restano inspiegati — spostare la
+tabella in RAM non ha cambiato nulla — ma spariranno da soli col flush
+asincrono, che sovrappone l'assemblaggio al DMA. `LCD_STREAM_BENCH` in `spi_diag_config.h`
 accende `LCD_StreamBench_Run()`, che dipinge lo schermo lungo entrambi i
 percorsi e lascia il confronto in `g_lcd_bench_*`. È distruttivo, quindi opt-in.
 
@@ -102,7 +105,7 @@ diagnostica, che ne era privo.
 Da ricordare: il collaudo con 240 round allunga il boot oltre i 20 s di default
 del poll di `test-hardware.ps1`. Serve `-TimeoutSeconds 60` o più.
 
-**Prossimo sviluppo:** ridurre i 61 ms di assemblaggio residui, poi il flush
+**Prossimo sviluppo:** il flush
 asincrono (DMA non bloccante e `flush_ready` nell'ISR), che su 272 transazioni
 da 976 byte rende molto più che sulle 8160 da 41. Poi, e solo poi, ha senso
 ragionare di Quad-SPI. Restano aperti il cablaggio, le resistenze di serie e la
