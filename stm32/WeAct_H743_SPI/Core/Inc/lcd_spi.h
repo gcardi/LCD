@@ -30,6 +30,14 @@ extern volatile uint32_t g_lcd_scroll_demo_state;
 void LCD_ScrollDemo_Run(void);
 int LCD_WriteRect(uint16_t x, uint16_t y, uint16_t w, uint16_t h,
                   const uint16_t *pixels);
+// Where LCD_WriteRect spends its time. Cycle fields are DWT counts at
+// SystemCoreClock and accumulate freely; packets and retries are counts.
+// A non-zero retries means the FPGA queue was still busy on arrival.
+typedef struct {
+    uint32_t assemble, exchange, fence, packets, retries;
+} LcdProfile;
+extern volatile LcdProfile g_lcd_profile;
+void LCD_ProfileReset(void);
 // RGB565 colors. Blocking, single-caller APIs: 1 on success, 0 on error.
 // FillRect rejects empty/out-of-screen rectangles without sending pixels.
 // A transport failure may leave a partially updated region, as with WriteRect.

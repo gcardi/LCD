@@ -18,12 +18,25 @@ static int bad(uint32_t phase,uint32_t index,uint32_t expected,uint32_t actual)
     }
     return 0;
 }
-static void spi_guard(void)
+static void dwt_enable(void)
 {
     CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA_Msk;
     DWT->CTRL |= DWT_CTRL_CYCCNTENA_Msk;
+}
+static void spi_guard(void)
+{
+    dwt_enable();
     uint32_t start=DWT->CYCCNT;
     while((uint32_t)(DWT->CYCCNT-start)<SystemCoreClock/1000000u) {}
+}
+// Where the pixel path spends its time, in DWT cycles at SystemCoreClock.
+// Free-running accumulators: read them around a known workload, or call
+// LCD_ProfileReset() first. Counts are packets and busy retries, not cycles.
+volatile LcdProfile g_lcd_profile;
+void LCD_ProfileReset(void)
+{
+    dwt_enable();
+    g_lcd_profile=(LcdProfile){0};
 }
 static int exchange(uint8_t *tx, uint8_t *rx, uint16_t n)
 {
@@ -390,10 +403,13 @@ int LCD_WriteRect(uint16_t x, uint16_t y, uint16_t w, uint16_t h,
                   const uint16_t *pixels)
 {
     if(!pixels || !w || !h || x>=480 || y>=272 || w>480-x || h>272-y) return 0;
+    uint32_t mark;
+    dwt_enable();
     for(unsigned row=0;row<h;row++) for(unsigned bx=x&~15u;bx<x+w;bx+=16) {
         uint8_t tx[41]={0xB7,0},rx[41];
         uint32_t address=(y+row)*480+bx;
         if(!g_lcd_error[0]) g_lcd_error[1]=address;
+        mark=DWT->CYCCNT;
         uint16_t mask=0;
         tx[2]=address>>16;tx[3]=address>>8;tx[4]=address;
         for(unsigned i=0;i<16;i++) if(bx+i>=x && bx+i<x+w) {
@@ -401,14 +417,32 @@ int LCD_WriteRect(uint16_t x, uint16_t y, uint16_t w, uint16_t h,
             mask|=(uint16_t)(1u<<i);tx[7+2*i]=pixel;tx[8+2*i]=pixel>>8;
         }
         tx[5]=mask>>8;tx[6]=mask;tx[39]=0x5A;
-        if(!ready() || !exchange(tx,rx,41)) return 0;
-        if(rx[0]!=0xA5) return bad(5,0,0xA5,rx[0]);
-        if(rx[1]!=0xC3) return bad(6,1,0xC3,rx[1]);
+        g_lcd_profile.assemble+=DWT->CYCCNT-mark;
+        // No separate B7 poll: byte 1 of this very packet carries the same
+        // readiness, because the FPGA latches accept_packet from that condition
+        // at index 0. A busy answer commits nothing, so resending the identical
+        // packet is safe and idempotent.
+        uint32_t start=HAL_GetTick();
+        for(;;) {
+            mark=DWT->CYCCNT;
+            int sent=exchange(tx,rx,41);
+            g_lcd_profile.exchange+=DWT->CYCCNT-mark;
+            if(!sent) return 0;
+            if(rx[0]!=0xA5) return bad(5,0,0xA5,rx[0]);
+            if(rx[1]==0xC3) break;
+            if(rx[1]!=0) return bad(6,1,0xC3,rx[1]);
+            g_lcd_profile.retries++;
+            if(HAL_GetTick()-start>=1000) return bad(4,1,0xC3,rx[1]);
+        }
         if(rx[40]!=0xAC) return bad(7,40,0xAC,rx[40]);
         for(unsigned i=2;i<40;i++) if(rx[i]!=tx[i-1]) return bad(8,i,tx[i-1],rx[i]);
+        g_lcd_profile.packets++;
         if(g_lcd_stress.state==1) g_lcd_stress.packets++;
     }
-    return ready();
+    mark=DWT->CYCCNT;
+    int done=ready();
+    g_lcd_profile.fence+=DWT->CYCCNT-mark;
+    return done;
 }
 // Shared B9 transport. Callers validate coordinates before any SPI traffic.
 static int draw_shape(uint8_t shape,uint16_t x,uint16_t y,
