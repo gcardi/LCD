@@ -97,6 +97,20 @@ implementazione/budget, non il limite della famiglia FPGA. 50 MHz e poi
 ottimizzazione clock/I/O e test hardware. Letture di stato piu' lente possono
 evitare che MISO limiti la velocita' di upload dei pixel.
 
+## Verifica write-only successiva — 16 settembre 2026
+
+La proposta dell'ultima frase e' stata implementata con `BE/BF`. `BE` usa DMA
+TX-only e non campiona MISO; `BF` legge risultato e CRC a 1,5625 MHz. `BD`
+full-duplex resta disponibile. Il frame completo passa a 12,5 MHz in 226 ms.
+
+A 25 MHz il frame viene ricostruito grazie ai retry ma ne richiede 46 su 272
+righe (7 overflow, 39 pacchetti incompleti) e non e' qualificato. Quindi il
+percorso di ritorno MISO e' stato effettivamente rimosso dal traffico pesante,
+ma il prossimo limite osservato e' SCK/accodamento, non la STA interna a 122 MHz.
+La configurazione distribuita resta 12,5 MHz `MEDIUM` finche' una vista timing
+fast separata e una prova hardware prolungata non chiuderanno anche quei due
+aspetti.
+
 ## Banda RGB565 480 x 272
 
 Frame = 261120 byte. Valori ideali, senza header, pause, rendering o attese:

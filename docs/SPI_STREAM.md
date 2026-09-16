@@ -1,7 +1,13 @@
-# `BD`, scrittura in streaming di una riga
+# `BD` / `BE`, scrittura in streaming di una riga
 
-Implementazione del 16 settembre 2026. Sostituisce `B7` come percorso pixel
-preferito; `B7` resta invariato e supportato.
+Implementazione del 16 settembre 2026. `BD` e' il protocollo full-duplex
+originale; `BE` usa lo stesso pacchetto come stream TX-only e legge il risultato
+in seguito con `BF`. `B7` e `BD` restano invariati e supportati come fallback.
+
+Il firmware usa attualmente `BE/BF`: 12,5 MHz per i pixel e 1,5625 MHz per lo
+stato. MISO non viene campionato durante `BE` e la FPGA lo mette in alta
+impedenza dal secondo byte; il primo byte precede necessariamente la decodifica
+dell'opcode ma viene comunque ignorato dal master.
 
 ## Perché
 
@@ -38,6 +44,38 @@ Tutte le transazioni iniziano con la risposta `A5`. Byte big-endian.
 
 CRC16-CCITT, polinomio `1021`, iniziale `FFFF`, reinizializzato fra header e
 payload. Lunghezza totale `32·group_count + 18`, al massimo 978 byte.
+
+## Variante write-only `BE` e stato `BF`
+
+`BE` ha esattamente gli stessi byte TX di `BD`. Le risposte inline non fanno
+parte del contratto: STM32 usa `HAL_SPI_Transmit_DMA`, quindi SPI2 passa in
+simplex TX e non arma la DMA RX. Al termine il firmware porta CS alto, cambia
+il prescaler con SPI disabilitata e interroga il mailbox con `BF`.
+
+`BF` richiede nove byte TX (`BF` seguito da otto dummy) e risponde:
+
+| Indice RX | Contenuto |
+|---:|---|
+| 0 | `A5` |
+| 1 | `D3`, firma stato stream |
+| 2 | versione, attualmente `01` |
+| 3 | bit 0 stato valido, bit 1 endpoint pronto per una nuova riga |
+| 4–5 | numero di riga `y` dell'ultimo `BE` |
+| 6 | risultato |
+| 7–8 | CRC16-CCITT sui byte RX 1–6 |
+
+Risultati: `AC` successo, `00` riga rifiutata per coda occupata, `E1` header
+non valido, `E2` overflow durante il payload, `E3` CRC/commit payload errato,
+`FE` pacchetto iniziato ma non completato. `00`, `E2`, `E3` e `FE` sono
+recuperabili rispedendo la stessa riga; `E1` indica un errore di protocollo.
+Il firmware aspetta anche il bit ready prima di procedere, quindi non confonde
+la validazione CRC con lo svuotamento dell'ultima entry verso la PSRAM.
+
+Il mailbox identifica la riga, non un frame globale. Questa granularita' rende
+la riparazione economica e impedisce `PRESENT` finche' tutte le righe non sono
+state confermate; costa pero' una lettura lenta per riga. Un futuro mailbox per
+blocchi o frame potra' ridurre ulteriormente l'overhead dopo aver aumentato la
+profondita' della coda.
 
 ### Perché gruppi interi e non pixel
 
@@ -138,6 +176,23 @@ Schermo intero riga per riga, entrambi i percorsi, `LCD_StreamBench_Run()` a
 **1,71x sullo schermo intero.** Il trasporto da solo fa 1,84x: 334,5 -> 181,7 ms,
 contro 170 ms di puro tempo di filo. Il costo fisso per transazione, che sui
 pacchetti `B7` valeva circa 15 us ciascuno, è praticamente sparito.
+
+### Prova `BE/BF`
+
+Sul medesimo hardware, firmware Release e GPIO `MEDIUM`:
+
+| Pixel SCK | Stato SCK | Totale frame `BE/BF` | Retry | Esito |
+|---:|---:|---:|---:|---|
+| 12,5 MHz | 1,5625 MHz | 226 ms | 1 | PASS, nessun errore LCD |
+| 25 MHz | 1,5625 MHz | 175 ms | 46 | frame completato, non qualificato |
+
+Nella seconda esecuzione i 46 retry erano 7 overflow della coda a una entry e
+39 pacchetti incompleti; nessun CRC payload errato. Una ripetizione con slew
+GPIO `HIGH` e' peggiorata fino al timeout (tutti i tentativi incompleti), quindi
+la configurazione e' tornata a `MEDIUM`. Il risultato dimostra che togliere MISO
+dal trasferimento funziona e rende gli errori recuperabili, ma non qualifica
+25 MHz: restano il routing generico di SCK segnalato da Gowin, l'integrita' del
+segnale e la profondita' della coda verso PSRAM.
 
 Due lezioni che vale la pena non ripetere:
 
