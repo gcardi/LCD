@@ -1,9 +1,19 @@
 param(
  [ValidateSet('Debug','Release')][string]$Preset='Release',
  [Parameter(Mandatory)][ValidatePattern('^[A-Za-z0-9]+$')][string]$SerialNumber,
- [switch]$ReadOnly
+ [switch]$ReadOnly,
+ [switch]$RequireScroll
 )
 $ErrorActionPreference='Stop'
+# Default follows the enabled demo; -RequireScroll also rejects a disabled one.
+$config=Get-Content (Join-Path $PSScriptRoot 'Core/Inc/spi_diag_config.h') -Raw
+$RequireScroll=$RequireScroll -or ($config -match '(?m)^#define LCD_SCROLL_DEMO 1\s*$')
+if($RequireScroll){
+ if($config -notmatch '#define LCD_SCROLL_DEMO 1' -or $config -notmatch '#define LCD_FPGA_TEXT_DEMO 1'){
+  throw 'Scroll qualification requires LCD_SCROLL_DEMO=1 and LCD_FPGA_TEXT_DEMO=1'
+ }
+}
+$resultStem=if($RequireScroll){'scroll'}else{'double-buffer'}
 $root=Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 . (Join-Path $root 'tools/Invoke-LoggedProcess.ps1')
 $programmer=(Get-ChildItem 'C:/ST/STM32CubeCLT_*/STM32CubeProgrammer/bin/STM32_Programmer_CLI.exe' -File |
@@ -11,7 +21,7 @@ $programmer=(Get-ChildItem 'C:/ST/STM32CubeCLT_*/STM32CubeProgrammer/bin/STM32_P
 if(-not $programmer){throw 'CubeProgrammer not found'}
 $build=Join-Path $PSScriptRoot "build/$Preset"
 New-Item -ItemType Directory -Force $build | Out-Null
-$resultPath=Join-Path $build 'double-buffer-result.json'
+$resultPath=Join-Path $build "$resultStem-result.json"
 if(Test-Path $resultPath){Remove-Item -LiteralPath $resultPath}
 if(-not $ReadOnly){
  $manifest=Get-Content (Join-Path $root 'impl/verification.json') -Raw | ConvertFrom-Json
@@ -28,6 +38,7 @@ if($LASTEXITCODE -ne 0){throw 'Cannot read ELF symbols'}
 $names=@('g_spi_test','g_lcd_fpga_text_demo_state','g_lcd_error','g_lcd_clear_ms16',
  'g_lcd_present_count','g_lcd_present_ms','g_lcd_front_buffer','g_lcd_present_sequence',
  'g_fpga_irq_count','g_fpga_irq_pending','g_fpga_irq_level')
+if($RequireScroll){$names+=@('g_lcd_scroll_demo_state','g_lcd_copy_count','g_lcd_scroll_count','g_lcd_copy_ms','g_lcd_scroll_ms')}
 $entries=@{}
 foreach($name in $names){
  $line=@($symbols | Where-Object {$_ -match ('^[0-9a-fA-F]+\s+[0-9a-fA-F]+\s+\w\s+'+$name+'$')})
@@ -57,17 +68,22 @@ do {
   $values=@(for($i=0;$i -lt $entries[$name][1];$i+=4){[BitConverter]::ToUInt32($bytes,$entries[$name][0]-$first+$i)})
   $result[$name]=if($values.Count -eq 1){$values[0]}else{$values}
  }
- if($result.g_lcd_fpga_text_demo_state -in @(2,3)){break}
+ if($RequireScroll){
+  if($result.g_lcd_scroll_demo_state -in @(2,3) -or $result.g_lcd_error[0] -ne 0){break}
+ }elseif($result.g_lcd_fpga_text_demo_state -in @(2,3)){break}
  Start-Sleep -Milliseconds 500
-}while($timer.Elapsed.TotalSeconds -lt 15)
+}while($timer.Elapsed.TotalSeconds -lt 25)
+$expectedPresents=if($RequireScroll){50}else{17}
 $result.pass=($result.g_spi_test[0] -eq 0x53504954 -and $result.g_spi_test[1] -eq 1 -and
  $result.g_spi_test[2] -eq 2 -and $result.g_spi_test[3] -eq 5 -and
  $result.g_spi_test[4] -eq 4374 -and $result.g_spi_test[5] -eq 0 -and
  $result.g_spi_test[9] -eq 0 -and $result.g_spi_test[11] -eq 12500000 -and
  $result.g_lcd_fpga_text_demo_state -eq 2 -and $result.g_lcd_error[0] -eq 0 -and
- $result.g_lcd_present_count -eq 17 -and $result.g_fpga_irq_count -eq 17 -and
+ $result.g_lcd_present_count -eq $expectedPresents -and $result.g_fpga_irq_count -eq $expectedPresents -and
  $result.g_fpga_irq_pending -eq 0 -and $result.g_fpga_irq_level -eq 1)
+if($RequireScroll){$result.pass=$result.pass -and $result.g_lcd_scroll_demo_state -eq 2 -and
+ $result.g_lcd_copy_count -eq 1 -and $result.g_lcd_scroll_count -eq 32}
 $result | ConvertTo-Json -Depth 4 | Set-Content $resultPath
 $result | ConvertTo-Json -Depth 4 | Write-Host
 if(-not $result.pass){throw "Double buffer hardware check failed: $resultPath"}
-Write-Host 'PASS: double_buffer hardware, 17 presentations and 17 IRQ edges, no SPI/LCD errors'
+Write-Host "PASS: graphics hardware, $expectedPresents presentations and IRQ edges, no SPI/LCD errors"
