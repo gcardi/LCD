@@ -56,13 +56,13 @@ module SpiFramebuffer (
  reg [26:0] status_snapshot,status_packet;
  reg status_busy;
  reg graphics_idle;
- reg selected_control,selected_status,accept_control;
+ reg selected_control,selected_status,selected_fast_status,accept_control;
  reg selected_blit,blit_invalid,blit_scroll,blit_destination;
  // BD streaming row write. The payload carries whole 16-pixel groups, so the
  // pixel path is the same byte shift register B7 already uses; the host pads
  // the ragged ends and describes them with a head and a tail mask. Keeping the
  // shifter shared is what makes the opcode nearly free in logic.
- reg selected_stream,accept_stream,stream_armed,stream_overflow,stream_first;
+ reg selected_stream,selected_fast,accept_stream,stream_armed,stream_overflow,stream_first;
  reg [2:0] stream_phase; // 0 header, 1 payload, 2 CRC hi, 3 CRC lo, 4 commit, 5 done
  reg [4:0] stream_byte;   // position inside the current 32-byte group
  reg [4:0] stream_groups; // groups still to write, current one included
@@ -72,6 +72,11 @@ module SpiFramebuffer (
  reg [7:0] stream_arg_start,stream_arg_count;
  reg [7:0] staging_op,staging_buffer;
  reg [15:0] staging_sequence,control_crc,control_expected_crc,status_crc;
+ // BE is the write-only form of BD. Its result survives CS rising and is read
+ // later with BF, when the master deliberately uses the slow MISO clock.
+ reg [15:0] fast_status_y;
+ reg [7:0] fast_status_result;
+ reg fast_status_valid,fast_status_ready;
  wire control_available = control_request == control_seen;
  wire graphics_available = control_available;
  wire control_fields_valid = staging_op>=1 && staging_op<=3 &&
@@ -156,6 +161,17 @@ module SpiFramebuffer (
      default:status_byte=0;
    endcase
  endfunction
+ function automatic [7:0] fast_status_byte(input [6:0] n);
+   case(n)
+     0:fast_status_byte=8'hD3;
+     1:fast_status_byte=8'h01;
+     2:fast_status_byte={6'd0,fast_status_ready,fast_status_valid};
+     3:fast_status_byte=fast_status_y[15:8];
+     4:fast_status_byte=fast_status_y[7:0];
+     5:fast_status_byte=fast_status_result;
+     default:fast_status_byte=0;
+   endcase
+ endfunction
  // Descriptor is bundled with the control mailbox and immutable while busy.
  always @(posedge sck or negedge rst_n) begin
    if(!rst_n) begin
@@ -190,9 +206,13 @@ module SpiFramebuffer (
    end
  endfunction
 
+ wire slave_miso_oe;
+ // The first byte is driven before the opcode is known. From the second byte
+ // onward BE is electrically write-only as well as ignored by the STM32.
+ assign miso_oe=slave_miso_oe && !selected_fast;
  SpiSlave #(.FIXED_FIRST_BYTE(1),.FIRST_BYTE(8'hA5)) slave(
    .rst_n(rst_n),.spi_sck(sck),.spi_cs_n(cs_n),.spi_mosi(mosi),
-   .spi_miso(miso),.spi_miso_oe(miso_oe),.rx_data(rx),.rx_push(push),
+   .spi_miso(miso),.spi_miso_oe(slave_miso_oe),.rx_data(rx),.rx_push(push),
    .tx_data(echo_byte),.tx_valid(1'b1),.tx_take());
 
  always @(posedge sck or negedge rst_n) begin
@@ -202,6 +222,29 @@ module SpiFramebuffer (
    end else begin
      ack1<=ack;ack2<=ack1;text_ack1<=text_ack;text_ack2<=text_ack1;
      text_enabled1<=text_enabled;text_enabled2<=text_enabled1;
+   end
+ end
+
+ // Result mailbox for the write-only stream. FE means that CS rose before a
+ // complete trailer; 00 is backpressure, E1 a bad header, E2 overflow and E3
+ // a bad payload CRC/commit. AC is the only successful completion.
+ always @(posedge sck or negedge rst_n) begin
+   if(!rst_n) begin
+     fast_status_y<=0;fast_status_result<=8'hFE;fast_status_valid<=0;
+   end else if(push) begin
+     if(index==0 && rx==8'hBE) begin
+       fast_status_y<=0;fast_status_valid<=1;
+       fast_status_result<=(available && graphics_available)?8'hFE:8'h00;
+     end
+     if(selected_fast) begin
+       if(index==2) fast_status_y[15:8]<=rx;
+       if(index==3) fast_status_y[7:0]<=rx;
+       if(index==12 && accept_stream && !stream_header_ok)
+         fast_status_result<=8'hE1;
+       if(stream_phase==3'd4)
+         fast_status_result<=stream_overflow?8'hE2:
+             ((rx==8'hA6 && control_expected_crc==control_crc)?8'hAC:8'hE3);
+     end
    end
  end
  always @(posedge clk or negedge mem_rst_n) begin
@@ -292,9 +335,9 @@ module SpiFramebuffer (
      accept_packet<=0;accept_text<=0;accept_shape<=0;
      echo_byte<=8'hA5;staging_addr<=0;staging_mask<=0;staging_pixels<=0;
      text_crc<=16'hFFFF;text_expected_crc<=0;text_invalid<=0;
-     selected_control<=0;selected_status<=0;accept_control<=0;
+     selected_control<=0;selected_status<=0;selected_fast_status<=0;accept_control<=0;
      selected_blit<=0;blit_invalid<=0;blit_scroll<=0;blit_destination<=0;
-     selected_stream<=0;accept_stream<=0;stream_armed<=0;stream_overflow<=0;
+     selected_stream<=0;selected_fast<=0;accept_stream<=0;stream_armed<=0;stream_overflow<=0;
      stream_first<=0;stream_phase<=0;stream_byte<=0;stream_groups<=0;
      stream_addr<=0;stream_head<=0;stream_tail<=0;
      stream_arg_y<=0;stream_arg_start<=0;stream_arg_count<=0;
@@ -318,6 +361,10 @@ module SpiFramebuffer (
        echo_byte<=8'hD2;status_packet<=status_snapshot;
        status_busy<=!control_available;status_crc<=crc16_byte(16'hFFFF,8'hD2);
      end
+     if(index==0 && rx==8'hBF) begin
+       echo_byte<=8'hD3;fast_status_ready<=available && graphics_available;
+       status_crc<=crc16_byte(16'hFFFF,8'hD3);
+     end
      if(selected_status) begin
        if(index>=1 && index<=7) begin
          echo_byte<=status_byte(index);
@@ -325,6 +372,14 @@ module SpiFramebuffer (
        end
        if(index==8) echo_byte<=status_crc[15:8];
        if(index==9) echo_byte<=status_crc[7:0];
+     end
+     if(selected_fast_status) begin
+       if(index>=1 && index<=5) begin
+         echo_byte<=fast_status_byte(index);
+         status_crc<=crc16_byte(status_crc,fast_status_byte(index));
+       end
+       if(index==6) echo_byte<=status_crc[15:8];
+       if(index==7) echo_byte<=status_crc[7:0];
      end
      if(selected_control && index==8) echo_byte<=control_commit?8'hAC:8'hE1;
      if(selected_blit && index==22) echo_byte<=blit_commit?8'hAC:8'hE1;
@@ -344,8 +399,10 @@ module SpiFramebuffer (
        accept_packet<=available && graphics_available;
        accept_text<=text_available && text_enabled2 && graphics_available;
        accept_shape<=text_available && graphics_available;
-       selected_stream<=rx==8'hBD;accept_stream<=available && graphics_available;
+       selected_stream<=rx==8'hBD || rx==8'hBE;selected_fast<=rx==8'hBE;
+       accept_stream<=available && graphics_available;
        selected_control<=rx==8'hBA;selected_status<=rx==8'hBB;
+       selected_fast_status<=rx==8'hBF;
        selected_blit<=rx==8'hBC;
        accept_control<=control_available;
        text_crc<=16'hFFFF;text_invalid<=0;

@@ -19,7 +19,7 @@ static uint8_t rx[4128] __attribute__((section(".spi_dma"), aligned(32)));
 // and 105: invisible until a run long enough to reach them.
 static uint8_t echo_safe(uint8_t first)
 {
-    return (first>=0xB7 && first<=0xBD) ? (uint8_t)(first^0x80) : first;
+    return (first>=0xB7 && first<=0xBF) ? (uint8_t)(first^0x80) : first;
 }
 volatile SpiTestResult g_spi_test;
 static volatile uint32_t completed, failed;
@@ -79,6 +79,10 @@ void HAL_SPI_TxRxCpltCallback(SPI_HandleTypeDef *hspi)
 {
     if(hspi == &hspi2) completed = 1;
 }
+void HAL_SPI_TxCpltCallback(SPI_HandleTypeDef *hspi)
+{
+    if(hspi == &hspi2) completed = 1;
+}
 void HAL_SPI_ErrorCallback(SPI_HandleTypeDef *hspi)
 {
     if(hspi == &hspi2) failed = 1;
@@ -102,6 +106,31 @@ int SPI_Exchange_DMA(const uint8_t *send,uint8_t *receive,uint16_t length)
     if(status!=HAL_OK || !completed || failed) {HAL_SPI_Abort(&hspi2);return 0;}
     if(SCB->CCR & SCB_CCR_DC_Msk) SCB_InvalidateDCache_by_Addr((uint32_t*)rx,cache_length);
     __DSB();memcpy(receive,rx,length);return 1;
+}
+
+int SPI_Transmit_DMA(const uint8_t *send,uint16_t length)
+{
+    if(!length || length>sizeof(tx)) return 0;
+    memcpy(tx,send,length);
+    uint32_t cache_length=(length+31u)&~31u;
+    if(SCB->CCR & SCB_CCR_DC_Msk)
+        SCB_CleanDCache_by_Addr((uint32_t*)tx,cache_length);
+    __DSB();completed=0;failed=0;
+    uint32_t start=HAL_GetTick();
+    HAL_StatusTypeDef status=HAL_SPI_Transmit_DMA(&hspi2,tx,length);
+    while(status==HAL_OK && !completed && !failed && HAL_GetTick()-start<1000) {}
+    if(status!=HAL_OK || !completed || failed) {HAL_SPI_Abort(&hspi2);return 0;}
+    return 1;
+}
+
+int SPI_SetBaudRatePrescaler(uint32_t prescaler)
+{
+    if(hspi2.State!=HAL_SPI_STATE_READY ||
+       !IS_SPI_BAUDRATE_PRESCALER(prescaler)) return 0;
+    __HAL_SPI_DISABLE(&hspi2);
+    MODIFY_REG(hspi2.Instance->CFG1,SPI_CFG1_MBR,prescaler);
+    hspi2.Init.BaudRatePrescaler=prescaler;
+    return 1;
 }
 
 // Readiness handshake over the existing link, in place of a blind delay.

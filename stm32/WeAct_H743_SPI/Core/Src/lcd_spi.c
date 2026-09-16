@@ -5,6 +5,9 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
+#define LCD_PIXEL_STREAM_PRESCALER SPI_BAUDRATEPRESCALER_16
+#define LCD_NORMAL_PRESCALER       SPI_BAUDRATEPRESCALER_16
+#define LCD_STATUS_PRESCALER       SPI_BAUDRATEPRESCALER_128
 // State: 0 diagnostic endpoint, 1 running, 2 submitted, 3 failure.
 volatile uint32_t g_lcd_demo_state;
 volatile uint32_t g_lcd_fpga_text_demo_state;
@@ -48,6 +51,17 @@ static int exchange(uint8_t *tx, uint8_t *rx, uint16_t n)
     spi_guard(); // Hold CS after EOT, with SCK settled low.
     HAL_GPIO_WritePin(FPGA_CS_GPIO_Port, FPGA_CS_Pin, GPIO_PIN_SET);
     if(status!=HAL_OK) { bad(1,0,HAL_OK,status);HAL_SPI_Abort(&hspi2); return 0; }
+    return 1;
+}
+static int transmit_only(uint8_t *tx,uint16_t n)
+{
+    spi_guard();
+    HAL_GPIO_WritePin(FPGA_CS_GPIO_Port,FPGA_CS_Pin,GPIO_PIN_RESET);
+    spi_guard();
+    int ok=SPI_Transmit_DMA(tx,n);
+    spi_guard();
+    HAL_GPIO_WritePin(FPGA_CS_GPIO_Port,FPGA_CS_Pin,GPIO_PIN_SET);
+    if(!ok) {bad(50,0,HAL_OK,HAL_ERROR);HAL_SPI_Abort(&hspi2);return 0;}
     return 1;
 }
 static int ready(void)
@@ -487,7 +501,47 @@ int LCD_WriteRect(uint16_t x, uint16_t y, uint16_t w, uint16_t h,
 // CRC over that payload, and a commit. At most 12 + 2*480 + 4 = 976 bytes, so
 // a full-width row always fits a single DMA. Returns 1 accepted, 0 hard error,
 // -1 retryable (the FPGA was busy, or reported overflow / payload CRC).
-static uint8_t stream_tx[1024], stream_rx[1024];
+static uint8_t stream_tx[1024];
+// BF result counters: busy, bad header, overflow, bad payload CRC/commit,
+// incomplete packet. They make a successful retrying run diagnosable by SWD.
+volatile uint32_t g_lcd_fast_status_counts[5],g_lcd_fast_status_reads;
+
+// Read the BE completion mailbox through BF. Pixel traffic may later run at a
+// substantially higher clock; this status transaction remains at 1.5625 MHz,
+// where the existing MISO path has ample margin. Restore the qualified normal
+// rate before returning so every other command retains its original timing.
+static int fast_stream_status(uint16_t y)
+{
+    uint8_t tx[9]={0xBF},rx[9];
+    uint32_t start=HAL_GetTick();
+    for(;;) {
+        if(!SPI_SetBaudRatePrescaler(LCD_STATUS_PRESCALER))
+            return bad(51,0,LCD_STATUS_PRESCALER,hspi2.Instance->CFG1&SPI_CFG1_MBR);
+        int exchanged=exchange(tx,rx,sizeof(tx));
+        int restored=SPI_SetBaudRatePrescaler(LCD_NORMAL_PRESCALER);
+        if(!exchanged || !restored) return bad(52,0,1,0);
+        if(rx[0]!=0xA5 || rx[1]!=0xD3 || rx[2]!=1 || (rx[3]&0xFC) || !(rx[3]&1))
+            return bad(53,1,0xD3,rx[1]);
+        uint16_t crc=0xFFFF;
+        for(unsigned i=1;i<=6;i++) crc=crc16_byte(crc,rx[i]);
+        uint16_t received=(uint16_t)((uint16_t)rx[7]<<8)|rx[8];
+        if(crc!=received) return bad(54,7,crc,received);
+        uint16_t reported_y=(uint16_t)((uint16_t)rx[4]<<8)|rx[5];
+        if(reported_y!=y) return bad(55,4,y,reported_y);
+        g_lcd_fast_status_reads++;
+        if(rx[6]==0xAC) {
+            if(rx[3]&2) return 1;
+            if(HAL_GetTick()-start>=1000) return bad(56,3,2,rx[3]);
+            continue;
+        }
+        if(rx[6]==0x00) {g_lcd_fast_status_counts[0]++;return -1;}
+        if(rx[6]==0xE1) {g_lcd_fast_status_counts[1]++;return bad(57,6,0xAC,rx[6]);}
+        if(rx[6]==0xE2) {g_lcd_fast_status_counts[2]++;return -1;}
+        if(rx[6]==0xE3) {g_lcd_fast_status_counts[3]++;return -1;}
+        if(rx[6]==0xFE) {g_lcd_fast_status_counts[4]++;return -1;}
+        return bad(57,6,0xAC,rx[6]);
+    }
+}
 static int stream_row(uint16_t y,uint16_t x,uint16_t count,const uint16_t *row)
 {
     unsigned last_column=x+count-1u;
@@ -496,7 +550,7 @@ static int stream_row(uint16_t y,uint16_t x,uint16_t count,const uint16_t *row)
     uint16_t tail=(uint16_t)(0xFFFFu>>(15u-(last_column&15u)));
     uint32_t mark=DWT->CYCCNT;
     uint8_t *p=stream_tx;
-    p[0]=0xBD;p[1]=0;
+    p[0]=0xBE;p[1]=0;
     p[2]=(uint8_t)(y>>8);p[3]=(uint8_t)y;
     p[4]=(uint8_t)first;p[5]=(uint8_t)groups;
     p[6]=(uint8_t)(head>>8);p[7]=(uint8_t)head;
@@ -524,27 +578,19 @@ static int stream_row(uint16_t y,uint16_t x,uint16_t count,const uint16_t *row)
     // the padding loop are not hidden inside the transfer figure.
     g_lcd_profile.assemble+=DWT->CYCCNT-mark;
     mark=DWT->CYCCNT;
-    int sent=exchange(stream_tx,stream_rx,(uint16_t)n);
-    g_lcd_profile.exchange+=DWT->CYCCNT-mark;
-    if(!sent) return 0;
-    if(stream_rx[0]!=0xA5) return bad(45,0,0xA5,stream_rx[0]);
-    if(stream_rx[1]!=0xC3) {
-        if(stream_rx[1]!=0) return bad(46,1,0xC3,stream_rx[1]);
-        return -1; // queue still draining; the row was never started
+    if(!SPI_SetBaudRatePrescaler(LCD_PIXEL_STREAM_PRESCALER) ||
+       !transmit_only(stream_tx,(uint16_t)n)) {
+        (void)SPI_SetBaudRatePrescaler(LCD_NORMAL_PRESCALER);
+        return 0;
     }
-    for(unsigned i=2;i<=12;i++)
-        if(stream_rx[i]!=stream_tx[i-1]) return bad(47,i,stream_tx[i-1],stream_rx[i]);
-    // A header refused while the endpoint reported free is a protocol fault,
-    // not backpressure: the fields and CRC were built here.
-    if(stream_rx[13]!=0xAC) return bad(48,13,0xAC,stream_rx[13]);
-    if(stream_rx[n-1]!=0xAC) return -1;
-    return 1;
+    int outcome=fast_stream_status(y);
+    g_lcd_profile.exchange+=DWT->CYCCNT-mark;
+    return outcome;
 }
 
-// Same contract as LCD_WriteRect, one transaction per row instead of one per
-// sixteen pixels. Rows commit as they stream, so a refused row leaves part of
-// itself behind; resending it is idempotent and nothing reaches the panel
-// before PRESENT.
+// Same contract as LCD_WriteRect. BE sends each row TX-only; BF obtains its
+// CRC/result later and slowly. Rows commit as they stream, so resending after
+// an error is idempotent and nothing reaches the panel before PRESENT.
 int LCD_WriteRectStream(uint16_t x, uint16_t y, uint16_t w, uint16_t h,
                         const uint16_t *pixels)
 {

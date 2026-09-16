@@ -148,6 +148,45 @@ module tb_spi_framebuffer;
        if(r!=expect_commit)$fatal(1,"stream commit %h expected %h",r,expect_commit);
      end
      cs=1;#300;
+ end
+ endtask
+ task fast_stream_row(input integer sy,input bit bad_payload_crc,
+                      input [15:0] first_pixel);
+   reg [7:0] b[0:49];reg [15:0] crc,pv;integer k,slot;
+   begin
+     for(k=0;k<50;k=k+1)b[k]=0;
+     b[0]=8'hBE;b[2]=sy>>8;b[3]=sy;b[4]=0;b[5]=1;
+     b[6]=8'hFF;b[7]=8'hFF;b[8]=8'hFF;b[9]=8'hFF;
+     crc=16'hFFFF;for(k=2;k<=9;k=k+1)crc=crc_byte(crc,b[k]);
+     b[10]=crc[15:8];b[11]=crc[7:0];b[12]=8'hA6;
+     crc=16'hFFFF;
+     for(slot=0;slot<16;slot=slot+1)begin
+       pv=first_pixel+slot;b[14+2*slot]=pv[7:0];b[15+2*slot]=pv[15:8];
+       crc=crc_byte(crc,pv[7:0]);crc=crc_byte(crc,pv[15:8]);
+     end
+     if(bad_payload_crc)crc=crc^16'h0100;
+     b[46]=crc[15:8];b[47]=crc[7:0];b[48]=8'hA6;
+     cs=0;#100;
+     byte_io(b[0],r);if(r!=8'hA5)$fatal(1,"fast stream identity %h",r);
+     if(oe!==1'b0)$fatal(1,"BE kept MISO enabled after opcode");
+     for(k=1;k<50;k=k+1)byte_io(b[k],r);
+     cs=1;#300;
+   end
+ endtask
+ task fast_stream_status(input integer expected_y,input [7:0] expected_result);
+   reg [7:0] reply[0:8];reg [15:0] crc,received;integer k;
+   begin
+     cs=0;#100;
+     for(k=0;k<9;k=k+1)byte_io(k==0?8'hBF:8'h00,reply[k]);
+     cs=1;#300;
+     if(reply[0]!=8'hA5 || reply[1]!=8'hD3 || reply[2]!=1)
+       $fatal(1,"fast status prefix %h %h %h",reply[0],reply[1],reply[2]);
+     if(!reply[3][0])$fatal(1,"fast status invalid");
+     if({reply[4],reply[5]}!=expected_y || reply[6]!=expected_result)
+       $fatal(1,"fast status y=%0d result=%h",{reply[4],reply[5]},reply[6]);
+     crc=16'hFFFF;for(k=1;k<=6;k=k+1)crc=crc_byte(crc,reply[k]);
+     received={reply[7],reply[8]};if(crc!=received)
+       $fatal(1,"fast status CRC %h expected %h",received,crc);
    end
  endtask
  initial begin
@@ -252,7 +291,14 @@ module tb_spi_framebuffer;
    for(i=0;i<32;i=i+1)
      if(memory[2880+i]!==16'h6000+i[15:0])$fatal(1,"recovered pixel %0d = %h",i,memory[2880+i]);
 
-   $display("PASS: spi_framebuffer masks, bounds, busy, abort, CDC, B9 line/fill CRC, BD streaming rows and PSRAM beats");$finish;
+   // BE carries the same row without using MISO. BF retrieves its result in a
+   // later transaction, including a CRC over the status mailbox.
+   fast_stream_row(7,0,16'h7000);#4000;fast_stream_status(7,8'hAC);
+   for(i=0;i<16;i=i+1)
+     if(memory[3360+i]!==16'h7000+i[15:0])$fatal(1,"fast pixel %0d = %h",i,memory[3360+i]);
+   fast_stream_row(8,1,16'h8000);#4000;fast_stream_status(8,8'hE3);
+
+   $display("PASS: spi_framebuffer masks, bounds, busy, abort, CDC, B9, BD and BE/BF streaming");$finish;
  end
  initial begin #10000000;$fatal(1,"timeout");end
 endmodule
