@@ -77,7 +77,7 @@ $expectedPresents=if($RequireScroll){50}else{17}
 $result.pass=($result.g_spi_test[0] -eq 0x53504954 -and $result.g_spi_test[1] -eq 1 -and
  $result.g_spi_test[2] -eq 2 -and $result.g_spi_test[3] -eq 5 -and
  $result.g_spi_test[4] -eq 4374 -and $result.g_spi_test[5] -eq 0 -and
- $result.g_spi_test[9] -eq 0 -and $result.g_spi_test[11] -eq 12500000 -and
+ $result.g_spi_test[9] -eq 0 -and $result.g_spi_test[11] -eq 9375000 -and
  $result.g_lcd_fpga_text_demo_state -eq 2 -and $result.g_lcd_error[0] -eq 0 -and
  $result.g_lcd_present_count -eq $expectedPresents -and $result.g_fpga_irq_count -eq $expectedPresents -and
  $result.g_fpga_irq_pending -eq 0 -and $result.g_fpga_irq_level -eq 1)

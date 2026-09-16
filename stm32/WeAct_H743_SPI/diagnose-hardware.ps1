@@ -10,13 +10,13 @@ $repoRoot=Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 $modeNumber=@{echo=0;miso=1;mosi=2}[$Mode]
 if($RestoreSelfTest) {
     # Pure diagnostic endpoint retains the original generic serializer.
-    # Restore its qualified 12.5 MHz operating point as well as its mode.
+    # Restore its operating point for the current 150 MHz SPI kernel and mode.
     $spiSource=Join-Path $PSScriptRoot 'Core/Src/spi.c'
     [IO.File]::WriteAllText($spiSource,([IO.File]::ReadAllText($spiSource) -replace 'SPI_BAUDRATEPRESCALER_\d+','SPI_BAUDRATEPRESCALER_16'))
     $ioc=Join-Path $PSScriptRoot 'WeAct_H743_SPI.ioc'
-    [IO.File]::WriteAllText($ioc,([IO.File]::ReadAllText($ioc) -replace 'SPI2.BaudRatePrescaler=SPI_BAUDRATEPRESCALER_\d+','SPI2.BaudRatePrescaler=SPI_BAUDRATEPRESCALER_16' -replace 'SPI2.CalculateBaudRate=[^\r\n]+','SPI2.CalculateBaudRate=12.5 MBits/s'))
+    [IO.File]::WriteAllText($ioc,([IO.File]::ReadAllText($ioc) -replace 'SPI2.BaudRatePrescaler=SPI_BAUDRATEPRESCALER_\d+','SPI2.BaudRatePrescaler=SPI_BAUDRATEPRESCALER_16' -replace 'SPI2.CalculateBaudRate=[^\r\n]+','SPI2.CalculateBaudRate=9.375 MBits/s'))
     $sdc=Join-Path $repoRoot 'src/LCD.sdc'
-    [IO.File]::WriteAllText($sdc,([IO.File]::ReadAllText($sdc) -replace 'create_clock -name spi_clk -period \d+ -waveform \{0 \d+\}','create_clock -name spi_clk -period 80 -waveform {0 40}'))
+    [IO.File]::WriteAllText($sdc,([IO.File]::ReadAllText($sdc) -replace 'create_clock -name spi_clk -period [\d.]+ -waveform \{0 [\d.]+\}','create_clock -name spi_clk -period 106.667 -waveform {0 53.333}'))
     $config=Join-Path $PSScriptRoot 'Core/Inc/spi_diag_config.h'
     $text=[IO.File]::ReadAllText($config) -replace '#define SPI_DIAG_MATRIX \d+','#define SPI_DIAG_MATRIX 0' -replace '#define SPI_DIAG_MODE \d+','#define SPI_DIAG_MODE 0'
     [IO.File]::WriteAllText($config,$text)

@@ -5,7 +5,7 @@
 #define SPI_DIAG_MODE 0
 #define SPI_DIAG_ROUNDS 8
 // Eco di verifica dopo SPI_Setup(). Ogni round sono 5 trasferimenti e 4374 byte,
-// circa 33 ms a 12.5 MHz, e la demo del testo non parte finche' non e' finito.
+// circa 44 ms a 9,375 MHz, e la demo del testo non parte finche' non e' finito.
 // Un round basta a dimostrare che il collegamento eco funziona davvero prima di
 // disegnare; test-hardware.ps1 rilegge questa costante e adatta le attese da
 // solo. Per -RequireStress servono pero' oltre 1.000.000 di byte controllati,

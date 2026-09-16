@@ -1,8 +1,9 @@
 # Scrittura framebuffer via SPI
 
-> Aggiornamento: il collaudo lungo rileva errori grafici intermittenti a 25 MHz.
-> Configurazione corrente 12.5 MHz, qualificata in tre prove prolungate.
-> Vedere [SPI_STRESS.md](SPI_STRESS.md); i risultati successivi a 25 MHz sono cronologia.
+> Aggiornamento: il percorso pixel corrente usa lo stream write-only `BE` a
+> 18,75 MHz e legge lo stato separatamente a 1,171875 MHz. Vedere
+> [SPI_STREAM.md](SPI_STREAM.md). Il collaudo a 12,5 MHz e i risultati a
+> 25 MHz qui sotto restano cronologia del precedente protocollo `B7`.
 
 Prima implementazione: `SpiFramebuffer.sv` trasferisce burst mascherati alla
 PSRAM tramite una coda asincrona di un elemento. `LCD_WriteRect` li compone

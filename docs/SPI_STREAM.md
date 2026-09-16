@@ -4,8 +4,9 @@ Implementazione del 16 settembre 2026. `BD` e' il protocollo full-duplex
 originale; `BE` usa lo stesso pacchetto come stream TX-only e legge il risultato
 in seguito con `BF`. `B7` e `BD` restano invariati e supportati come fallback.
 
-Il firmware usa attualmente `BE/BF`: 12,5 MHz per i pixel e 1,5625 MHz per lo
-stato. MISO non viene campionato durante `BE` e la FPGA lo mette in alta
+Il firmware usa attualmente `BE/BF`: 18,75 MHz per i pixel, 9,375 MHz per i
+comandi ordinari e 1,171875 MHz per lo stato. MISO non viene campionato durante
+`BE` e la FPGA lo mette in alta
 impedenza dal secondo byte; il primo byte precede necessariamente la decodifica
 dell'opcode ma viene comunque ignorato dal master.
 
@@ -118,12 +119,12 @@ scrivere per il resto della riga e lo riporta in due modi: il byte di stato sul
 payload passa da `C3` a `00`, e il commit finale risponde `E1`. Anche qui la cura
 è rispedire la riga.
 
-In pratica l'overflow non dovrebbe accadere: un gruppo impiega 20,5 µs ad
-arrivare a 12,5 MHz, mentre il dominio memoria lo smaltisce in meno di un
-microsecondo. La coda a una entry è quindi ampiamente sufficiente, e il campo
-`retries` del profilo firmware è lì per dimostrarlo sul banco invece che a parole.
-Se un giorno dovesse saturare, il rimedio è un buffer elastico fra dominio SCK e
-dominio PSRAM — `FramebufferFifo` è già parametrico in larghezza e profondità.
+La misura prolungata a 18,75 MHz ha mostrato che l'overflow puo' invece
+accadere: 210 retry su 13.056 righe, tutti `E2`. La velocita' media della PSRAM
+non e' il problema; basta un breve stallo al confine di un gruppo per saturare
+la coda a una entry. Il recupero rende il trasferimento corretto, ma il prossimo
+guadagno richiede un buffer elastico piu' profondo fra dominio SCK e dominio
+PSRAM — `FramebufferFifo` è già parametrico in larghezza e profondità.
 
 ## Implementazione
 
@@ -184,6 +185,7 @@ Sul medesimo hardware, firmware Release e GPIO `MEDIUM`:
 | Pixel SCK | Stato SCK | Totale frame `BE/BF` | Retry | Esito |
 |---:|---:|---:|---:|---|
 | 12,5 MHz | 1,5625 MHz | 226 ms | 1 | PASS, nessun errore LCD |
+| 18,75 MHz | 1,171875 MHz | 186 ms | 5 | PASS, 5 overflow recuperati |
 | 25 MHz | 1,5625 MHz | 175 ms | 46 | frame completato, non qualificato |
 
 Nella seconda esecuzione i 46 retry erano 7 overflow della coda a una entry e
@@ -193,6 +195,15 @@ la configurazione e' tornata a `MEDIUM`. Il risultato dimostra che togliere MISO
 dal trasferimento funziona e rende gli errori recuperabili, ma non qualifica
 25 MHz: restano il routing generico di SCK segnalato da Gowin, l'integrita' del
 segnale e la profondita' della coda verso PSRAM.
+
+La qualifica prolungata della configurazione a 18,75 MHz ha trasferito 48 frame,
+13.056 righe, in 10.641 ms: 210 retry, tutti overflow `E2`, e zero busy, header
+errati, CRC errati o pacchetti incompleti. La media di circa 221,7 ms/frame
+include il recupero degli overflow. Le prove dicotomiche superiori non sono
+state caricate sull'hardware: 21,875 MHz ha fallito la STA SPI (Fmax circa
+20,763 MHz), 20,3125 MHz ha fallito un percorso MOSI di 0,445 ns e 19,375 MHz
+ha prodotto una regressione di placement sul percorso PSRAM di 0,343 ns. Per
+questo la configurazione distribuita e qualificata resta 18,75 MHz.
 
 Due lezioni che vale la pena non ripetere:
 

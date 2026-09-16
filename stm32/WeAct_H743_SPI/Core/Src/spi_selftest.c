@@ -306,7 +306,7 @@ static void diagnostic_matrix(void) {
     for(unsigned repeat=0;repeat<3;repeat++) for(unsigned rate=0;rate<2;rate++) for(unsigned speed=0;speed<3;speed++) {
         volatile DiagCase *result=&g_spi_diag.cases[g_spi_diag.count];
         uint32_t prescaler=rate?SPI_BAUDRATEPRESCALER_16:SPI_BAUDRATEPRESCALER_32;
-        result->hz=rate?12500000:6250000;result->speed=speeds[speed];result->repeat=repeat;
+        result->hz=rate?9375000:4687500;result->speed=speeds[speed];result->repeat=repeat;
         uint32_t start=HAL_GetTick();
         for(unsigned round=0;round<SPI_DIAG_ROUNDS && !result->hal_error;round++) {
             unsigned tests=SPI_DIAG_MODE==2?1:5;

@@ -134,7 +134,7 @@ void LCD_TextDemo_Run(void)
     g_lcd_text_demo_state=1;
     if(!LCD_Clear(0x0000) ||
        !LCD_DrawText(24,20,"Tang Nano 9K",0x07FF,0x0000) ||
-       !LCD_DrawText(24,56,"STM32 + FPGA @ 12.5 MHz",0xFFFF,0x0000) ||
+       !LCD_DrawText(24,56,"STM32 + FPGA @ 9.375 MHz",0xFFFF,0x0000) ||
        !LCD_DrawText(24,92,"Temperatura: 23,5 " "\xC2\xB0" "C",0xFFE0,0x0000) ||
        !LCD_DrawText(24,128,"Accenti: " "\xC3\xA0 \xC3\xA8 \xC3\xA9 \xC3\xAC \xC3\xB2 \xC3\xB9",0x07E0,0x0000) ||
        !LCD_DrawText(24,164,"Frecce: " "\xE2\x86\x90 \xE2\x86\x91 \xE2\x86\x92 \xE2\x86\x93",0xF81F,0x0000) ||

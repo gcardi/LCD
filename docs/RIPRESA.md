@@ -2,6 +2,16 @@
 
 ## Stato corrente: percorso pixel in streaming
 
+**Punto operativo finale del 16 settembre.** PLL2 alimenta SPI2 a 150 MHz:
+`BE` usa `/8` (18,75 MHz, TX-only), i comandi ordinari `/16` (9,375 MHz) e
+`BF` `/128` (1,171875 MHz). Il vincolo FPGA resta conservativamente a
+18,75 MHz anche per MISO e chiude il gate timing. Una prova di 48 frame ha
+trasferito 13.056 righe senza errori CRC, header o pacchetti incompleti; i 210
+retry erano tutti overflow recuperati della coda a una entry. I tentativi a
+21,875 e 20,3125 MHz non chiudono la STA SPI; quello a 19,375 MHz ha prodotto
+una regressione di placement PSRAM. `.ioc`, codice generato e runner sono
+allineati al kernel clock da 150 MHz.
+
 Il trasporto dei pixel è stato rifatto in due passi, entrambi indipendenti dal
 cablaggio, che resta il vincolo fisico aperto.
 

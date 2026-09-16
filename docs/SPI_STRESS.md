@@ -84,7 +84,7 @@ Al termine riportarlo a 0 e ricaricare STM32 per mantenere lo sfondo uniforme.
 
 
 ```powershell
-# Build/upload e prova completa nella configurazione corrente 12.5 MHz:
+# Build/upload e prova completa nella configurazione corrente (SPI ordinaria 9,375 MHz):
 ./stm32/WeAct_H743_SPI/test-hardware.ps1 -RequireGraphics -RequireStress -TimeoutSeconds 120 -SerialNumber 35FF6C064D53373238602143
 # Solo lettura quando firmware/ELF coincidono:
 ./stm32/WeAct_H743_SPI/test-hardware.ps1 -ReadOnly -RequireGraphics -RequireStress -TimeoutSeconds 120 -SerialNumber 35FF6C064D53373238602143

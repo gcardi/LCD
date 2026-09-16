@@ -5,7 +5,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
-#define LCD_PIXEL_STREAM_PRESCALER SPI_BAUDRATEPRESCALER_16
+#define LCD_PIXEL_STREAM_PRESCALER SPI_BAUDRATEPRESCALER_8
 #define LCD_NORMAL_PRESCALER       SPI_BAUDRATEPRESCALER_16
 #define LCD_STATUS_PRESCALER       SPI_BAUDRATEPRESCALER_128
 // State: 0 diagnostic endpoint, 1 running, 2 submitted, 3 failure.
@@ -416,7 +416,7 @@ void LCD_FPGATextDemo_Run(void)
        !LCD_FillRect(300,118,101,53,0x0010) ||
        !LCD_DrawTextFPGA(16,12,0,0,LCD_FONT_16X32,0,0x07FF,0,"Tang Nano 9K") ||
        !LCD_DrawTextFPGA(20,54,0,0,LCD_FONT_12X24,0,0xFFFF,0,
-                         "STM32 -> FPGA @ 12.5 MHz") ||
+                         "STM32 -> FPGA @ 18.75 MHz") ||
        !LCD_DrawTextFPGA(20,88,0,0,LCD_FONT_8X16,0,0x07E0,0,
                          "Accenti: \xC3\xA0 \xC3\xA8 \xC3\xA9 \xC3\xAC \xC3\xB2 \xC3\xB9  Frecce: \xE2\x86\x90 \xE2\x86\x91 \xE2\x86\x92 \xE2\x86\x93") ||
        !LCD_DrawTextFPGA(20,120,220,72,LCD_FONT_12X24,LCD_TEXT_WRAP,
@@ -507,7 +507,7 @@ static uint8_t stream_tx[1024];
 volatile uint32_t g_lcd_fast_status_counts[5],g_lcd_fast_status_reads;
 
 // Read the BE completion mailbox through BF. Pixel traffic may later run at a
-// substantially higher clock; this status transaction remains at 1.5625 MHz,
+// substantially higher clock; this status transaction remains at 1.171875 MHz,
 // where the existing MISO path has ample margin. Restore the qualified normal
 // rate before returning so every other command retains its original timing.
 static int fast_stream_status(uint16_t y)

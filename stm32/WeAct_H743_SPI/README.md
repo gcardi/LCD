@@ -124,7 +124,7 @@ byte MOSI. Non modifica il framebuffer. Prima del DMA, una prova GPIO lenta
 invia otto byte con tre configurazioni MISO (nessun pull, up, down). Le risposte
 attese sono `A5 3C 4D 5E 6F 80 91 A2` in tutti e tre i casi.
 
-Il firmware normale esegue un round: 5 trasferimenti DMA a 12.5 Mbit/s,
+Il firmware normale esegue un round: 5 trasferimenti DMA a 9.375 Mbit/s,
 GPIO MEDIUM (lunghezze 1, 2, 17, 257, 4097), verificando 4374 byte.
 La qualifica a 240 round esegue 1200 trasferimenti e verifica 1049760 byte.
 I buffer sono
@@ -163,7 +163,7 @@ stato ricaricato e supera il confronto DMA. L'anomalia della prima prova
 GPIO dopo caricamento FPGA non ricompare riavviando il solo STM32.
 
 Il nuovo `diagnose-hardware.ps1 -SerialNumber <seriale> -Mode echo|miso|mosi`
-esegue tre ripetizioni a 6.25/12.5 MHz e fronti VERY_HIGH/HIGH/MEDIUM;
+esegue tre ripetizioni a 4.6875/9.375 MHz e fronti VERY_HIGH/HIGH/MEDIUM;
 `-Rounds 80` estende la prova. Salva fino a 16 eventi per caso con byte
 vicini, contatori totali e artefatti identificati da hash. I mismatch sono
 evidenze diagnostiche e non fanno fallire questo runner; controllare i
@@ -177,13 +177,13 @@ CS senza clock non era sufficiente. Vedere il report diagnostico per i
 limiti di questa sequenza di inizializzazione e le prove successive.
 
 
-## Aggiornamento grafica a 25 MHz
+## Aggiornamento grafica storico a 25 MHz
 
-La configurazione corrente e' prescaler 8, GPIO MEDIUM, SDC 40 ns e
+La configurazione di quella prova era prescaler 8, GPIO MEDIUM, SDC 40 ns e
 SPI_FRAMEBUFFER=1. Il nuovo serializer con primo byte fisso A5 supera timing
 e primo collaudo hardware (34992 byte senza errori e demo accettata).
 Vedere [SPI_FRAMEBUFFER.md](../../docs/SPI_FRAMEBUFFER.md).
--RestoreSelfTest ripristina invece l'eco pura e 12.5 MHz anche in C/CubeMX/SDC.
+I risultati successivi hanno sostituito questo punto operativo.
 
 
 ## Stato dopo collaudo prolungato

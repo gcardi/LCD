@@ -6,7 +6,9 @@
 
 **Aggiornamento successivo:** la diagnosi dei fronti ha ottenuto PASS a
 12.5 MHz con GPIO STM32 MEDIUM, inclusi 1049760 byte nel test eco lungo.
-Configurazione corrente: prescaler 16, SDC 80 ns, GPIO MEDIUM. Vedere
+La configurazione corrente usa PLL2 a 150 MHz: 18,75 MHz TX-only per i pixel,
+9,375 MHz per i comandi ordinari e 1,171875 MHz per lo stato, GPIO MEDIUM e
+SDC a 53,333 ns. Vedere
 [risultati diagnostici](SPI_DIAGNOSTIC_RESULTS.md). La tabella seguente
 documenta la precedente salita con GPIO VERY_HIGH, non il limite attuale.
 
@@ -100,16 +102,23 @@ evitare che MISO limiti la velocita' di upload dei pixel.
 ## Verifica write-only successiva — 16 settembre 2026
 
 La proposta dell'ultima frase e' stata implementata con `BE/BF`. `BE` usa DMA
-TX-only e non campiona MISO; `BF` legge risultato e CRC a 1,5625 MHz. `BD`
-full-duplex resta disponibile. Il frame completo passa a 12,5 MHz in 226 ms.
+TX-only e non campiona MISO; `BF` legge risultato e CRC a 1,171875 MHz. `BD`
+full-duplex resta disponibile. Il frame completo passa a 12,5 MHz in 226 ms e
+a 18,75 MHz in 186 ms, con rispettivamente 1 e 5 retry recuperati.
 
 A 25 MHz il frame viene ricostruito grazie ai retry ma ne richiede 46 su 272
 righe (7 overflow, 39 pacchetti incompleti) e non e' qualificato. Quindi il
 percorso di ritorno MISO e' stato effettivamente rimosso dal traffico pesante,
 ma il prossimo limite osservato e' SCK/accodamento, non la STA interna a 122 MHz.
-La configurazione distribuita resta 12,5 MHz `MEDIUM` finche' una vista timing
-fast separata e una prova hardware prolungata non chiuderanno anche quei due
-aspetti.
+
+La prova prolungata a 18,75 MHz ha completato 48 frame, 13.056 righe, in
+10.641 ms con 210 retry, tutti overflow `E2`, e nessun busy, header errato, CRC
+errato o pacchetto incompleto. La ricerca superiore si e' fermata prima del
+caricamento hardware: 21,875 MHz fallisce la STA SPI (Fmax circa 20,763 MHz),
+20,3125 MHz fallisce un percorso MOSI di 0,445 ns e 19,375 MHz ha avuto una
+regressione di placement PSRAM di 0,343 ns. La configurazione distribuita resta
+quindi 18,75 MHz `MEDIUM`, con il vincolo MISO conservativamente verificato alla
+stessa frequenza anche se le letture reali avvengono piu' lentamente.
 
 ## Banda RGB565 480 x 272
 

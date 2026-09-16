@@ -109,14 +109,21 @@ condivisibili restano tracciati.
 
 ## Corrispondenza fra .ioc e firmware
 
-L'`.ioc` e' allineato alla configurazione collaudata: SPI2 master full duplex,
-8 bit, `SPI_BAUDRATEPRESCALER_16` pari a 12.5 Mbit/s, NSS software con
-`FPGA_CS` su PB12 (uscita, livello alto all'avvio, GPIO speed HIGH),
-SCK/MISO/MOSI su PB13/PB14/PB15 con GPIO speed MEDIUM. I fronti MEDIUM sono una
-scelta deliberata: a 12.5 MHz i fronti piu' rapidi introducevano errori, come
-descritto in [../../docs/SPI_DIAGNOSTIC_RESULTS.md](../../docs/SPI_DIAGNOSTIC_RESULTS.md).
-Cambiando prescaler o GPIO speed vanno aggiornati sia l'`.ioc` sia il vincolo
-timing SPI lato FPGA.
+L'`.ioc` e' allineato alla configurazione collaudata: PLL2 fornisce a SPI2 un
+kernel clock da 150 MHz; SPI2 parte master full duplex, 8 bit, con
+`SPI_BAUDRATEPRESCALER_16`, pari a 9,375 Mbit/s. Il percorso `BE` passa fra
+transazioni a `/8`, 18,75 MHz TX-only, mentre `BF` usa `/128`, 1,171875 MHz,
+per leggere MISO e poi ripristina `/16`. CubeMX rappresenta correttamente il
+clock e lo stato iniziale; i due prescaler dinamici restano necessariamente
+nel codice applicativo.
+
+NSS e' software con `FPGA_CS` su PB12 (uscita, livello alto all'avvio, GPIO
+speed HIGH); SCK/MISO/MOSI sono su PB13/PB14/PB15 con GPIO speed MEDIUM. I
+fronti MEDIUM sono una scelta deliberata: fronti piu' rapidi hanno peggiorato
+le prove al banco, come descritto in
+[../../docs/SPI_DIAGNOSTIC_RESULTS.md](../../docs/SPI_DIAGNOSTIC_RESULTS.md).
+Cambiando PLL, prescaler o GPIO speed vanno aggiornati insieme `.ioc`, codice
+generato/applicativo e vincolo timing SPI lato FPGA.
 
 I buffer DMA stanno in RAM_D2 allineati a 32 byte; il codice generato non abilita
 la cache dati, ma il self-test esegue comunque clean/invalidate condizionati a
