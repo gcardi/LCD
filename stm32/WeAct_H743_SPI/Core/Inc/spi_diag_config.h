@@ -23,4 +23,8 @@
 #define LCD_TEXT_DEMO 0
 #define LCD_FPGA_TEXT_DEMO 1
 #define LCD_SCROLL_DEMO 1
+// Full-screen B7 versus BD comparison. Destructive like LCD_BOOT_TESTS: it
+// paints the whole screen twice and takes roughly half a second, so it is
+// opt-in. Read g_lcd_bench_* over SWD afterwards.
+#define LCD_STREAM_BENCH 0
 #endif

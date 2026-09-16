@@ -15,6 +15,7 @@ l'API STM32 prepara i pacchetti e gestisce attese, risposte ed errori.
 | Opcode | Cosa fa |
 |---|---|
 | `B7` | scrive un burst mascherato di 16 pixel RGB565 in PSRAM |
+| `BD` | scrive una riga intera in streaming, una transazione sola; [protocollo](SPI_STREAM.md) |
 | `B8` | disegna una stringa UTF-8 con i font della User Flash |
 | `B9` | riempie un rettangolo o traccia una linea RGB565, senza trasferire i singoli pixel |
 | `BC` | COPY/SCROLL front → back, con riempimento RGB565; [protocollo](BLITTER.md) |
@@ -67,6 +68,18 @@ usano maschere parziali. Il commit avviene alla ricezione del byte `5A`.
 
 Non c'è CRC prima del commit, né rollback: un errore di trasmissione può essere
 segnalato dall'eco *dopo* che la scrittura è stata accettata.
+
+### `BD`, scrittura in streaming di una riga
+
+È il percorso pixel preferito. Una sola transazione porta header, payload
+contiguo, CRC sul payload e commit: per una riga piena 976 byte in un DMA,
+contro i trenta pacchetti `B7` da 41 byte che servivano prima. `x` e `count`
+sono al pixel, non al gruppo di 16, quindi il payload non ha padding e coincide
+con la mappa di pixel che un client fornisce già.
+
+Come `B7` non è atomico: i gruppi si scrivono mentre arrivano, il CRC finale
+segnala senza annullare, e la riparazione è rispedire la riga. Formato completo,
+semantica dell'overflow e API in [SPI_STREAM.md](SPI_STREAM.md).
 
 ### `B8`, testo
 

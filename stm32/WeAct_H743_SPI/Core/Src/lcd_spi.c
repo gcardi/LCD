@@ -444,6 +444,101 @@ int LCD_WriteRect(uint16_t x, uint16_t y, uint16_t w, uint16_t h,
     g_lcd_profile.fence+=DWT->CYCCNT-mark;
     return done;
 }
+// BD carries one row per transaction: header, contiguous RGB565 payload, a
+// CRC over that payload, and a commit. At most 12 + 2*480 + 4 = 976 bytes, so
+// a full-width row always fits a single DMA. Returns 1 accepted, 0 hard error,
+// -1 retryable (the FPGA was busy, or reported overflow / payload CRC).
+static uint8_t stream_tx[1024], stream_rx[1024];
+static int stream_row(uint16_t y,uint16_t x,uint16_t count,const uint16_t *row)
+{
+    unsigned last_column=x+count-1u;
+    unsigned first=x>>4, groups=(last_column>>4)-first+1u;
+    uint16_t head=(uint16_t)(0xFFFFu<<(x&15u));
+    uint16_t tail=(uint16_t)(0xFFFFu>>(15u-(last_column&15u)));
+    uint8_t *p=stream_tx;
+    p[0]=0xBD;p[1]=0;
+    p[2]=(uint8_t)(y>>8);p[3]=(uint8_t)y;
+    p[4]=(uint8_t)first;p[5]=(uint8_t)groups;
+    p[6]=(uint8_t)(head>>8);p[7]=(uint8_t)head;
+    p[8]=(uint8_t)(tail>>8);p[9]=(uint8_t)tail;
+    uint16_t crc=0xFFFF;
+    for(unsigned i=2;i<=9;i++) crc=crc16_byte(crc,p[i]);
+    p[10]=(uint8_t)(crc>>8);p[11]=(uint8_t)crc;p[12]=0xA6;p[13]=0;
+    crc=0xFFFF;
+    unsigned n=14;
+    // Whole groups only; the ragged ends are padded here and masked there.
+    for(unsigned g=0;g<groups;g++) for(unsigned slot=0;slot<16;slot++) {
+        unsigned column=(first+g)*16u+slot;
+        uint16_t pixel=(column>=x && column<=last_column)?row[column-x]:0;
+        p[n]=(uint8_t)pixel;p[n+1]=(uint8_t)(pixel>>8);
+        crc=crc16_byte(crc,p[n]);crc=crc16_byte(crc,p[n+1]);n+=2u;
+    }
+    p[n]=(uint8_t)(crc>>8);p[n+1]=(uint8_t)crc;p[n+2]=0xA6;p[n+3]=0;
+    n+=4u;
+    if(!exchange(stream_tx,stream_rx,(uint16_t)n)) return 0;
+    if(stream_rx[0]!=0xA5) return bad(45,0,0xA5,stream_rx[0]);
+    if(stream_rx[1]!=0xC3) {
+        if(stream_rx[1]!=0) return bad(46,1,0xC3,stream_rx[1]);
+        return -1; // queue still draining; the row was never started
+    }
+    for(unsigned i=2;i<=12;i++)
+        if(stream_rx[i]!=stream_tx[i-1]) return bad(47,i,stream_tx[i-1],stream_rx[i]);
+    // A header refused while the endpoint reported free is a protocol fault,
+    // not backpressure: the fields and CRC were built here.
+    if(stream_rx[13]!=0xAC) return bad(48,13,0xAC,stream_rx[13]);
+    if(stream_rx[n-1]!=0xAC) return -1;
+    return 1;
+}
+
+// Same contract as LCD_WriteRect, one transaction per row instead of one per
+// sixteen pixels. Rows commit as they stream, so a refused row leaves part of
+// itself behind; resending it is idempotent and nothing reaches the panel
+// before PRESENT.
+int LCD_WriteRectStream(uint16_t x, uint16_t y, uint16_t w, uint16_t h,
+                        const uint16_t *pixels)
+{
+    if(!pixels || !w || !h || x>=480 || y>=272 || w>480-x || h>272-y) return 0;
+    uint32_t mark;
+    dwt_enable();
+    for(unsigned row=0;row<h;row++) {
+        uint32_t start=HAL_GetTick();
+        for(;;) {
+            mark=DWT->CYCCNT;
+            int outcome=stream_row((uint16_t)(y+row),x,w,pixels+(size_t)row*w);
+            g_lcd_profile.exchange+=DWT->CYCCNT-mark;
+            if(outcome>0) break;
+            if(outcome==0) return 0;
+            g_lcd_profile.retries++;
+            if(HAL_GetTick()-start>=1000) return bad(49,0,0xAC,0xE1);
+        }
+        g_lcd_profile.packets++;
+    }
+    mark=DWT->CYCCNT;
+    int done=ready();
+    g_lcd_profile.fence+=DWT->CYCCNT-mark;
+    return done;
+}
+
+// Full screen down both paths, one row at a time so a single row buffer does.
+// State: 1 running, 2 done, 3 B7 failed, 4 BD failed.
+volatile uint32_t g_lcd_bench_state,g_lcd_bench_b7_ms,g_lcd_bench_bd_ms;
+volatile LcdProfile g_lcd_bench_b7,g_lcd_bench_bd;
+void LCD_StreamBench_Run(void)
+{
+    static uint16_t row[480];
+    uint32_t start;
+    for(unsigned i=0;i<480;i++) row[i]=(uint16_t)(i*37u+1u);
+    g_lcd_bench_state=1;
+    LCD_ProfileReset();start=HAL_GetTick();
+    for(unsigned y=0;y<272;y++)
+        if(!LCD_WriteRect(0,(uint16_t)y,480,1,row)){g_lcd_bench_state=3;return;}
+    g_lcd_bench_b7_ms=HAL_GetTick()-start;g_lcd_bench_b7=g_lcd_profile;
+    LCD_ProfileReset();start=HAL_GetTick();
+    for(unsigned y=0;y<272;y++)
+        if(!LCD_WriteRectStream(0,(uint16_t)y,480,1,row)){g_lcd_bench_state=4;return;}
+    g_lcd_bench_bd_ms=HAL_GetTick()-start;g_lcd_bench_bd=g_lcd_profile;
+    g_lcd_bench_state=2;
+}
 // Shared B9 transport. Callers validate coordinates before any SPI traffic.
 static int draw_shape(uint8_t shape,uint16_t x,uint16_t y,
                        uint16_t a,uint16_t b,uint16_t color)

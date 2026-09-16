@@ -38,6 +38,16 @@ typedef struct {
 } LcdProfile;
 extern volatile LcdProfile g_lcd_profile;
 void LCD_ProfileReset(void);
+// One SPI transaction per row instead of one per sixteen pixels, with the
+// payload CRC checked once at the end. Same arguments and return value as
+// LCD_WriteRect; prefer it for anything wider than a few pixels.
+int LCD_WriteRectStream(uint16_t x, uint16_t y, uint16_t w, uint16_t h,
+                        const uint16_t *pixels);
+// Full screen down both paths, for comparison. Read the two millisecond
+// figures and the two profiles over SWD.
+void LCD_StreamBench_Run(void);
+extern volatile uint32_t g_lcd_bench_state,g_lcd_bench_b7_ms,g_lcd_bench_bd_ms;
+extern volatile LcdProfile g_lcd_bench_b7,g_lcd_bench_bd;
 // RGB565 colors. Blocking, single-caller APIs: 1 on success, 0 on error.
 // FillRect rejects empty/out-of-screen rectangles without sending pixels.
 // A transport failure may leave a partially updated region, as with WriteRect.

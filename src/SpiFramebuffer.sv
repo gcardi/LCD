@@ -58,6 +58,18 @@ module SpiFramebuffer (
  reg graphics_idle;
  reg selected_control,selected_status,accept_control;
  reg selected_blit,blit_invalid,blit_scroll,blit_destination;
+ // BD streaming row write. The payload carries whole 16-pixel groups, so the
+ // pixel path is the same byte shift register B7 already uses; the host pads
+ // the ragged ends and describes them with a head and a tail mask. Keeping the
+ // shifter shared is what makes the opcode nearly free in logic.
+ reg selected_stream,accept_stream,stream_armed,stream_overflow,stream_first;
+ reg [2:0] stream_phase; // 0 header, 1 payload, 2 CRC hi, 3 CRC lo, 4 commit, 5 done
+ reg [4:0] stream_byte;   // position inside the current 32-byte group
+ reg [4:0] stream_groups; // groups still to write, current one included
+ reg [16:0] stream_addr;  // pixel address of the current group
+ reg [15:0] stream_head,stream_tail;
+ reg [15:0] stream_arg_y;
+ reg [7:0] stream_arg_start,stream_arg_count;
  reg [7:0] staging_op,staging_buffer;
  reg [15:0] staging_sequence,control_crc,control_expected_crc,status_crc;
  wire control_available = control_request == control_seen;
@@ -65,6 +77,30 @@ module SpiFramebuffer (
  wire control_fields_valid = staging_op>=1 && staging_op<=3 &&
      (staging_op==2 ? staging_buffer<=1 : staging_buffer==0) &&
      (staging_op!=1 || staging_sequence==0);
+ wire stream_payload = selected_stream && accept_stream && stream_phase==3'd1;
+ // One CRC16 datapath per register instead of one per call site. BA, BC and BD
+ // are mutually exclusive opcodes, as are B8 and B9, so a shared enable costs
+ // far less logic than the separate instances the per-site calls synthesised.
+ wire control_crc_enable =
+     (selected_blit && accept_control && index>=7'd2 && index<=7'd19) ||
+     (selected_control && accept_control && index>=7'd2 && index<=7'd5) ||
+     (selected_stream && accept_stream && index>=7'd2 && index<=7'd9) ||
+     stream_payload;
+ wire text_crc_enable =
+     (selected_shape && accept_shape && index>=7'd2 && index<=7'd13) ||
+     (selected_text && accept_text && index>=7'd2 && index<=(7'd16+text_length));
+ wire stream_group_end = stream_payload && stream_byte==5'd31;
+ // Both masks apply when the row fits a single group.
+ wire [15:0] stream_mask = (stream_first?stream_head:16'hFFFF) &
+                           (stream_groups==5'd1 ? stream_tail:16'hFFFF);
+ wire stream_fields_valid = stream_arg_y<16'd272 && stream_arg_start<8'd30 &&
+     stream_arg_count!=0 && stream_head!=0 && stream_tail!=0 &&
+     ({1'b0,stream_arg_start}+{1'b0,stream_arg_count})<=9'd30;
+ wire stream_header_ok = selected_stream && accept_stream && rx==8'hA6 &&
+     stream_fields_valid && control_expected_crc==control_crc;
+ // SCK cannot be stalled, so a full queue is latched as an overflow and the
+ // rest of the row is dropped. The trailer reports it and the host resends.
+ wire stream_commit = stream_group_end && !stream_overflow;
  wire control_commit = selected_control && accept_control && index==8 &&
      rx==8'hA6 && control_fields_valid && control_crc==control_expected_crc;
  wire blit_commit = selected_blit && accept_control && index==22 &&
@@ -237,6 +273,10 @@ module SpiFramebuffer (
        address<=staging_addr[20:0];pixels<=staging_pixels;
        mask<=staging_mask;request<=!request;
      end
+     if(stream_commit && available) begin
+       address<={4'd0,stream_addr};pixels<={rx,staging_pixels[255:8]};
+       mask<=stream_mask;request<=!request;
+     end
      if(text_commit_index && accept_text && rx==8'hA6 && text_fields_valid &&
         text_expected_crc==text_crc)
        text_request<=!text_request;
@@ -254,6 +294,10 @@ module SpiFramebuffer (
      text_crc<=16'hFFFF;text_expected_crc<=0;text_invalid<=0;
      selected_control<=0;selected_status<=0;accept_control<=0;
      selected_blit<=0;blit_invalid<=0;blit_scroll<=0;blit_destination<=0;
+     selected_stream<=0;accept_stream<=0;stream_armed<=0;stream_overflow<=0;
+     stream_first<=0;stream_phase<=0;stream_byte<=0;stream_groups<=0;
+     stream_addr<=0;stream_head<=0;stream_tail<=0;
+     stream_arg_y<=0;stream_arg_start<=0;stream_arg_count<=0;
      staging_op<=0;staging_buffer<=0;staging_sequence<=0;
      control_crc<=16'hFFFF;control_expected_crc<=0;
      status_packet<=0;status_busy<=0;status_crc<=16'hFFFF;
@@ -266,6 +310,8 @@ module SpiFramebuffer (
      // Un riempimento non usa i font, quindi non dipende da text_enabled.
      if(index==0 && rx==8'hB9)
        echo_byte<=(text_available && graphics_available)?8'hC3:8'h00;
+     if(index==0 && rx==8'hBD)
+       echo_byte<=(available && graphics_available)?8'hC3:8'h00;
      if(index==0 && rx==8'hBA) echo_byte<=control_available?8'hC3:8'h00;
      if(index==0 && rx==8'hBC) echo_byte<=control_available?8'hC3:8'h00;
      if(index==0 && rx==8'hBB) begin
@@ -298,13 +344,15 @@ module SpiFramebuffer (
        accept_packet<=available && graphics_available;
        accept_text<=text_available && text_enabled2 && graphics_available;
        accept_shape<=text_available && graphics_available;
+       selected_stream<=rx==8'hBD;accept_stream<=available && graphics_available;
        selected_control<=rx==8'hBA;selected_status<=rx==8'hBB;
        selected_blit<=rx==8'hBC;
        accept_control<=control_available;
        text_crc<=16'hFFFF;text_invalid<=0;
      end
+     if(control_crc_enable) control_crc<=crc16_byte(control_crc,rx);
+     if(text_crc_enable) text_crc<=crc16_byte(text_crc,rx);
      if(selected_blit && accept_control) begin
-       if(index>=2 && index<=19)control_crc<=crc16_byte(control_crc,rx);
        case(index)
          2:begin blit_scroll<=rx[0];if(rx>1)blit_invalid<=1;end
          3:if(rx>1)blit_invalid<=1;
@@ -315,20 +363,70 @@ module SpiFramebuffer (
        endcase
      end
      if(selected_control && accept_control) begin
-       if(index>=2 && index<=5) control_crc<=crc16_byte(control_crc,rx);
        case(index)
          2:staging_op<=rx;3:staging_buffer<=rx;
          4:staging_sequence[15:8]<=rx;5:staging_sequence[7:0]<=rx;
          6:control_expected_crc[15:8]<=rx;7:control_expected_crc[7:0]<=rx;
        endcase
      end
+     if(selected_stream && accept_stream) begin
+       case(index)
+         2:stream_arg_y[15:8]<=rx;   3:stream_arg_y[7:0]<=rx;
+         4:stream_arg_start<=rx;     5:stream_arg_count<=rx;
+         6:stream_head[15:8]<=rx;    7:stream_head[7:0]<=rx;
+         8:stream_tail[15:8]<=rx;    9:stream_tail[7:0]<=rx;
+         10:control_expected_crc[15:8]<=rx;
+         11:control_expected_crc[7:0]<=rx;
+         12:begin
+           echo_byte<=stream_header_ok?8'hAC:8'hE1;
+           if(stream_header_ok) begin
+             stream_armed<=1;stream_first<=1;stream_byte<=0;
+             stream_groups<=stream_arg_count[4:0];
+             // y*480 without a multiplier, plus the first group's offset.
+             // y*480 + group*16. The 24-bit intermediate never exceeds
+             // 271*480+464 = 130544, so the slice back to 17 bits is exact.
+             stream_addr<=17'(({15'd0,stream_arg_y[8:0]}<<9)-
+                              ({15'd0,stream_arg_y[8:0]}<<5)+
+                              {15'd0,stream_arg_start[4:0],4'd0});
+           end
+         end
+         13:if(stream_armed) begin
+           stream_phase<=3'd1;control_crc<=16'hFFFF;
+           echo_byte<=8'hC3; // healthy from the first payload byte onwards
+         end
+       endcase
+       if(stream_phase==3'd1) begin
+         echo_byte<=stream_overflow?8'h00:8'hC3;
+         stream_byte<=stream_byte+5'd1;
+         if(stream_byte==5'd31) begin
+           stream_first<=0;stream_groups<=stream_groups-5'd1;
+           stream_addr<=stream_addr+17'd16;
+           if(!available) stream_overflow<=1;
+           if(stream_groups==5'd1) stream_phase<=3'd2;
+         end
+       end
+       if(stream_phase==3'd2) begin
+         control_expected_crc[15:8]<=rx;stream_phase<=3'd3;
+       end
+       if(stream_phase==3'd3) begin
+         control_expected_crc[7:0]<=rx;stream_phase<=3'd4;
+       end
+       if(stream_phase==3'd4) begin
+         echo_byte<=(!stream_overflow && rx==8'hA6 &&
+                     control_expected_crc==control_crc)?8'hAC:8'hE1;
+         stream_phase<=3'd5;
+       end
+     end
+     // One 256-bit shift register serves both pixel paths: B7 fills it from its
+     // packet body, BD from the payload stream. The two opcodes are never
+     // selected together, so the shifter and its enable are shared.
+     if((selected && accept_packet && index>=7 && index<=38) || stream_payload)
+       staging_pixels<={rx,staging_pixels[255:8]};
      if(selected && accept_packet) begin
        if(index>=2 && index<=4) staging_addr<={staging_addr[15:0],rx};
        if(index==5 || index==6) staging_mask<={staging_mask[7:0],rx};
-       if(index>=7 && index<=38) staging_pixels<={rx,staging_pixels[255:8]};
      end
      if(selected_shape && accept_shape) begin
-       if(index>=2 && index<=13) text_crc<=crc16_byte(text_crc,rx);
        if(index==2 && rx>1)text_invalid<=1;   // rettangolo o linea
        if(index==3 && rx!=0)text_invalid<=1;   // flags riservati
        if((index==4 || index==6 || index==10) && rx>1)text_invalid<=1;
@@ -337,8 +435,6 @@ module SpiFramebuffer (
        if(index==15) text_expected_crc[7:0]<=rx;
      end
      if(selected_text && accept_text) begin
-       if(index>=2 && index<=16+text_length)
-         text_crc<=crc16_byte(text_crc,rx);
        if(index==2 && rx>2)text_invalid<=1;
        if(index==3 && rx[7:2]!=0)text_invalid<=1;
        if((index==4 || index==6 || index==10) && rx>1)text_invalid<=1;

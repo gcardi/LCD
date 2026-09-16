@@ -1,6 +1,62 @@
 # Punto di ripresa - 16 settembre 2026
 
-## Stato corrente: COPY, SCROLL e demo terminale
+## Stato corrente: percorso pixel in streaming
+
+Il trasporto dei pixel è stato rifatto in due passi, entrambi indipendenti dal
+cablaggio, che resta il vincolo fisico aperto.
+
+**Primo passo, solo firmware.** La `ready()` prima di ogni pacchetto `B7` era
+ridondante: il byte 1 del pacchetto dati porta già la stessa disponibilità,
+perché l'FPGA campiona `accept_packet` da quella condizione all'indice 0. Un
+rifiuto non committa nulla, quindi il pacchetto si rispedisce. Le transazioni
+per frame scendono da 16.320 a 8160, e ogni transazione non costa solo byte:
+due `memcpy`, tre operazioni di cache con barriera e un setup HAL di due stream
+DMA. Aggiunto `LcdProfile` per misurare via SWD dove va il tempo, con il campo
+`retries` che dice se la coda a una entry dell'FPGA satura davvero mai.
+
+**Secondo passo, nuovo opcode `BD`.** Una riga per transazione invece di trenta
+pacchetti: header, payload contiguo, CRC sul payload, commit. Per una riga piena
+978 byte in un solo DMA. Riferimento completo: [SPI_STREAM.md](SPI_STREAM.md).
+
+L'implementazione sta tutta nel dominio SCK. `BD` produce la stessa terna
+`address`/`pixels`/`mask` che il controller consumava già, quindi
+`FramebufferController` e `TOP` sono rimasti intatti.
+
+**Lezione sul costo in logica, vale la pena ricordarla.** La prima versione
+accettava `x` e `count` al pixel e costruiva le maschere nell'FPGA. Comodo per
+l'host, ma richiede un mux a inserimento variabile su 256 bit: misurati **+864
+LUT, dal 61% al 71% del die, e 15 endpoint setup violati** — non nel codice
+nuovo, bensì su `init_y → memory_address` dentro `FramebufferController`, che
+non era stato toccato. Pura pressione di placement su un percorso già al limite.
+Attribuzione confermata ricostruendo il bitstream con il solo
+`SpiFramebuffer.sv` di HEAD: zero violazioni, 5209/8640 logiche.
+
+La versione definitiva trasporta **gruppi interi allineati a 16 pixel**, con
+head e tail mask nell'header e il padding a carico dell'host (≤ 60 byte per
+riga). Così il percorso pixel è lo stesso shift register a byte di `B7`,
+condiviso perché i due opcode non sono mai selezionati insieme, e il costo in
+logica torna trascurabile.
+
+Nota di portabilità: il parser Gowin rifiuta `5'd1?x:y` senza spazio attorno al
+punto interrogativo, dove Icarus lo accetta. Sintomo: *Illegal use of 'x' or 'z'
+character in a decimal number*.
+
+Attesa a 12,5 MHz: frame intero da ~300 ms a ~170 ms, e la CPU quasi libera.
+**Non ancora misurato sul banco.** `LCD_STREAM_BENCH` in `spi_diag_config.h`
+accende `LCD_StreamBench_Run()`, che dipinge lo schermo lungo entrambi i
+percorsi e lascia il confronto in `g_lcd_bench_*`. È distruttivo, quindi opt-in.
+
+Verifica: i nove testbench passano, `tb_spi_framebuffer` esteso con i cinque
+rifiuti di header, gruppo allineato, riga non allineata in testa e in coda, riga
+intera da 480 pixel, CRC di payload sbagliato e overflow forzato con recupero.
+
+**Prossimo sviluppo:** misurare il guadagno reale sul banco, poi il flush
+asincrono (DMA non bloccante e `flush_ready` nell'ISR), che su 272 transazioni
+da 976 byte rende molto più che sulle 8160 da 41. Poi, e solo poi, ha senso
+ragionare di Quad-SPI. Restano aperti il cablaggio, le resistenze di serie e la
+causa dei fallimenti a 25 MHz.
+
+## Stato precedente: COPY, SCROLL e demo terminale
 
 Implementati e caricati in flash FPGA/font e STM32 Release. Protocollo e API:
 [BLITTER.md](BLITTER.md). BB versione 2; BC copia front → back o esegue scroll

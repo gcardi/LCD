@@ -125,6 +125,9 @@ int main(void)
 #if LCD_FPGA_TEXT_DEMO
   if (g_spi_test.state == 2) LCD_FPGATextDemo_Run();
 #endif
+#if LCD_STREAM_BENCH
+  if (g_spi_test.state == 2 && !g_lcd_error[0]) LCD_StreamBench_Run();
+#endif
 #if LCD_SCROLL_DEMO
   if (g_spi_test.state == 2 && !g_lcd_error[0]) LCD_ScrollDemo_Run();
 #endif

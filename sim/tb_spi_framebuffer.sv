@@ -104,6 +104,52 @@ module tb_spi_framebuffer;
      cs=1;#300;
    end
  endtask
+ // BD streaming row. Header only when expect_header is not AC; otherwise the
+ // payload, its CRC and the trailer follow inside the same CS-low period.
+ reg stream_saw_busy;integer writes_before;
+ task stream_row(input integer sy,sx,scount,
+                 input bit bad_header_crc,bad_payload_crc,
+                 input [7:0] expect_status,expect_header,expect_commit,
+                 input [15:0] first_pixel);
+   reg [7:0] b[0:13];reg [15:0] crc,pv,head,tail;
+   integer k,g,slot,column,first,last,groups;
+   begin
+     stream_saw_busy=0;
+     first=sx>>4;last=(sx+scount-1)>>4;groups=last-first+1;
+     head=16'hFFFF<<(sx%16);tail=16'hFFFF>>(15-((sx+scount-1)%16));
+     b[0]=8'hBD;b[1]=0;
+     b[2]=sy>>8;b[3]=sy;b[4]=first;b[5]=groups;
+     b[6]=head>>8;b[7]=head;b[8]=tail>>8;b[9]=tail;
+     crc=16'hFFFF;for(k=2;k<=9;k=k+1)crc=crc_byte(crc,b[k]);
+     b[10]=crc[15:8]^(bad_header_crc?8'h01:8'h00);b[11]=crc[7:0];
+     b[12]=8'hA6;b[13]=8'h00;
+     cs=0;#100;
+     for(k=0;k<=13;k=k+1) begin
+       byte_io(b[k],r);
+       if(k==0 && r!=8'hA5)$fatal(1,"stream identity %h",r);
+       if(k==1 && r!=expect_status)$fatal(1,"stream status %h expected %h",r,expect_status);
+       if(k>=2 && k<=12 && r!=b[k-1])$fatal(1,"stream echo at %0d",k);
+       if(k==13 && r!=expect_header)
+         $fatal(1,"stream header %h expected %h",r,expect_header);
+     end
+     if(expect_header==8'hAC) begin
+       crc=16'hFFFF;
+       for(g=0;g<groups;g=g+1) for(slot=0;slot<16;slot=slot+1) begin
+         column=(first+g)*16+slot;
+         pv=(column>=sx && column<sx+scount)?(first_pixel+(column-sx)):16'h0000;
+         byte_io(pv[7:0],r);crc=crc_byte(crc,pv[7:0]);
+         if(r!=8'hC3)stream_saw_busy=1;
+         byte_io(pv[15:8],r);crc=crc_byte(crc,pv[15:8]);
+         if(r!=8'hC3)stream_saw_busy=1;
+       end
+       if(bad_payload_crc)crc=crc^16'h0100;
+       byte_io(crc[15:8],r);byte_io(crc[7:0],r);
+       byte_io(8'hA6,r);byte_io(8'h00,r);
+       if(r!=expect_commit)$fatal(1,"stream commit %h expected %h",r,expect_commit);
+     end
+     cs=1;#300;
+   end
+ endtask
  initial begin
    #1;rst=0;#100;rst=1;#100;sck=1;#20;sck=0;#20;sck=1;#20;sck=0;
    wait(writes==8160 && !writing);#1000;
@@ -158,7 +204,55 @@ module tb_spi_framebuffer;
    @(negedge clk);text_take=1;@(negedge clk);text_take=0;wait(!text_valid);#200;
    shape_packet(0,5,7,12,24,0,0,0,8'hC3,8'hAC);
    if(!text_valid || text_font!=0 || !text_kind)$fatal(1,"fill regression");
-   $display("PASS: spi_framebuffer masks, bounds, busy, abort, CDC, B9 line/fill CRC and PSRAM beats");$finish;
+   // BD: every rejected header must stay inert, writing nothing.
+   writes_before=writes;
+   stream_row(272,  0, 16,0,0,8'hC3,8'hE1,8'h00,16'h1111); // y past the last row
+   stream_row(  0,480, 16,0,0,8'hC3,8'hE1,8'h00,16'h1111); // x past the last column
+   stream_row(  0,  0,  0,0,0,8'hC3,8'hE1,8'h00,16'h1111); // empty row
+   stream_row(  0,470, 11,0,0,8'hC3,8'hE1,8'h00,16'h1111); // runs off the right edge
+   stream_row(  1,  0, 16,1,0,8'hC3,8'hE1,8'h00,16'h1111); // wrong header CRC
+   #2000;if(writes!=writes_before)$fatal(1,"rejected stream wrote %0d",writes-writes_before);
+
+   // One aligned group.
+   stream_row(1,0,16,0,0,8'hC3,8'hAC,8'hAC,16'h1000);#4000;
+   if(stream_saw_busy)$fatal(1,"aligned stream reported busy");
+   for(i=0;i<16;i=i+1)
+     if(memory[480+i]!==16'h1000+i[15:0])$fatal(1,"stream pixel %0d = %h",i,memory[480+i]);
+
+   // Unaligned start and end: a partial leading group, a full one, a partial tail.
+   stream_row(2,5,25,0,0,8'hC3,8'hAC,8'hAC,16'h2000);#6000;
+   for(i=0;i<5;i=i+1)
+     if(memory[960+i]!==16'h0000)$fatal(1,"leading pixel %0d touched",i);
+   for(i=0;i<25;i=i+1)
+     if(memory[965+i]!==16'h2000+i[15:0])$fatal(1,"unaligned pixel %0d = %h",i,memory[965+i]);
+   if(memory[990]!==16'h0000)$fatal(1,"trailing pixel touched");
+
+   // A full row exercises every group boundary.
+   stream_row(3,0,480,0,0,8'hC3,8'hAC,8'hAC,16'h3000);#8000;
+   for(i=0;i<480;i=i+1)
+     if(memory[1440+i]!==16'h3000+i[15:0])$fatal(1,"full row pixel %0d = %h",i,memory[1440+i]);
+
+   // The payload CRC reports, it does not roll back: groups commit as they
+   // stream, so a corrupt row stays in the back buffer until the host resends.
+   writes_before=writes;
+   stream_row(4,0,16,0,1,8'hC3,8'hAC,8'hE1,16'h4000);#4000;
+   if(writes==writes_before)$fatal(1,"bad payload CRC wrote nothing");
+   if(memory[1920]!==16'h4000)$fatal(1,"bad payload CRC pixel %h",memory[1920]);
+
+   // A stalled queue cannot stall SCK, so the overflow is latched and reported.
+   allow=0;#200;
+   stream_row(5,0,64,0,0,8'hC3,8'hAC,8'hE1,16'h5000);
+   if(!stream_saw_busy)$fatal(1,"overflow not visible during payload");
+   allow=1;#4000;
+   if(memory[2400]!==16'h5000)$fatal(1,"first group lost before overflow");
+   if(memory[2416]!==16'h0000)$fatal(1,"wrote past the overflow");
+   // The endpoint recovers on the next transaction.
+   stream_row(6,0,32,0,0,8'hC3,8'hAC,8'hAC,16'h6000);#6000;
+   if(stream_saw_busy)$fatal(1,"still busy after recovery");
+   for(i=0;i<32;i=i+1)
+     if(memory[2880+i]!==16'h6000+i[15:0])$fatal(1,"recovered pixel %0d = %h",i,memory[2880+i]);
+
+   $display("PASS: spi_framebuffer masks, bounds, busy, abort, CDC, B9 line/fill CRC, BD streaming rows and PSRAM beats");$finish;
  end
  initial begin #10000000;$fatal(1,"timeout");end
 endmodule
