@@ -42,9 +42,12 @@ module tb_double_buffer;
      end
    end
  end
- reg old_front=0,boundary;
+ reg old_front=0,boundary,boundary_delayed=0;
  always @(posedge dut.psram_clk) if(dut.psram_rst_n) begin
-   boundary=dut.frame_restart_psram;
+   // The controller registers the synchronized pulse once before arbitration.
+   // Track that one-cycle latency independently of the controller register.
+   boundary=boundary_delayed;
+   boundary_delayed=dut.frame_restart_psram;
    #1;
    if(old_front!=dut.framebuffer_controller_inst.front_buffer && !boundary)
      $fatal(1,"swap outside a fresh frame boundary");
@@ -70,7 +73,7 @@ module tb_double_buffer;
      cs=0;#1000;byte_io(8'hBB,st[0]);
      for(integer i=1;i<11;i=i+1)byte_io(0,st[i]);
      #1000;cs=1;#1000;
-     if(st[0]!=8'hA5 || st[1]!=8'hD2 || st[2]!=1 || st[3]!=2)$fatal(1,"status identity");
+     if(st[0]!=8'hA5 || st[1]!=8'hD2 || st[2]!=2 || st[3]!=2)$fatal(1,"status identity");
      crc=16'hFFFF;for(integer i=1;i<=8;i=i+1)crc=crc_byte(crc,st[i]);
      if({st[9],st[10]}!=crc)$fatal(1,"status CRC");
    end
@@ -158,6 +161,9 @@ module tb_double_buffer;
      #1000;cs=1;#1000;
    end
  endtask
+`ifdef BLIT_TEST
+ `include "sim/blit_cases.svh"
+`endif
  initial begin
    #1;rst=0;#400;rst=1;
    // SCK resynchronizer startup, as on STM32.
@@ -208,10 +214,13 @@ module tb_double_buffer;
    // No silent aliasing of the padding between the two fixed slots.
    if(dut.psram_inst.fb[130560]!==16'hxxxx)$fatal(1,"slot padding was written");
    if(irq_edges!=2 || !irq)$fatal(1,"spurious IRQ");
+`ifdef BLIT_TEST
+   blit_scenario();
+`endif
    $display("PASS: double_buffer CRC, abort, barrier, back-only writes, duplicate, ACK and full raster frames");
    $finish;
  end
- initial begin #160000000;$fatal(1,"double buffer timeout");end
+ initial begin #300000000;$fatal(1,"double buffer timeout");end
 endmodule
 
 module Gowin_rPLL(input clkin,output reg clkout=0,output wire lock);

@@ -1,17 +1,19 @@
-param([switch]$RealFifo,[int]$TimeoutSeconds=600)
+param([switch]$RealFifo,[switch]$Blit,[int]$TimeoutSeconds=600)
 $ErrorActionPreference='Stop'
 $root=Split-Path -Parent $PSScriptRoot
 . (Join-Path $root 'tools/Invoke-LoggedProcess.ps1')
 $variant=if($RealFifo){'real'}else{'model'}
+if($Blit){$variant='blit_'+$variant}
 $build=Join-Path $PSScriptRoot 'build'
 New-Item -ItemType Directory -Force $build | Out-Null
 $vvp=Join-Path $build "double_buffer_$variant.vvp"
 if(Test-Path $vvp){Remove-Item -LiteralPath $vvp}
 $sources=@('src/TOP.sv','src/SpiSlave.sv','src/SpiFramebuffer.sv','src/TextRenderer.sv',
- 'src/FontStore.sv','src/UserFlashReader.sv','src/FramebufferController.sv',
+ 'src/FontStore.sv','src/UserFlashReader.sv','src/FramebufferController.sv','src/BlitRenderer.sv',
  'src/VGA_Timing.sv','src/ResetSynchronizer.sv','src/PulseSynchronizer.sv',
  'sim/models.sv','sim/tb_double_buffer.sv') | ForEach-Object {Join-Path $root $_}
 $defines=@('-DSIMULATION')
+if($Blit){$defines+='-DBLIT_TEST'}
 if($RealFifo){$defines+='-DREAL_FIFO';$sources+=Join-Path $root 'src/FramebufferFifo.sv'}
 Push-Location $root
 try {
