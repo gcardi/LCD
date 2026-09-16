@@ -22,4 +22,5 @@
 // CPU-rendered reference and FPGA/User-Flash rendered demo are independent.
 #define LCD_TEXT_DEMO 0
 #define LCD_FPGA_TEXT_DEMO 1
+#define LCD_SCROLL_DEMO 1
 #endif

@@ -3,6 +3,7 @@
 #include "lcd_spi.h"
 #include "main.h"
 #include <stdint.h>
+#include <stdio.h>
 // State: 0 diagnostic endpoint, 1 running, 2 submitted, 3 failure.
 volatile uint32_t g_lcd_demo_state;
 volatile uint32_t g_lcd_fpga_text_demo_state;
@@ -64,7 +65,7 @@ int LCD_GetBufferStatus(LcdBufferStatus *status)
 {
     uint8_t tx[11]={0xBB},rx[11];
     if(!status || !exchange(tx,rx,sizeof(tx))) return 0;
-    if(rx[0]!=0xA5 || rx[1]!=0xD2 || rx[2]!=1 || rx[3]!=2)
+    if(rx[0]!=0xA5 || rx[1]!=0xD2 || (rx[2]!=1 && rx[2]!=2) || rx[3]!=2)
         return bad(23,1,0xD2,rx[1]);
     uint16_t crc=0xFFFF;
     for(unsigned i=1;i<=8;i++) crc=crc16_byte(crc,rx[i]);
@@ -73,7 +74,7 @@ int LCD_GetBufferStatus(LcdBufferStatus *status)
     if((rx[4]&0xF0) || rx[5]>1) return bad(25,4,0,rx[4]);
     *status=(LcdBufferStatus){.enabled=rx[4]&1,.front=(rx[4]>>1)&1,
         .draw=rx[5],.irq=(rx[4]>>2)&1,.busy=(rx[4]>>3)&1,
-        .result=rx[8],.sequence=(uint16_t)((uint16_t)rx[6]<<8)|rx[7]};
+        .result=rx[8],.version=rx[2],.sequence=(uint16_t)((uint16_t)rx[6]<<8)|rx[7]};
     return 1;
 }
 
@@ -160,6 +161,91 @@ int LCD_Present(uint32_t timeout_ms)
         HAL_Delay(1);
     } while(HAL_GetTick()-start<timeout_ms);
     return bad(36,0,sequence,status.sequence);
+}
+
+volatile uint32_t g_lcd_copy_count,g_lcd_scroll_count,g_lcd_copy_ms,g_lcd_scroll_ms;
+volatile uint32_t g_lcd_scroll_demo_state;
+
+static int blit_command(uint8_t operation,uint8_t source,uint8_t destination,
+                        uint16_t x,uint16_t y,uint16_t width,uint16_t height,
+                        uint16_t arg_x,uint16_t arg_y,uint16_t fill)
+{
+    LcdBufferStatus status;
+    if(!buffer_idle(&status,1000))return 0;
+    if(status.version<2)return bad(38,2,2,status.version);
+    if(!status.enabled || source!=status.front || destination!=status.draw)
+        return bad(39,4,status.draw,destination);
+    uint8_t tx[24]={0xBC,0,operation,source,destination,0},rx[24];
+    const uint16_t fields[7]={x,y,width,height,arg_x,arg_y,fill};
+    for(unsigned i=0;i<7;i++){
+        tx[6+2*i]=(uint8_t)(fields[i]>>8);tx[7+2*i]=(uint8_t)fields[i];
+    }
+    uint16_t crc=0xFFFF;
+    for(unsigned i=2;i<=19;i++)crc=crc16_byte(crc,tx[i]);
+    tx[20]=(uint8_t)(crc>>8);tx[21]=(uint8_t)crc;tx[22]=0xA6;
+    uint32_t start=HAL_GetTick();
+    if(!exchange(tx,rx,sizeof(tx)))return 0;
+    if(rx[0]!=0xA5 || rx[1]!=0xC3)return bad(40,1,0xC3,rx[1]);
+    for(unsigned i=2;i<=22;i++)if(rx[i]!=tx[i-1])return bad(41,i,tx[i-1],rx[i]);
+    if(rx[23]!=0xAC)return bad(42,23,0xAC,rx[23]);
+    if(!buffer_idle(&status,1000))return 0;
+    if(status.result)return bad(43,8,0,status.result);
+    if(operation){g_lcd_scroll_ms=HAL_GetTick()-start;g_lcd_scroll_count++;}
+    else {g_lcd_copy_ms=HAL_GetTick()-start;g_lcd_copy_count++;}
+    return 1;
+}
+
+int LCD_CopyRect(uint8_t source,uint8_t destination,uint16_t x,uint16_t y,
+                 uint16_t width,uint16_t height,uint16_t dest_x,uint16_t dest_y)
+{
+    if(source>1 || destination>1 || source==destination || !width || !height ||
+       x>=480 || y>=272 || width>480-x || height>272-y ||
+       dest_x>=480 || dest_y>=272 || width>480-dest_x || height>272-dest_y)return 0;
+    return blit_command(0,source,destination,x,y,width,height,dest_x,dest_y,0);
+}
+
+int LCD_ScrollRect(uint8_t source,uint8_t destination,uint16_t x,uint16_t y,
+                   uint16_t width,uint16_t height,int16_t dx,int16_t dy,uint16_t fill)
+{
+    if(source>1 || destination>1 || source==destination || !width || !height ||
+       x>=480 || y>=272 || width>480-x || height>272-y)return 0;
+    return blit_command(1,source,destination,x,y,width,height,(uint16_t)dx,(uint16_t)dy,fill);
+}
+
+void LCD_ScrollDemo_Run(void)
+{
+    LcdBufferStatus status;
+    char line[64];
+    static const char *messages[]={"PSRAM: copia interna, nessun pixel sulla SPI",
+        "Viewport: 442 x 176, bordi non allineati",
+        "Area scoperta riempita dal comando SCROLL",
+        "Nuova riga disegnata nel back buffer",
+        "PRESENT: swap al blanking, IRQ confermato"};
+    g_lcd_scroll_demo_state=1;
+    uint32_t irq_start=g_fpga_irq_count;
+    if(!LCD_EnableDoubleBuffer() || !LCD_Clear(0x0841) ||
+       !LCD_DrawTextFPGA(20,8,0,0,LCD_FONT_12X24,0,0x07FF,0x0841,"Terminale FPGA") ||
+       !LCD_DrawTextFPGA(20,36,0,0,LCD_FONT_8X16,0,0xFFFF,0x0841,
+                        "COPY / SCROLL / fill RGB565 / VSYNC + IRQ") ||
+       !LCD_FillRect(18,59,444,178,0x07E0) || !LCD_FillRect(19,60,442,176,0) ||
+       !LCD_DrawTextFPGA(20,248,0,0,LCD_FONT_8X16,0,0xFFE0,0x0841,
+                        "32 righe - cornice e sfondo preservati") || !LCD_Present(1000) ||
+       !LCD_GetBufferStatus(&status) ||
+       !LCD_CopyRect(status.front,status.draw,0,0,480,272,0,0))goto fail;
+    // Both buffers now have identical borders/background. Only the viewport
+    // needs updating on subsequent frames; no full-frame copy in the loop.
+    for(unsigned n=1;n<=32;n++){
+        if(!LCD_GetBufferStatus(&status) ||
+           !LCD_ScrollRect(status.front,status.draw,19,60,442,176,0,-16,0))goto fail;
+        (void)snprintf(line,sizeof(line),"%02u > %s",n,messages[(n-1)%5]);
+        if(!LCD_DrawTextFPGA(23,220,434,16,LCD_FONT_8X16,LCD_TEXT_TRANSPARENT,
+                            (n%5)==0?0x07FF:0xFFFF,0,line) || !LCD_Present(1000))goto fail;
+        HAL_Delay(120);
+    }
+    if(g_fpga_irq_count-irq_start!=33){bad(44,0,33,g_fpga_irq_count-irq_start);goto fail;}
+    g_lcd_scroll_demo_state=2;return;
+fail:
+    g_lcd_scroll_demo_state=3;
 }
 
 static int text_ready(void)
