@@ -62,8 +62,15 @@ hold/recovery/removal. 5698/8640 logiche (66%), 3753 registri (56%), 3 BSRAM.
 Fmax `psram_clk_81` 85,528 MHz contro un vincolo di 80,998: i domini del
 progetto conservano il loro margine.
 
-Attesa a 12,5 MHz: frame intero da ~300 ms a ~170 ms, e la CPU quasi libera.
-**Nessuna delle due cifre è ancora stata misurata sul banco.** `LCD_STREAM_BENCH` in `spi_diag_config.h`
+**Misurato al banco:** schermo intero **383 ms con `B7`, 249 ms con `BD`**,
+cioè **1,54x**. Il solo trasporto fa 1,83x (334,5 -> 183,0 ms); il resto se lo
+prende l'assemblaggio del pacchetto. La stima a tavolino diceva ~170 ms ed era
+sbagliata. Dettaglio e lezioni in [SPI_STREAM.md](SPI_STREAM.md).
+
+La prima misura dava `BD` a un inutile 3% dal `B7`: il CRC software bit per bit
+costava 334 cicli per byte e su 960 byte per riga annullava tutto il guadagno
+del trasporto. Sostituito con una tabella da 256 voci. Restano 61 ms di
+assemblaggio da aggredire, verosimilmente nel loop di padding. `LCD_STREAM_BENCH` in `spi_diag_config.h`
 accende `LCD_StreamBench_Run()`, che dipinge lo schermo lungo entrambi i
 percorsi e lascia il confronto in `g_lcd_bench_*`. È distruttivo, quindi opt-in.
 
@@ -71,7 +78,31 @@ Verifica: i nove testbench passano, `tb_spi_framebuffer` esteso con i cinque
 rifiuti di header, gruppo allineato, riga non allineata in testa e in coda, riga
 intera da 480 pixel, CRC di payload sbagliato e overflow forzato con recupero.
 
-**Prossimo sviluppo:** misurare il guadagno reale sul banco, poi il flush
+**Collaudo al banco superato, 16 settembre 2026.** Qualifica scroll: 50
+presentazioni, 50 fronti EXTI, zero errori SPI/LCD, COPY schermo intero 14 ms,
+SCROLL 442x176 8 ms, attesa PRESENT 18 ms; immagine confermata a vista
+dall'utente. Stress: 1200 trasferimenti, **1.049.760 byte con zero mismatch**,
+prova GPIO corretta su tutte e tre le configurazioni di pull, 512 rettangoli,
+354.528 pixel, 30.035 pacchetti in 1432 ms. Entrambi sul bitstream con `BD` e
+con le tre violazioni di calibrazione ammesse: **se la taratura del passo DLL
+fosse compromessa, 50 swap consecutivi con COPY e SCROLL in PSRAM lo avrebbero
+mostrato.** Non è una dimostrazione formale, ma è l'evidenza che il gate da solo
+non poteva dare.
+
+**Trappola trovata dallo stress.** La guardia in `spi_selftest.c` che evita di
+spedire un opcode come primo byte dell'eco conosceva solo `B7` e `B8`. Il
+pattern rende `tx[0] = (round*53) & 0xFF`, quindi `BA`, `BB`, `BC` e `BD`
+cadono ai round 18, 47, 76 e 105, e `B9` al 245 — appena fuori dai 240
+eseguiti, che è il motivo per cui non era mai emerso. `BA`/`BB`/`BC` erano lì
+dal 15 settembre e i 240 round non venivano più eseguiti dalla qualifica del
+9 settembre: mina armata da un giorno, indipendente da `BD`. Guardia estesa
+all'intervallo `B7..BD` e applicata anche al percorso della matrice
+diagnostica, che ne era privo.
+
+Da ricordare: il collaudo con 240 round allunga il boot oltre i 20 s di default
+del poll di `test-hardware.ps1`. Serve `-TimeoutSeconds 60` o più.
+
+**Prossimo sviluppo:** ridurre i 61 ms di assemblaggio residui, poi il flush
 asincrono (DMA non bloccante e `flush_ready` nell'ISR), che su 272 transazioni
 da 976 byte rende molto più che sulle 8160 da 41. Poi, e solo poi, ha senso
 ragionare di Quad-SPI. Restano aperti il cablaggio, le resistenze di serie e la

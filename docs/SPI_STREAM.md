@@ -125,6 +125,38 @@ dipinge lo schermo intero lungo entrambi i percorsi e lascia in
 `g_lcd_bench_b7_ms`, `g_lcd_bench_bd_ms`, `g_lcd_bench_b7` e `g_lcd_bench_bd` il
 confronto diretto. È distruttivo, quindi è opt-in come `LCD_BOOT_TESTS`.
 
+## Misura al banco, 16 settembre 2026
+
+Schermo intero riga per riga, entrambi i percorsi, `LCD_StreamBench_Run()` a
+12,5 MHz, MCU Release. Cicli DWT convertiti a 480 MHz.
+
+| | assemble | exchange | fence | totale |
+|---|---:|---:|---:|---:|
+| `B7`, 8160 transazioni | 11,5 ms | 334,5 ms | 4,3 ms | **383 ms** |
+| `BD`, 272 transazioni | 61,4 ms | 183,0 ms | 4,3 ms | **249 ms** |
+
+**1,54x sullo schermo intero.** Il trasporto da solo fa 1,83x: 334,5 -> 183,0 ms,
+contro 170 ms di puro tempo di filo. Il costo fisso per transazione, che sui
+pacchetti `B7` valeva circa 15 us ciascuno, è praticamente sparito.
+
+Due lezioni che vale la pena non ripetere:
+
+- la stima a tavolino era **~170 ms**, cioè sbagliata di 80 ms, perché non
+  teneva conto del CRC software sul payload;
+- la prima misura dava `BD` a 374 ms contro 385, un misero 3%. Il CRC bit per
+  bit costava **334 cicli per byte** e su 960 byte di payload per riga si
+  mangiava per intero i 150 ms che il trasporto aveva guadagnato. Sostituito con
+  una tabella da 256 voci (512 byte di flash), l'assemblaggio è sceso da 183,4 a
+  61,4 ms. Senza la scomposizione `assemble`/`exchange`/`fence` del profilo, il
+  colpevole sarebbe rimasto invisibile.
+
+Restano 61 ms di assemblaggio, 226 us per riga, cioè ~112 cicli per byte per un
+lookup in tabella e due store: ancora troppo. Il sospetto è il loop di padding,
+che lavora pixel per pixel anche per una riga allineata a larghezza piena, dove
+`head_mask` e `tail_mask` valgono entrambe `FFFF` e il payload coincide già con
+i pixel sorgente. Un percorso veloce con `memcpy` e CRC su blocco è il prossimo
+passo ovvio. Non ancora fatto.
+
 ## Verifica
 
 `sim/tb_spi_framebuffer.sv` copre, oltre a tutto il preesistente:

@@ -11,6 +11,16 @@ static void diagnostic_matrix(void);
 // Separate, cache-line aligned buffers in DMA-accessible SRAM, not DTCM.
 static uint8_t tx[4128] __attribute__((section(".spi_dma"), aligned(32)));
 static uint8_t rx[4128] __attribute__((section(".spi_dma"), aligned(32)));
+// Every opcode the graphics endpoint claims, not just the two that existed
+// when this guard was first written. A leading B7..BD byte takes a command
+// path instead of the plain echo, so the reply is not the previous byte and
+// the comparison below would flag it as a transport error. The pattern makes
+// tx[0] = (round*53) & 0xFF, so BA, BB, BC and BD land on rounds 18, 47, 76
+// and 105: invisible until a run long enough to reach them.
+static uint8_t echo_safe(uint8_t first)
+{
+    return (first>=0xB7 && first<=0xBD) ? (uint8_t)(first^0x80) : first;
+}
 volatile SpiTestResult g_spi_test;
 static volatile uint32_t completed, failed;
 // Slow GPIO probe, independent of SPI/DMA. Each row uses no pull, pull-up,
@@ -158,8 +168,7 @@ void SPI_SelfTest_Run(void)
         for(uint32_t t=0;t<sizeof(lengths)/sizeof(lengths[0]);t++) {
             uint16_t length=lengths[t];
             for(uint32_t i=0;i<sizeof(tx);i++) tx[i]=(uint8_t)((i*37+round*53)^(i>>3));
-            // B7 and B8 are application opcodes, never send them as echo opcodes.
-            if(tx[0]==0xB7 || tx[0]==0xB8) tx[0]^=0x80;
+            tx[0]=echo_safe(tx[0]);
             memset(rx,0,sizeof(rx));
             if(SCB->CCR & SCB_CCR_DC_Msk) {
                 SCB_CleanDCache_by_Addr((uint32_t*)tx,sizeof(tx));
@@ -278,6 +287,7 @@ static void diagnostic_matrix(void) {
                 uint8_t sequence=0xA5;
                 for(unsigned i=0;i<sizeof(tx);i++) {
                     tx[i]=(uint8_t)((i*37+round*53)^(i>>3));
+                    if(i==0) tx[0]=echo_safe(tx[0]);
                     expected_rx[i]=SPI_DIAG_MODE==1?sequence:(i==0?0xA5:tx[i-1]);
                     sequence=lfsr_next(sequence);
                     if(i<length) crc=crc_byte(crc,tx[i]);
