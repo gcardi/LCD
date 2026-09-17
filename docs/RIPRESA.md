@@ -39,6 +39,19 @@ logiche, 3802 registri, **CLS 87%**, da tenere d'occhio. Al banco:
 rilascio**, autotest SPI a zero errori, demo testo e scroll complete, 50 PRESENT
 con 50 fronti IRQ.
 
+**Prova negativa superata, due volte.** Con il filo PB1–IO29 staccato:
+`g_fpga_reset_state = 3` dopo tre tentativi, fase **60** (`reset_seen` atteso 1,
+letto 0), demo non avviate, autotest SPI comunque a zero errori. La MCU distingue
+quindi "FPGA viva ma non resettata" da "FPGA muta", e in entrambi i casi non la
+usa. Ricollegato il filo, si torna a stato 2 al primo tentativo.
+
+La pull-up da 10 kΩ va montata **sulla Tang Nano, fra IO29 e 3V3**, non sul filo:
+se il collegamento verso la MCU si stacca, IO29 deve restare tenuto alto da una
+resistenza vera e non dalla sola pull-up interna, che è debole. Lo schermo nero
+visto durante la prova non era un difetto: per montare la resistenza le schede
+erano state spente, la FPGA è ripartita col fondo nero, e la MCU, non potendo
+dimostrare il reset, correttamente non ha disegnato.
+
 Due trappole del banco di simulazione, emerse qui. L'impulso di reset di 400 ns
 che inizializzava il progetto viene giustamente ignorato dal filtro: ora dura
 2 ms. E il controllo di scansione non azzerava il conteggio dei fotogrammi al

@@ -81,6 +81,11 @@ Il cablaggio e' implementato nel TOP e nei vincoli del progetto LCD.
 | PB0 / FPGA_IRQ_N | 28 | notifica PRESENT, attiva bassa fino ad ACK |
 | PB1 / FPGA_RST_N | 29 | reset logico della FPGA, open drain, attivo basso; pull-up 10 kΩ verso il 3V3 della Tang Nano |
 
+La pull-up di `FPGA_RST_N` va montata sulla Tang Nano, fra IO29 e il pin 3V3
+(mai 5V: IO29 è nel banco a 3,3 V), non a metà del filo né dal lato STM32. Se il
+collegamento con la MCU si stacca, IO29 deve restare alto con decisione: con la
+sola pull-up interna un disturbo lungo più di 1 ms resetterebbe la logica.
+
 Collegamento IRQ IO28 -> PB0 confermato dall'utente. Lato MCU sono predisposti
 EXTI0 sul fronte di discesa, pull-up e priorità NVIC 5 (subpriorità 0).
 IO28 e' ora pilotato dalla FPGA: un fronte segnala lo swap completato.
