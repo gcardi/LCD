@@ -13,7 +13,11 @@ module tb_text_renderer;
  FontStore store(.clk(clk),.rst_n(rst),.fonts_ready(fonts_ready),.fonts_error(fonts_error),
   .read_request(flash_request),.read_address(flash_address),.read_ready(flash_ready),
   .read_valid(flash_valid),.read_data(flash_data));
+ // No boot logo here: this bench measures text, and a logo would put its own
+ // pixels in the framebuffer it checks.
  TextRenderer renderer(.clk(clk),.rst_n(rst),.fonts_ready(fonts_ready),
+  .logo_valid(1'b0),.logo_width(9'd0),.logo_height(9'd0),
+  .logo_x(9'd0),.logo_y(9'd0),.logo_base(15'd0),
   .command_valid(command_valid),.command_take(command_take),.command_kind(kind),
   .command_font_id(font_id),
   .command_flags(flags),.command_x(x),.command_y(y),.command_box_width(box_width),

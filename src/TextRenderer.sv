@@ -3,6 +3,11 @@
 // burst construction are deliberately serial to keep the logic small.
 module TextRenderer (
  input wire clk,rst_n,fonts_ready,
+ // Boot logo descriptor from FontStore, valid once fonts_ready is up. The
+ // logo is drawn once per reset, before the first command is accepted.
+ input wire logo_valid,
+ input wire [8:0] logo_width,logo_height,logo_x,logo_y,
+ input wire [14:0] logo_base,
  input wire command_valid,output wire command_take,
  // kind 0 = testo; kind 1 = forma B9, font_id 0 fill / 1 linea.
  // Testo e forme condividono coda, campi e percorso dei burst. Per le linee
@@ -25,7 +30,8 @@ module TextRenderer (
                   FETCH_REQUEST=7,FETCH_WAIT=8,PREP_BURST=9,
                   BUILD_PIXEL=10,ISSUE_BURST=11,DONE=12,WAIT_CLEAR=13,
                   FILL_PREP=14,LINE_INIT=15,LINE_START=16,
-                  LINE_PIXEL=17,LINE_CHECK=18,LINE_FLUSH=19,LINE_RELEASE=20;
+                  LINE_PIXEL=17,LINE_CHECK=18,LINE_FLUSH=19,LINE_RELEASE=20,
+                  LOGO_PIXEL=21,LOGO_FETCH=22,LOGO_WAIT=23;
  reg [4:0] state;
  reg [8:0] origin_x,pen_x,pen_y;
  reg [9:0] clip_right;
@@ -56,6 +62,13 @@ module TextRenderer (
  reg [5:0] glyph_row;
  reg [15:0] glyph_bits;
  reg second_burst;
+ // Boot logo. The rectangle is walked by the fill path; these carry the
+ // pixel stream that replaces the fill colour. The logo is stored row by row
+ // with an even width, so scanning it is a single advancing word pointer and
+ // never a multiply: one flash word is the next two selected pixels.
+ reg logo,logo_pending,logo_phase,logo_have;
+ reg [31:0] logo_pair;
+ reg [14:0] logo_ptr;
  reg [9:0] burst_x;
  reg [4:0] pixel_index;
  reg row_visible;
@@ -93,9 +106,10 @@ module TextRenderer (
  endfunction
  wire [7:0] mapped_glyph=map_glyph(codepoint);
 
- assign command_take = state==DONE;
- assign flash_request = state==FETCH_REQUEST && flash_ready;
- assign flash_address = glyph_byte_address[16:2];
+ // The logo reaches DONE too, and must not swallow a pending SPI command.
+ assign command_take = state==DONE && !logo;
+ assign flash_request = (state==FETCH_REQUEST || state==LOGO_FETCH) && flash_ready;
+ assign flash_address = logo ? logo_ptr : glyph_byte_address[16:2];
  assign update_valid = (state==ISSUE_BURST || state==LINE_FLUSH) && update_mask!=0;
 
  always @(posedge clk or negedge rst_n) begin
@@ -108,10 +122,28 @@ module TextRenderer (
      second_burst<=0;burst_x<=0;pixel_index<=0;update_address<=0;
      update_data<=0;update_mask<=0;row_visible<=0;kind<=0;
      line_dx<=0;line_dy<=0;line_error<=0;line_left<=0;line_up<=0;line_last<=0;
+     logo<=0;logo_pending<=1;logo_phase<=0;logo_have<=0;logo_pair<=0;logo_ptr<=0;
    end else case(state)
      // Un riempimento non tocca la User Flash, quindi resta disponibile
      // anche quando i font mancano o non superano il CRC.
-     IDLE: if(command_valid && (command_kind || fonts_ready)) begin
+     // The logo goes first and only once per reset. Its bursts sit in the
+     // handshake until FramebufferController has finished clearing the frame,
+     // which is the only ordering this needs: updates are not served until
+     // then. When there is no logo the flag simply retires.
+     IDLE: if(logo_pending && fonts_ready) begin
+       logo_pending<=0;
+       if(logo_valid) begin
+         logo<=1;kind<=1;glyph_row<=0;flags<=0;second_burst<=0;
+         origin_x<=logo_x;pen_x<=logo_x;pen_y<=logo_y;
+         burst_x<={1'b0,logo_x[8:4],4'd0};
+         // FontStore has already refused a logo that would not close inside
+         // the panel, so these need no clamp of their own.
+         clip_right<={1'b0,logo_x}+{1'b0,logo_width};
+         clip_bottom<=logo_y+logo_height;
+         logo_ptr<=logo_base;logo_phase<=0;logo_have<=0;
+         state<=FILL_PREP;
+       end
+     end else if(command_valid && (command_kind || fonts_ready)) begin
        kind<=command_kind;glyph_row<=0;
        burst_x<={1'b0,command_x[8:4],4'd0};
        font_id<=command_font_id;flags<=command_flags;origin_x<=command_x;
@@ -248,7 +280,32 @@ module TextRenderer (
      FILL_PREP:begin
        row_visible<=pen_y<clip_bottom;
        update_address<=render_row_address+burst_x;
-       update_data<=0;update_mask<=0;pixel_index<=0;state<=BUILD_PIXEL;
+       update_data<=0;update_mask<=0;pixel_index<=0;
+       state<=logo?LOGO_PIXEL:BUILD_PIXEL;
+     end
+     // Same walk as the fill, one stored pixel consumed per selected column.
+     // Columns outside the rectangle are skipped without touching the stream,
+     // so an even width keeps every row starting on a fresh flash word.
+     LOGO_PIXEL:begin
+       if(!fill_selected)begin
+         update_data<={16'd0,update_data[255:16]};
+         update_mask<={1'b0,update_mask[15:1]};
+         if(pixel_index==15)state<=ISSUE_BURST;
+         else pixel_index<=pixel_index+1'b1;
+       end else if(!logo_have) state<=LOGO_FETCH;
+       else begin
+         update_data<={logo_phase?logo_pair[31:16]:logo_pair[15:0],
+                       update_data[255:16]};
+         update_mask<={1'b1,update_mask[15:1]};
+         logo_phase<=~logo_phase;
+         if(logo_phase)begin logo_have<=0;logo_ptr<=logo_ptr+15'd1;end
+         if(pixel_index==15)state<=ISSUE_BURST;
+         else pixel_index<=pixel_index+1'b1;
+       end
+     end
+     LOGO_FETCH:if(flash_ready)state<=LOGO_WAIT;
+     LOGO_WAIT:if(flash_valid)begin
+       logo_pair<=flash_data;logo_have<=1;state<=LOGO_PIXEL;
      end
      PREP_BURST:begin
        burst_x<=candidate_burst_x;
@@ -284,7 +341,9 @@ module TextRenderer (
          glyph_row<=glyph_row+1'b1;second_burst<=0;state<=FETCH_REQUEST;
        end
      end
-     DONE:state<=WAIT_CLEAR;
+     // A command always reloads kind on its way out of IDLE, so dropping the
+     // logo flag is all the logo leaves behind.
+     DONE:begin logo<=0;state<=logo?IDLE:WAIT_CLEAR;end
      WAIT_CLEAR:if(!command_valid)state<=IDLE;
      default:state<=IDLE;
    endcase
