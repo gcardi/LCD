@@ -27,4 +27,12 @@
 // paints the whole screen twice and takes roughly half a second, so it is
 // opt-in. Read g_lcd_bench_* over SWD afterwards.
 #define LCD_STREAM_BENCH 0
+// Linea di reset FPGA_RST_N (PB1 -> IO29) montata su questa scheda?
+// 1: all'avvio la MCU resetta la FPGA e pretende la prova che il reset sia
+//    arrivato; senza prova la FPGA non viene usata.
+// 0: nessuna linea. Non si resetta niente e non si dimostra niente, ma si
+//    aspetta comunque che la FPGA sia davvero pronta (calibrazione PSRAM e
+//    riempimento iniziale) invece di fidarsi di un ritardo fisso.
+// La FPGA non ha bisogno della linea: IO29 ha la pull-up e senza filo sta a riposo.
+#define FPGA_RESET_LINE 1
 #endif

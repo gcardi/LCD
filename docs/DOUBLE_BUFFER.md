@@ -150,6 +150,33 @@ di `BB`: si accende a ogni reset e si spegne soltanto con `BA ACK_RESET`.
 | 2 | **reset dimostrato** |
 | 3 | fallito dopo tre tentativi: la FPGA non va usata, le demo non partono |
 | 4 | impulso inviato ma non dimostrabile: bitstream precedente alla versione 3, oppure FPGA muta prima dell'impulso e viva dopo |
+| 5 | senza linea di reset: pronta, e la FPGA era **appena ripartita** (accensione o pulsante) |
+| 6 | senza linea di reset: pronta, e la FPGA **stava già girando** con il suo stato (è ripartita solo la MCU) |
+
+### La linea di reset è facoltativa
+
+La FPGA non ne ha bisogno: IO29 ha la pull-up e senza filo resta a riposo. È il
+firmware a decidere, con `FPGA_RESET_LINE` in `spi_diag_config.h`, e `main()`
+chiama `FPGA_Start()`, che sceglie il percorso:
+
+- **1, linea montata**: `FPGA_ResetCycle()`, reset con prova come sopra; senza
+  prova la FPGA non viene usata e le demo non partono;
+- **0, nessuna linea**: `FPGA_WaitReady()`. Non resetta e non dimostra niente, ma
+  manda comunque `ACK_RESET` e ne attende il completamento. Siccome viene servito
+  solo dopo calibrazione PSRAM e riempimento iniziale, la MCU aspetta che la FPGA
+  sia **davvero** pronta invece di fidarsi di un ritardo fisso. Letto prima
+  dell'ACK, `reset_seen` distingue una FPGA appena accesa (stato 5) da una che
+  stava già girando (stato 6), nel qual caso può conservare doppio buffer
+  abilitato o IRQ pendenti: `LCD_EnableDoubleBuffer` li gestisce già.
+
+`g_fpga_ready_tick` riporta in entrambi i casi il tick HAL, cioè i millisecondi
+dall'avvio della MCU, in cui la FPGA è diventata utilizzabile. Su un'accensione
+comune delle due schede è il tempo che la MCU ha dovuto aspettare davvero, ed è
+il dato da usare se un sistema dovesse ripiegare su un ritardo fisso.
+
+Primo riscontro senza linea, con la sola MCU riavviata: stato 6, pronta a 12 ms
+dall'avvio della MCU, demo complete. Non è ancora la misura di un'accensione
+comune, perché la FPGA era già accesa.
 
 `g_fpga_reset_attempts` conta i tentativi, `g_fpga_reset_ready_ms` misura il tempo
 dal rilascio della linea alla FPGA pronta. Sul banco, il 17 settembre 2026:

@@ -13,12 +13,20 @@ typedef struct {
 // The FPGA sets reset_seen on every reset and clears it only on ACK_RESET. The
 // cycle clears it, pulses the line, and requires it set again afterwards, so a
 // missing wire or an ineffective pulse is detected instead of assumed away.
-// Returns 1 when the FPGA may be used, 0 when it must not. Call it after
-// SPI_Setup() and before any other use of the FPGA.
-//   g_fpga_reset_state: 0 not run, 1 running, 2 reset proven,
-//                       3 failed, 4 pulsed but not provable (see lcd_spi.c)
+// Returns 1 when the FPGA may be used, 0 when it must not.
 int FPGA_ResetCycle(void);
+// Without a reset line: no pulse and no proof, but a real wait for readiness.
+int FPGA_WaitReady(void);
+// What main() calls after SPI_Setup(): one of the two, per FPGA_RESET_LINE.
+int FPGA_Start(void);
+//   g_fpga_reset_state: 0 not run, 1 running, 3 failed,
+//     with the reset line:    2 reset proven, 4 pulsed but not provable;
+//     without the reset line: 5 ready, FPGA had just restarted (power-up, key),
+//                             6 ready, FPGA was already running with its state.
+//   g_fpga_ready_tick: HAL tick, i.e. ms since MCU start, when the FPGA became
+//     usable. On a common power-up this is how long the MCU really had to wait.
 extern volatile uint32_t g_fpga_reset_state, g_fpga_reset_attempts, g_fpga_reset_ready_ms;
+extern volatile uint32_t g_fpga_ready_tick;
 // Single-caller APIs. Enable waits for previous drawing and selects the back
 // buffer. Its contents are undefined until explicitly cleared/redrawn.
 int LCD_GetBufferStatus(LcdBufferStatus *status);

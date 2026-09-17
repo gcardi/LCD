@@ -118,9 +118,10 @@ int main(void)
   /* USER CODE BEGIN 2 */
   // Bring up the link and wait for the FPGA before anything else touches SPI.
   SPI_Setup();
-  // Then reset it under MCU control and require proof that the reset happened.
+  // Then make sure it is really usable: with the reset line fitted, reset it and
+  // require proof; without it, wait until it reports ready (FPGA_RESET_LINE).
   // The self-test still runs on failure: it is the diagnostic to read next.
-  int fpga_ok = FPGA_ResetCycle();
+  int fpga_ok = FPGA_Start();
   (void)fpga_ok; // unused when every boot demo is compiled out
   SPI_SelfTest_Run();
 #if LCD_TEXT_DEMO

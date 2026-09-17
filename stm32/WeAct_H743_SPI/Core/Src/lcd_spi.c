@@ -2,6 +2,7 @@
 #include "spi_selftest.h"
 #include "lcd_spi.h"
 #include "main.h"
+#include "spi_diag_config.h"
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
@@ -187,6 +188,7 @@ static int acknowledge_present(uint16_t sequence)
 
 // ---- Controlled FPGA reset -------------------------------------------------
 volatile uint32_t g_fpga_reset_state, g_fpga_reset_attempts, g_fpga_reset_ready_ms;
+volatile uint32_t g_fpga_ready_tick;
 
 #define FPGA_RESET_PULSE_MS  10u   // the RTL filter ignores anything under 1 ms
 #define FPGA_RESET_READY_MS  3000u // PSRAM calibration plus the initial fill
@@ -264,7 +266,40 @@ int FPGA_ResetCycle(void)
         outcome=reset_attempt();
     }
     g_fpga_reset_state=outcome?outcome:3;
+    if(outcome) g_fpga_ready_tick=HAL_GetTick();
     return outcome!=0;
+}
+
+int FPGA_WaitReady(void)
+{
+    LcdBufferStatus status;
+    g_fpga_reset_state=1;
+    g_fpga_reset_attempts=1;
+    g_fpga_reset_ready_ms=0;
+    clear_lcd_error();
+    uint32_t start=HAL_GetTick();
+    if(!buffer_idle(&status,FPGA_RESET_READY_MS)) {g_fpga_reset_state=3;return 0;}
+    if(status.version<3) {
+        // Older bitstream: no readiness to wait for beyond answering BB.
+        g_fpga_reset_state=4;g_fpga_ready_tick=HAL_GetTick();return 1;
+    }
+    // reset_seen before acknowledging tells a freshly started FPGA from one
+    // that kept running while only the MCU restarted.
+    uint32_t fresh=status.reset_seen;
+    if(!acknowledge_reset(&status)) {g_fpga_reset_state=3;return 0;}
+    g_fpga_reset_ready_ms=HAL_GetTick()-start;
+    g_fpga_ready_tick=HAL_GetTick();
+    g_fpga_reset_state=fresh?5:6;
+    return 1;
+}
+
+int FPGA_Start(void)
+{
+#if FPGA_RESET_LINE
+    return FPGA_ResetCycle();
+#else
+    return FPGA_WaitReady();
+#endif
 }
 
 int LCD_EnableDoubleBuffer(void)
