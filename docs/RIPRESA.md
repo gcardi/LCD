@@ -45,6 +45,14 @@ letto 0), demo non avviate, autotest SPI comunque a zero errori. La MCU distingu
 quindi "FPGA viva ma non resettata" da "FPGA muta", e in entrambi i casi non la
 usa. Ricollegato il filo, si torna a stato 2 al primo tentativo.
 
+**La linea è facoltativa.** `FPGA_RESET_LINE` in `spi_diag_config.h`: con 1
+reset e prova come sopra, con 0 `FPGA_WaitReady()` non resetta ma aspetta che la
+FPGA risponda ad `ACK_RESET`, quindi il display funziona anche senza filo.
+Provato con 0: sola MCU riavviata stato 6, accensione comune stato 5, in entrambi
+i casi pronta a 12 ms dall'avvio della MCU, cioè già pronta alla prima domanda.
+Per sistemi che non possono attendere attivamente, il ritardo fisso documentato
+è **200 ms** (vedi `DOUBLE_BUFFER.md`). Nel sorgente l'opzione resta a 1.
+
 La pull-up da 10 kΩ va montata **sulla Tang Nano, fra IO29 e 3V3**, non sul filo:
 se il collegamento verso la MCU si stacca, IO29 deve restare tenuto alto da una
 resistenza vera e non dalla sola pull-up interna, che è debole. Lo schermo nero

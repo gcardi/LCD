@@ -174,9 +174,21 @@ dall'avvio della MCU, in cui la FPGA è diventata utilizzabile. Su un'accensione
 comune delle due schede è il tempo che la MCU ha dovuto aspettare davvero, ed è
 il dato da usare se un sistema dovesse ripiegare su un ritardo fisso.
 
-Primo riscontro senza linea, con la sola MCU riavviata: stato 6, pronta a 12 ms
-dall'avvio della MCU, demo complete. Non è ancora la misura di un'accensione
-comune, perché la FPGA era già accesa.
+Riscontri senza linea, 17 settembre 2026. Con la sola MCU riavviata: stato 6,
+pronta a 12 ms dall'avvio della MCU. Con le due schede spente e riaccese insieme,
+ciascuna dalla propria USB: stato 5, pronta a **12 ms** al primo tentativo, con
+attesa sotto il millisecondo. La FPGA quindi aveva già finito quando la MCU ha
+potuto chiedere, perché la SPI è pronta solo a 12 ms: il dato è un limite
+superiore, contato dall'avvio della MCU e non dall'accensione, e il tempo reale
+della FPGA resta non misurato.
+
+**Ritardo fisso per sistemi senza linea e senza attesa attiva: 200 ms**
+dall'accensione prima del primo comando. Il margine rispetto ai 12 ms osservati
+copre ciò che quella misura non vede: rampe di alimentazione più lente, schede
+accese in momenti diversi, caricamento del bitstream e aggancio dei PLL. Se la
+MCU può permetterselo, dopo il ritardo legga comunque lo stato `BB` e ripeta con
+una breve pausa finché non risponde: `FPGA_WaitReady()` resta la soluzione da
+preferire.
 
 `g_fpga_reset_attempts` conta i tentativi, `g_fpga_reset_ready_ms` misura il tempo
 dal rilascio della linea alla FPGA pronta. Sul banco, il 17 settembre 2026:
