@@ -9,7 +9,7 @@ $build = Join-Path $PSScriptRoot 'build'
 New-Item -ItemType Directory -Force $build | Out-Null
 Push-Location $root
 try {
-foreach ($top in @('tb_spi_slave', 'tb_spi_diagnostic', 'tb_spi_directions', 'tb_spi_framebuffer', 'tb_font_store', 'tb_text_renderer', 'tb_line_renderer', 'tb_blit_renderer', 'tb_framebuffer_fifo')) {
+foreach ($top in @('tb_spi_slave', 'tb_spi_diagnostic', 'tb_spi_directions', 'tb_spi_framebuffer', 'tb_font_store', 'tb_text_renderer', 'tb_line_renderer', 'tb_blit_renderer', 'tb_framebuffer_fifo', 'tb_boot_logo')) {
 $vvp = Join-Path $build ($top + '.vvp')
 $compileLog = Join-Path $build ($top + '_compile.log')
 $runLog = Join-Path $build ($top + '_run.log')
