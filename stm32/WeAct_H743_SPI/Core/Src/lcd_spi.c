@@ -131,16 +131,19 @@ int LCD_GetBufferStatus(LcdBufferStatus *status)
 {
     uint8_t tx[11]={0xBB},rx[11];
     if(!status || !exchange(tx,rx,sizeof(tx))) return 0;
-    if(rx[0]!=0xA5 || rx[1]!=0xD2 || (rx[2]!=1 && rx[2]!=2) || rx[3]!=2)
+    if(rx[0]!=0xA5 || rx[1]!=0xD2 || rx[2]<1 || rx[2]>3 || rx[3]!=2)
         return bad(23,1,0xD2,rx[1]);
     uint16_t crc=0xFFFF;
     for(unsigned i=1;i<=8;i++) crc=crc16_byte(crc,rx[i]);
     uint16_t received=(uint16_t)((uint16_t)rx[9]<<8)|rx[10];
     if(crc!=received) return bad(24,9,crc,received);
-    if((rx[4]&0xF0) || rx[5]>1) return bad(25,4,0,rx[4]);
+    // Bit 4 (reset_seen) is defined from version 3; before that it is reserved.
+    uint8_t reserved=rx[2]>=3?0xE0:0xF0;
+    if((rx[4]&reserved) || rx[5]>1) return bad(25,4,0,rx[4]);
     *status=(LcdBufferStatus){.enabled=rx[4]&1,.front=(rx[4]>>1)&1,
         .draw=rx[5],.irq=(rx[4]>>2)&1,.busy=(rx[4]>>3)&1,
-        .result=rx[8],.version=rx[2],.sequence=(uint16_t)((uint16_t)rx[6]<<8)|rx[7]};
+        .result=rx[8],.version=rx[2],.reset_seen=(rx[4]>>4)&1,
+        .sequence=(uint16_t)((uint16_t)rx[6]<<8)|rx[7]};
     return 1;
 }
 
@@ -180,6 +183,88 @@ static int acknowledge_present(uint16_t sequence)
     g_fpga_irq_level=HAL_GPIO_ReadPin(FPGA_IRQ_N_GPIO_Port,FPGA_IRQ_N_Pin)==GPIO_PIN_SET;
     if(!g_fpga_irq_level) return bad(31,0,1,0);
     return 1;
+}
+
+// ---- Controlled FPGA reset -------------------------------------------------
+volatile uint32_t g_fpga_reset_state, g_fpga_reset_attempts, g_fpga_reset_ready_ms;
+
+#define FPGA_RESET_PULSE_MS  10u   // the RTL filter ignores anything under 1 ms
+#define FPGA_RESET_READY_MS  3000u // PSRAM calibration plus the initial fill
+#define FPGA_RESET_ATTEMPTS  3u
+#define FPGA_ACK_RESET       6u
+
+static void clear_lcd_error(void)
+{
+    for(unsigned i=0;i<6;i++) g_lcd_error[i]=0;
+}
+
+// ACK_RESET is served only after calibration and the initial fill, so waiting
+// for it to complete is also waiting for the memory side to be ready to draw.
+static int acknowledge_reset(LcdBufferStatus *status)
+{
+    if(!buffer_command(FPGA_ACK_RESET,0,0) || !buffer_idle(status,FPGA_RESET_READY_MS))
+        return 0;
+    if(status->result || status->reset_seen)
+        return bad(58,0,0,status->result?status->result:status->reset_seen);
+    return 1;
+}
+
+// One attempt. Returns 2 proven, 4 pulsed but not provable, 0 failed.
+static uint32_t reset_attempt(void)
+{
+    LcdBufferStatus status;
+    clear_lcd_error();
+
+    // Arm the proof: clear reset_seen, so that finding it set again can only
+    // mean this pulse. Impossible if the FPGA is silent or predates version 3;
+    // the pulse still goes out, but the outcome can then only be "not provable".
+    // A silent FPGA fails the very first BB on its signature, without waiting.
+    int armed=buffer_idle(&status,1000) && status.version>=3 && acknowledge_reset(&status);
+    if(!armed) clear_lcd_error(); // expected when the FPGA is hung or older
+
+    // Pulse. SPI deselected, and EXTI masked: while the fabric resets, the IRQ
+    // line must not be able to produce a phantom PRESENT event.
+    HAL_GPIO_WritePin(FPGA_CS_GPIO_Port,FPGA_CS_Pin,GPIO_PIN_SET);
+    HAL_NVIC_DisableIRQ(FPGA_IRQ_N_EXTI_IRQn);
+    HAL_GPIO_WritePin(FPGA_RST_N_GPIO_Port,FPGA_RST_N_Pin,GPIO_PIN_RESET);
+    HAL_Delay(FPGA_RESET_PULSE_MS);
+    HAL_GPIO_WritePin(FPGA_RST_N_GPIO_Port,FPGA_RST_N_Pin,GPIO_PIN_SET);
+    uint32_t released=HAL_GetTick();
+
+    uint32_t outcome=0;
+    if(!SPI_Setup()) {
+        bad(59,0,1,0);                          // no SPI answer after the pulse
+    } else if(!buffer_idle(&status,FPGA_RESET_READY_MS)) {
+        // buffer_idle has recorded the reason
+    } else if(status.version<3) {
+        outcome=4;                              // bitstream without reset proof
+    } else if(!status.reset_seen) {
+        bad(60,0,1,0);                          // pulse did not reset the fabric
+    } else if(acknowledge_reset(&status)) {
+        outcome=armed?2:4;
+        g_fpga_reset_ready_ms=HAL_GetTick()-released;
+    }
+
+    // Nothing from before the reset is a valid event any more.
+    __HAL_GPIO_EXTI_CLEAR_IT(FPGA_IRQ_N_Pin);
+    g_fpga_irq_pending=0;
+    g_fpga_irq_level=HAL_GPIO_ReadPin(FPGA_IRQ_N_GPIO_Port,FPGA_IRQ_N_Pin)==GPIO_PIN_SET;
+    HAL_NVIC_EnableIRQ(FPGA_IRQ_N_EXTI_IRQn);
+    return outcome;
+}
+
+int FPGA_ResetCycle(void)
+{
+    g_fpga_reset_state=1;
+    g_fpga_reset_attempts=0;
+    g_fpga_reset_ready_ms=0;
+    uint32_t outcome=0;
+    while(g_fpga_reset_attempts<FPGA_RESET_ATTEMPTS && !outcome) {
+        g_fpga_reset_attempts++;
+        outcome=reset_attempt();
+    }
+    g_fpga_reset_state=outcome?outcome:3;
+    return outcome!=0;
 }
 
 int LCD_EnableDoubleBuffer(void)

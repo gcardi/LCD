@@ -4,9 +4,21 @@
 extern volatile uint32_t g_lcd_demo_state;
 extern volatile uint32_t g_lcd_error[6];
 typedef struct {
-    uint8_t enabled, front, draw, irq, busy, result, version;
+    // reset_seen exists from protocol version 3 and reads 0 before it.
+    uint8_t enabled, front, draw, irq, busy, result, version, reset_seen;
     uint16_t sequence;
 } LcdBufferStatus;
+
+// Controlled FPGA reset through FPGA_RST_N (PB1 -> IO29), with proof.
+// The FPGA sets reset_seen on every reset and clears it only on ACK_RESET. The
+// cycle clears it, pulses the line, and requires it set again afterwards, so a
+// missing wire or an ineffective pulse is detected instead of assumed away.
+// Returns 1 when the FPGA may be used, 0 when it must not. Call it after
+// SPI_Setup() and before any other use of the FPGA.
+//   g_fpga_reset_state: 0 not run, 1 running, 2 reset proven,
+//                       3 failed, 4 pulsed but not provable (see lcd_spi.c)
+int FPGA_ResetCycle(void);
+extern volatile uint32_t g_fpga_reset_state, g_fpga_reset_attempts, g_fpga_reset_ready_ms;
 // Single-caller APIs. Enable waits for previous drawing and selects the back
 // buffer. Its contents are undefined until explicitly cleared/redrawn.
 int LCD_GetBufferStatus(LcdBufferStatus *status);

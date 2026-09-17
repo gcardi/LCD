@@ -118,22 +118,26 @@ int main(void)
   /* USER CODE BEGIN 2 */
   // Bring up the link and wait for the FPGA before anything else touches SPI.
   SPI_Setup();
+  // Then reset it under MCU control and require proof that the reset happened.
+  // The self-test still runs on failure: it is the diagnostic to read next.
+  int fpga_ok = FPGA_ResetCycle();
+  (void)fpga_ok; // unused when every boot demo is compiled out
   SPI_SelfTest_Run();
 #if LCD_TEXT_DEMO
-  if (g_spi_test.state == 2) LCD_TextDemo_Run();
+  if (fpga_ok && g_spi_test.state == 2) LCD_TextDemo_Run();
 #endif
 #if LCD_FPGA_TEXT_DEMO
-  if (g_spi_test.state == 2) LCD_FPGATextDemo_Run();
+  if (fpga_ok && g_spi_test.state == 2) LCD_FPGATextDemo_Run();
 #endif
 #if LCD_STREAM_BENCH
-  if (g_spi_test.state == 2 && !g_lcd_error[0]) LCD_StreamBench_Run();
+  if (fpga_ok && g_spi_test.state == 2 && !g_lcd_error[0]) LCD_StreamBench_Run();
 #endif
 #if LCD_SCROLL_DEMO
-  if (g_spi_test.state == 2 && !g_lcd_error[0]) LCD_ScrollDemo_Run();
+  if (fpga_ok && g_spi_test.state == 2 && !g_lcd_error[0]) LCD_ScrollDemo_Run();
 #endif
   // Keep the uniform FPGA background unless graphical tests are requested.
 #if LCD_BOOT_TESTS
-  if (g_spi_test.state == 2) {
+  if (fpga_ok && g_spi_test.state == 2) {
     LCD_Demo_Run();
     if(g_lcd_demo_state==2) {
       LCD_Stress_Run();
