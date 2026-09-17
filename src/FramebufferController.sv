@@ -33,7 +33,7 @@ module FramebufferController #(
     input wire control_buffer,
     input wire [15:0] control_sequence,
     output logic control_take,
-    output wire [26:0] control_status,
+    output wire [27:0] control_status,
     output wire irq_n,
     output logic blit_start,input wire blit_done,blit_error,
     input wire blit_read_valid,output wire blit_read_take,
@@ -88,6 +88,13 @@ module FramebufferController #(
     // Pixel addresses: two disjoint 128K-pixel slots (256 KiB each).
     // The first 130560 pixels of each slot are the 480x272 image.
     logic double_enabled,front_buffer,irq_pending,present_pending,present_flushing;
+    // Proof of reset for the MCU. Set by every reset of this domain, cleared
+    // only by ACK_RESET. The MCU clears it, pulses FPGA_RST_N and reads it
+    // back: set again means the pulse really reset the fabric, still clear
+    // means it did not arrive. ACK_RESET is served here in READ_COMMAND, after
+    // PSRAM calibration and the initial fill, so its completion also says the
+    // memory side is ready to draw.
+    logic reset_seen;
     logic [15:0] completed_sequence;
     logic [7:0] control_result;
     logic blit_active,blit_read_active;
@@ -103,7 +110,7 @@ module FramebufferController #(
     assign blit_read_take = state==BLIT_READ_COMMAND;
     wire draw_buffer = double_enabled && !front_buffer;
     assign irq_n = !irq_pending;
-    assign control_status = {completed_sequence,control_result,irq_pending,front_buffer,double_enabled};
+    assign control_status = {reset_seen,completed_sequence,control_result,irq_pending,front_buffer,double_enabled};
       assign update_take = state == UPDATE_COMMAND;
       // Break the FIFO pointer/threshold path before it reaches the controller
       // state decoder. The FIFO threshold already reserves a full burst.
@@ -246,7 +253,7 @@ module FramebufferController #(
     always_ff @(posedge clk or negedge nRST) begin
         if (!nRST) begin
             restart_pending <= 0;
-            double_enabled<=0;front_buffer<=0;irq_pending<=0;
+            double_enabled<=0;front_buffer<=0;irq_pending<=0;reset_seen<=1;
             present_pending<=0;present_flushing<=0;
             completed_sequence<=0;control_result<=0;control_take<=0;
             blit_start<=0;blit_active<=0;blit_read_active<=0;
@@ -407,6 +414,7 @@ module FramebufferController #(
                             else control_result<=8'hE1;
                             control_take<=1;
                           end
+                          6:begin reset_seen<=0;control_take<=1;end // ACK_RESET
                           4,5:begin
                             if(double_enabled && control_buffer!=front_buffer)begin
                               blit_start<=1;blit_active<=1;

@@ -59,15 +59,18 @@ set_clock_groups -asynchronous -group [get_clocks {spi_clk}] -group [get_clocks 
 // Notes
 // -----------------------------------------------------------------------
 //
-// Reset_Button reaches flops only through the per-domain ResetSynchronizer
-// instances, gated on both PLL locks. Assertion is asynchronous by design;
+// Reset_Button and FPGA_RST_N (STM32 PB1) are first filtered together by
+// ResetRequestFilter on xtal_27, then reach flops only through the per-domain
+// ResetSynchronizer instances, gated on both PLL locks. The filter's
+// synchronisers sit in the xtal_27 group, already asynchronous to every other
+// clock, so the new port adds no analysable crossing. Assertion is asynchronous by design;
 // release is retimed onto each domain's own clock, so it shows up in the
 // removal table as an intra-domain path with positive slack rather than as an
 // unconstrained crossing. No set_false_path is declared because the analyzer
 // reports no path that would need one; the constraint would be inert.
 //
-// The button is still un-debounced. A bounce asserts reset again, which is
-// harmless, but it is not a clean single-shot reset.
+// The filter requires 1 ms of continuous low before asserting, which also
+// debounces the button: release bounces are too short to assert it again.
 //
 // The LCD output bus is source-synchronous and carries ~111 ns of margin per
 // pixel, so no set_output_delay is declared. Add one if the panel's setup and

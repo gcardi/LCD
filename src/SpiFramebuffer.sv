@@ -28,7 +28,7 @@ module SpiFramebuffer (
  output wire control_valid, input wire control_take,
  output reg [7:0] control_op, output reg control_buffer,
  output reg [15:0] control_sequence,
- input wire [26:0] control_status,
+ input wire [27:0] control_status,
  output reg blit_source,
  output reg [15:0] blit_x,blit_y,blit_width,blit_height,blit_arg_x,blit_arg_y,blit_color
 );
@@ -53,7 +53,7 @@ module SpiFramebuffer (
  (* async_reg = "true" *) reg control_req1,control_req2,control_ack1,control_ack2;
  (* async_reg = "true" *) reg text_mem_req1,text_mem_req2,text_mem_ack1,text_mem_ack2;
  reg control_seen;
- reg [26:0] status_snapshot,status_packet;
+ reg [27:0] status_snapshot,status_packet;
  reg status_busy;
  reg graphics_idle;
  reg selected_control,selected_status,selected_fast_status,accept_control;
@@ -79,9 +79,11 @@ module SpiFramebuffer (
  reg fast_status_valid,fast_status_ready;
  wire control_available = control_request == control_seen;
  wire graphics_available = control_available;
- wire control_fields_valid = staging_op>=1 && staging_op<=3 &&
+ // 1 ENABLE_DOUBLE, 2 PRESENT, 3 ACK_PRESENT, 6 ACK_RESET. Codes 4 and 5 are
+ // COPY and SCROLL, reachable only through BC, never through BA.
+ wire control_fields_valid = ((staging_op>=1 && staging_op<=3) || staging_op==6) &&
      (staging_op==2 ? staging_buffer<=1 : staging_buffer==0) &&
-     (staging_op!=1 || staging_sequence==0);
+     ((staging_op!=1 && staging_op!=6) || staging_sequence==0);
  wire stream_payload = selected_stream && accept_stream && stream_phase==3'd1;
  // One CRC16 datapath per register instead of one per call site. BA, BC and BD
  // are mutually exclusive opcodes, as are B8 and B9, so a shared enable costs
@@ -118,7 +120,9 @@ module SpiFramebuffer (
  // second snapshot throughout each BB packet, including its CRC.
  always @(posedge sck or negedge rst_n) begin
    if(!rst_n) begin
-     control_ack1<=0;control_ack2<=0;control_seen<=0;status_snapshot<=0;
+     // reset_seen is set by the same reset in the memory domain: mirror it
+     // here so BB reports it before any control has completed.
+     control_ack1<=0;control_ack2<=0;control_seen<=0;status_snapshot<=28'h8000000;
      control_request<=0;control_op<=0;control_buffer<=0;control_sequence<=0;
    end else begin
      control_ack1<=control_ack;control_ack2<=control_ack1;
@@ -151,9 +155,9 @@ module SpiFramebuffer (
  function automatic [7:0] status_byte(input [6:0] n);
    case(n)
      0:status_byte=8'hD2;
-     1:status_byte=8'h02; // version 2 adds BC COPY/SCROLL
+     1:status_byte=8'h03; // version 3 adds reset_seen and BA ACK_RESET
      2:status_byte=8'h02; // buffer count
-     3:status_byte={4'd0,status_busy,status_packet[2:0]}; // busy, IRQ, front, enabled
+     3:status_byte={3'd0,status_packet[27],status_busy,status_packet[2:0]}; // reset_seen, busy, IRQ, front, enabled
      4:status_byte={7'd0,(status_packet[0] && !status_packet[1])}; // draw buffer
      5:status_byte=status_packet[26:19]; // last completed PRESENT sequence
      6:status_byte=status_packet[18:11];

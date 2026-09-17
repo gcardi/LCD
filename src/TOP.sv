@@ -1,6 +1,8 @@
 module TOP
 (
 	input			Reset_Button,
+    // Reset from the STM32 (PB1, open drain, external pull-up). Active low.
+    input wire      FPGA_RST_N,
     //input           User_Button,
     input           XTAL_IN,
     input wire      SPI_SCK,
@@ -33,10 +35,18 @@ module TOP
 	logic psram_clk;       // clk_out = 81 MHz
 	logic init_calib;
 
-	// Reset tree. Reset_Button is asynchronous to every clock here, and both
-	// PLL outputs are meaningless until they lock, so the release is gated on
-	// both locks and then retimed separately into each domain.
-	wire global_rst_n = Reset_Button & psram_pll_lock & lcd_pll_lock;
+	// Reset tree. The button and the MCU line are filtered together on the
+	// crystal clock, which runs before either PLL locks. Both PLL outputs are
+	// meaningless until they lock, so the release is also gated on both locks
+	// and then retimed separately into each domain.
+	wire reset_request_n;
+	ResetRequestFilter reset_request_filter (
+		.clk             (XTAL_IN),
+		.button_n        (Reset_Button),
+		.mcu_n           (FPGA_RST_N),
+		.reset_request_n (reset_request_n)
+	);
+	wire global_rst_n = reset_request_n & psram_pll_lock & lcd_pll_lock;
     wire psram_rst_n;
     wire font_rst_n;
     wire spi_miso_data, spi_miso_enable;
@@ -47,7 +57,7 @@ module TOP
     wire control_valid,control_take,control_buffer;
     wire [7:0] control_op;
     wire [15:0] control_sequence;
-    wire [26:0] control_status;
+    wire [27:0] control_status;
     wire blit_start,blit_done,blit_error,blit_read_valid,blit_read_take,blit_read_done;
     wire [20:0] blit_read_address;
     wire [255:0] blit_read_pixels;
@@ -214,9 +224,11 @@ module TOP
 		.clk            (XTAL_IN),
 		.memory_clk     (memory_clk),
 		.pll_lock       (psram_pll_lock),
-		// Left on the raw button on purpose: the IP takes pll_lock separately
-		// and synchronises rst_n internally, so it is characterised this way.
-		.rst_n          (Reset_Button),
+		// Not gated on the PLL locks: the IP takes pll_lock separately and
+		// synchronises rst_n internally. It used to see the raw button; it now
+		// sees the filtered request, which is clean and already on XTAL_IN,
+		// the IP's own control clock. An MCU reset restarts calibration too.
+		.rst_n          (reset_request_n),
 
 		// Porte interne SiP
 		.O_psram_ck      (O_psram_ck),

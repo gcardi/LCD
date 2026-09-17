@@ -1,9 +1,9 @@
 `timescale 1ns/1ps
 module tb_double_buffer;
- reg xtal=0,rst=1,sck=0,cs=1,mosi=0;
+ reg xtal=0,rst=1,mcu_rst=1,sck=0,cs=1,mosi=0;
  always #18.5185 xtal=~xtal;
  wire miso,irq,lcd_clk,de,hs,vs;wire [4:0] r,b;wire [5:0] g;
- TOP dut(.Reset_Button(rst),.XTAL_IN(xtal),.SPI_SCK(sck),.SPI_CS_N(cs),
+ TOP dut(.Reset_Button(rst),.FPGA_RST_N(mcu_rst),.XTAL_IN(xtal),.SPI_SCK(sck),.SPI_CS_N(cs),
    .SPI_MOSI(mosi),.SPI_MISO(miso),.FPGA_IRQ_N(irq),.LCD_CLK(lcd_clk),
    .LCD_DEN(de),.LCD_HYNC(hs),.LCD_SYNC(vs),.LCD_R(r),.LCD_G(g),.LCD_B(b));
  reg [7:0] reply,st[0:10];integer irq_edges=0,checked_frames=0,pixel_count=0;
@@ -13,7 +13,9 @@ module tb_double_buffer;
  always @(negedge irq) if(rst) irq_edges=irq_edges+1;
  // Independent raster coordinates, with one-cycle registered video outputs.
  always @(posedge lcd_clk) begin
-   if(!dut.lcd_rst_n) begin raster_phase=0;check_frame=0;pixel_count=0;end
+   // restarts too: the first frame after any reset, not only power-on, is
+   // skipped, because the controller is still redoing the initial fill.
+   if(!dut.lcd_rst_n) begin raster_phase=0;check_frame=0;pixel_count=0;restarts=0;end
    else begin
      reference_phase=raster_phase;
      raster_phase=(raster_phase==166617)?0:raster_phase+1;
@@ -43,7 +45,7 @@ module tb_double_buffer;
    end
  end
  reg old_front=0,boundary,boundary_delayed=0;
- always @(posedge dut.psram_clk) if(dut.psram_rst_n) begin
+ always @(posedge dut.psram_clk) if(!dut.psram_rst_n) old_front=0; else begin
    // The controller registers the synchronized pulse once before arbitration.
    // Track that one-cycle latency independently of the controller register.
    boundary=boundary_delayed;
@@ -73,7 +75,7 @@ module tb_double_buffer;
      cs=0;#1000;byte_io(8'hBB,st[0]);
      for(integer i=1;i<11;i=i+1)byte_io(0,st[i]);
      #1000;cs=1;#1000;
-     if(st[0]!=8'hA5 || st[1]!=8'hD2 || st[2]!=2 || st[3]!=2)$fatal(1,"status identity");
+     if(st[0]!=8'hA5 || st[1]!=8'hD2 || st[2]!=3 || st[3]!=2)$fatal(1,"status identity");
      crc=16'hFFFF;for(integer i=1;i<=8;i=i+1)crc=crc_byte(crc,st[i]);
      if({st[9],st[10]}!=crc)$fatal(1,"status CRC");
    end
@@ -165,11 +167,17 @@ module tb_double_buffer;
  `include "sim/blit_cases.svh"
 `endif
  initial begin
-   #1;rst=0;#400;rst=1;
+   // The reset request filter ignores anything shorter than 1 ms, so the
+   // power-on press has to last longer than that: 2 ms, like a real key.
+   #1;rst=0;#2000000;rst=1;
    // SCK resynchronizer startup, as on STM32.
    repeat(3)begin #40;sck=1;#40;sck=0;end
    wait(dut.graphics.fonts_ready);wait(dut.framebuffer_controller_inst.state==4);
-   audit(0,0);status();if(st[4]!=0 || st[5]!=0)$fatal(1,"reset state");
+   audit(0,0);status();if(st[4]!=8'h10 || st[5]!=0)$fatal(1,"reset state, reset_seen expected");
+   control(6,1,0,0,10,8'hC3,8'hE1); // ACK_RESET: reserved buffer
+   control(6,0,1,0,10,8'hC3,8'hE1); // ACK_RESET: reserved sequence
+   control(6,0,0,0,10,8'hC3,8'hAC);idle(0);
+   if(st[4]!=0)$fatal(1,"ACK_RESET did not clear reset_seen");
    control(1,0,0,1,10,8'hC3,8'hE1); // corrupt CRC
    control(4,0,0,0,10,8'hC3,8'hE1); // unknown op
    control(1,1,0,0,10,8'hC3,8'hE1); // reserved field
@@ -217,7 +225,23 @@ module tb_double_buffer;
 `ifdef BLIT_TEST
    blit_scenario();
 `endif
-   $display("PASS: double_buffer CRC, abort, barrier, back-only writes, duplicate, ACK and full raster frames");
+   // --- Reset from the MCU (FPGA_RST_N) ---
+   // A short glitch must not reset: reset_seen, cleared above, stays clear.
+   mcu_rst=0;#500000;mcu_rst=1;#300000;
+   status();if(st[4][4])$fatal(1,"0.5 ms glitch reset the fabric");
+   // A real 10 ms pulse, as the firmware sends it.
+   mcu_rst=0;#3000000;
+   if(dut.global_rst_n)$fatal(1,"reset request not asserted after 3 ms low");
+   if(!irq)$fatal(1,"IRQ active during reset");
+   #7000000;mcu_rst=1;
+   wait(dut.graphics.fonts_ready);wait(dut.framebuffer_controller_inst.state==4);
+   repeat(3)begin #40;sck=1;#40;sck=0;end
+   status();if(st[4]!=8'h10 || st[5]!=0)$fatal(1,"reset proof missing after MCU reset: %h",st[4]);
+   audit(0,0); // initial fill ran again
+   control(6,0,0,0,10,8'hC3,8'hAC);idle(0);
+   if(st[4]!=0)$fatal(1,"ACK_RESET after MCU reset");
+   if(!irq)$fatal(1,"IRQ left active after reset");
+   $display("PASS: double_buffer CRC, abort, barrier, back-only writes, duplicate, ACK, full raster frames and MCU reset proof");
    $finish;
  end
  initial begin #300000000;$fatal(1,"double buffer timeout");end

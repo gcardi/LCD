@@ -10,7 +10,7 @@ $vvp=Join-Path $build "double_buffer_$variant.vvp"
 if(Test-Path $vvp){Remove-Item -LiteralPath $vvp}
 $sources=@('src/TOP.sv','src/SpiSlave.sv','src/SpiFramebuffer.sv','src/TextRenderer.sv',
  'src/FontStore.sv','src/UserFlashReader.sv','src/FramebufferController.sv','src/BlitRenderer.sv',
- 'src/VGA_Timing.sv','src/ResetSynchronizer.sv','src/PulseSynchronizer.sv',
+ 'src/VGA_Timing.sv','src/ResetRequestFilter.sv','src/ResetSynchronizer.sv','src/PulseSynchronizer.sv',
  'sim/models.sv','sim/tb_double_buffer.sv') | ForEach-Object {Join-Path $root $_}
 $defines=@('-DSIMULATION')
 if($Blit){$defines+='-DBLIT_TEST'}
