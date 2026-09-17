@@ -4,6 +4,7 @@ param(
     [switch]$ReadOnly,
     [switch]$RequireGraphics,
     [switch]$RequireStress,
+    [switch]$RequireStream,
     [switch]$RequireText,
     [switch]$RequireFPGAText,
     [string]$ProgrammerPath,
@@ -24,6 +25,10 @@ if($RequireText -and
 if($RequireFPGAText -and
    (Get-Content (Join-Path $PSScriptRoot 'Core/Inc/spi_diag_config.h') -Raw) -match '#define LCD_FPGA_TEXT_DEMO 0') {
     throw 'Demo testo FPGA disabilitata: impostare LCD_FPGA_TEXT_DEMO 1 in Core/Inc/spi_diag_config.h e ricompilare/caricare.'
+}
+if($RequireStream -and
+   (Get-Content (Join-Path $PSScriptRoot 'Core/Inc/spi_diag_config.h') -Raw) -match '#define LCD_STREAM_BENCH 0') {
+    throw 'Benchmark stream disabilitato: impostare LCD_STREAM_BENCH 1 in Core/Inc/spi_diag_config.h e ricompilare/caricare.'
 }
 # Il gate finale pretende gpio_probe.all_match, ma la prova GPIO costa ~800 ms
 # ed e' disattivabile: senza di essa il collaudo fallirebbe senza spiegazione.
@@ -104,7 +109,7 @@ if ($RequireGraphics) {
         $graphicsBytes=[IO.File]::ReadAllBytes($graphicsDump)
         if($graphicsBytes.Length -ne 4) {throw 'Dump grafico troncato'}
         $result['graphics_state']=[BitConverter]::ToUInt32($graphicsBytes,0)
-        if($result.graphics_state -ne 1) {break}
+        if($result.graphics_state -in @(2,3)) {break}
         Start-Sleep -Milliseconds 100
     } while($graphicsTimer.Elapsed.TotalSeconds -lt $TimeoutSeconds)
 }
@@ -120,7 +125,7 @@ if($RequireText) {
         $textBytes=[IO.File]::ReadAllBytes($textDump)
         if($textBytes.Length -ne 4) {throw 'Dump demo testo troncato'}
         $result['text_state']=[BitConverter]::ToUInt32($textBytes,0)
-        if($result.text_state -ne 1) {break}
+        if($result.text_state -in @(2,3)) {break}
         Start-Sleep -Milliseconds 100
     } while($textTimer.Elapsed.TotalSeconds -lt $TimeoutSeconds)
 }
@@ -136,7 +141,7 @@ if($RequireFPGAText) {
         $fpgaTextBytes=[IO.File]::ReadAllBytes($fpgaTextDump)
         if($fpgaTextBytes.Length -ne 4) {throw 'Dump demo testo FPGA troncato'}
         $result['fpga_text_state']=[BitConverter]::ToUInt32($fpgaTextBytes,0)
-        if($result.fpga_text_state -ne 1) {break}
+        if($result.fpga_text_state -in @(2,3)) {break}
         Start-Sleep -Milliseconds 100
     } while($fpgaTextTimer.Elapsed.TotalSeconds -lt $TimeoutSeconds)
     $errorSymbol=@($symbols | Where-Object {$_ -match '^[0-9a-fA-F]+\s+\w\s+g_lcd_error$'})
@@ -188,6 +193,72 @@ if($RequireStress) {
         $result['lcd_error']=$lcdError
     }
 }
+if($RequireStream) {
+    $streamSizes=[ordered]@{
+        g_lcd_bench_state=4;g_lcd_bench_b7_ms=4;g_lcd_bench_bd_ms=4
+        g_lcd_bench_b7=20;g_lcd_bench_bd=20;g_lcd_stream_overlap_rows=4
+        g_spi_dma_notifications=4;g_spi_dma_waits=4;g_spi_dma_timeouts=4
+    }
+    $streamEntries=@{}
+    foreach($streamName in $streamSizes.Keys) {
+        $streamSymbol=@($symbols | Where-Object {$_ -match "^[0-9a-fA-F]+\s+\w\s+$streamName`$"})
+        if($streamSymbol.Count -ne 1) {throw "Simbolo stream mancante o ambiguo: $streamName"}
+        $streamEntries[$streamName]=[Convert]::ToUInt32(($streamSymbol[0] -split '\s+')[0],16)
+    }
+    [uint32]$streamFirst=($streamEntries.Values | Measure-Object -Minimum).Minimum
+    [uint32]$streamLast=($streamSizes.Keys | ForEach-Object {$streamEntries[$_]+$streamSizes[$_]} | Measure-Object -Maximum).Maximum
+    [uint32]$streamLength=$streamLast-$streamFirst
+    $streamDump=Join-Path $build 'hardware-stream.bin'
+    $streamTimer=[Diagnostics.Stopwatch]::StartNew()
+    do {
+        if(Test-Path $streamDump) {Remove-Item -LiteralPath $streamDump}
+        Invoke-LoggedProcess -FilePath $ProgrammerPath -Arguments @('-c','port=SWD',"sn=$SerialNumber",'mode=HOTPLUG','freq=1000','-u',('0x{0:X8}' -f $streamFirst),"$streamLength",$streamDump) -LogPath (Join-Path $build 'hardware-stream.log') -TimeoutSeconds $TimeoutSeconds
+        $streamBytes=[IO.File]::ReadAllBytes($streamDump)
+        if($streamBytes.Length -ne $streamLength) {throw 'Dump stream troncato'}
+        $streamState=[BitConverter]::ToUInt32($streamBytes,$streamEntries.g_lcd_bench_state-$streamFirst)
+        if($streamState -in @(2,3,4)) {break}
+        Start-Sleep -Milliseconds 100
+    } while($streamTimer.Elapsed.TotalSeconds -lt $TimeoutSeconds)
+    $readStreamValue={param($name,$index=0) [BitConverter]::ToUInt32($streamBytes,$streamEntries[$name]-$streamFirst+4*$index)}
+    $result['stream']=[ordered]@{
+        state=&$readStreamValue g_lcd_bench_state
+        b7_ms=&$readStreamValue g_lcd_bench_b7_ms
+        bd_ms=&$readStreamValue g_lcd_bench_bd_ms
+        b7=[ordered]@{assemble=&$readStreamValue g_lcd_bench_b7 0;exchange=&$readStreamValue g_lcd_bench_b7 1;fence=&$readStreamValue g_lcd_bench_b7 2;packets=&$readStreamValue g_lcd_bench_b7 3;retries=&$readStreamValue g_lcd_bench_b7 4}
+        bd=[ordered]@{assemble=&$readStreamValue g_lcd_bench_bd 0;exchange=&$readStreamValue g_lcd_bench_bd 1;fence=&$readStreamValue g_lcd_bench_bd 2;packets=&$readStreamValue g_lcd_bench_bd 3;retries=&$readStreamValue g_lcd_bench_bd 4}
+        overlap_rows=&$readStreamValue g_lcd_stream_overlap_rows
+        dma_notifications=&$readStreamValue g_spi_dma_notifications
+        dma_waits=&$readStreamValue g_spi_dma_waits
+        dma_timeouts=&$readStreamValue g_spi_dma_timeouts
+    }
+}
+$rtosNames=@('g_display_stack_high_water_words','g_display_stack_high_water_bytes',
+    'g_default_stack_high_water_words','g_default_stack_high_water_bytes','g_freertos_failure')
+$rtosAddresses=@()
+foreach($rtosName in $rtosNames) {
+    $rtosSymbol=@($symbols | Where-Object {$_ -match "^[0-9a-fA-F]+\s+\w\s+$rtosName`$"})
+    if($rtosSymbol.Count -ne 1) {throw "Simbolo FreeRTOS mancante o ambiguo: $rtosName"}
+    $rtosAddresses += [Convert]::ToUInt32(($rtosSymbol[0] -split '\s+')[0],16)
+}
+[uint32]$rtosFirst=($rtosAddresses | Measure-Object -Minimum).Minimum
+[uint32]$rtosLast=($rtosAddresses | Measure-Object -Maximum).Maximum
+[uint32]$rtosLength=$rtosLast-$rtosFirst+4
+$rtosDump=Join-Path $build 'hardware-freertos.bin'
+if(Test-Path $rtosDump) {Remove-Item -LiteralPath $rtosDump}
+Invoke-LoggedProcess -FilePath $ProgrammerPath -Arguments @('-c','port=SWD',"sn=$SerialNumber",'mode=HOTPLUG','freq=1000','-u',('0x{0:X8}' -f $rtosFirst),"$rtosLength",$rtosDump) -LogPath (Join-Path $build 'hardware-freertos.log') -TimeoutSeconds $TimeoutSeconds
+$rtosBytes=[IO.File]::ReadAllBytes($rtosDump)
+if($rtosBytes.Length -ne $rtosLength) {throw 'Dump diagnostica FreeRTOS troncato'}
+$rtosValues=@()
+foreach($rtosAddress in $rtosAddresses) {
+    $rtosValues += [BitConverter]::ToUInt32($rtosBytes,$rtosAddress-$rtosFirst)
+}
+$result['freertos']=[ordered]@{
+    display_stack_free_words=$rtosValues[0]
+    display_stack_free_bytes=$rtosValues[1]
+    default_stack_free_words=$rtosValues[2]
+    default_stack_free_bytes=$rtosValues[3]
+    failure=$rtosValues[4]
+}
 $result | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $resultPath
 if($result.magic -ne 0x53504954 -or $result.version -ne 1 -or $result.state -ne 2 -or $result.transfers -ne ($expectedRounds*5) -or $result.checked_bytes -ne ($expectedRounds*4374) -or $result.mismatches -ne 0 -or $result.hal_error -ne 0 -or -not $result.gpio_probe.all_match) {
     throw "Test hardware NON superato (timeout/errore): $($result | ConvertTo-Json -Compress)"
@@ -196,5 +267,13 @@ if ($RequireGraphics -and $result.graphics_state -ne 2) {throw "Demo grafica NON
 if($RequireText -and $result.text_state -ne 2) {throw "Demo testo NON superata: stato $($result.text_state)"}
 if($RequireFPGAText -and ($result.fpga_text_state -ne 2 -or $result.lcd_error.phase -ne 0)) {throw "Demo testo FPGA NON superata: $($result | ConvertTo-Json -Depth 5 -Compress)"}
 if($RequireStress -and ($result.stress.state -ne 2 -or $result.stress.rectangles -ne 512 -or $result.stress.pixels -ne 354528 -or $result.stress.packets -ne 30035 -or $result.lcd_error.phase -ne 0 -or $result.checked_bytes -lt 1000000)) {throw "Stress NON superato: $($result | ConvertTo-Json -Depth 5 -Compress)"}
+if($RequireStream -and ($result.stream.state -ne 2 -or $result.stream.b7.packets -ne 8160 -or
+    $result.stream.bd.packets -ne 272 -or $result.stream.overlap_rows -ne 238 -or
+    $result.stream.bd_ms -ge $result.stream.b7_ms -or $result.stream.dma_timeouts -ne 0 -or
+    $result.stream.dma_notifications -ne $result.stream.dma_waits)) {
+    throw "Stream DMA asincrono NON superato: $($result.stream | ConvertTo-Json -Depth 5 -Compress)"
+}
+if($result.freertos.failure -ne 0 -or $result.freertos.display_stack_free_words -eq 0 -or $result.freertos.default_stack_free_words -eq 0) {throw "FreeRTOS NON superato: $($result.freertos | ConvertTo-Json -Compress)"}
 Write-Host "PASS: SPI DMA, $($result.transfers) trasferimenti, $($result.checked_bytes) byte verificati, $($result.elapsed_ms) ms."
+Write-Host "Stack minimo libero: DisplayTask $($result.freertos.display_stack_free_bytes) byte, defaultTask $($result.freertos.default_stack_free_bytes) byte."
 Write-Host "Risultato: $resultPath"

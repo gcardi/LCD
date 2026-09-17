@@ -21,14 +21,10 @@
 #include "dma.h"
 #include "spi.h"
 #include "gpio.h"
+#include "cmsis_os.h"
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-#include "spi_selftest.h"
-#include "lcd_spi.h"
-#include "lcd_text.h"
-#include "spi_diag_config.h"
-
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -60,6 +56,7 @@ volatile uint32_t g_fpga_irq_level;   // livello letto a regime: 1 atteso
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 static void MPU_Config(void);
+void MX_FREERTOS_Init(void);
 /* USER CODE BEGIN PFP */
 
 /* USER CODE END PFP */
@@ -112,42 +109,19 @@ int main(void)
   MX_DMA_Init();
   MX_SPI2_Init();
   /* USER CODE BEGIN 2 */
-  // Bring up the link and wait for the FPGA before anything else touches SPI.
-  SPI_Setup();
-  // Then make sure it is really usable: with the reset line fitted, reset it and
-  // require proof; without it, wait until it reports ready (FPGA_RESET_LINE).
-  // The self-test still runs on failure: it is the diagnostic to read next.
-  int fpga_ok = FPGA_Start();
-  (void)fpga_ok; // unused when every boot demo is compiled out
-  SPI_SelfTest_Run();
-#if LCD_TEXT_DEMO
-  if (fpga_ok && g_spi_test.state == 2) LCD_TextDemo_Run();
-#endif
-#if LCD_FPGA_TEXT_DEMO
-  if (fpga_ok && g_spi_test.state == 2) LCD_FPGATextDemo_Run();
-#endif
-#if LCD_STREAM_BENCH
-  if (fpga_ok && g_spi_test.state == 2 && !g_lcd_error[0]) LCD_StreamBench_Run();
-#endif
-#if LCD_SCROLL_DEMO
-  if (fpga_ok && g_spi_test.state == 2 && !g_lcd_error[0]) LCD_ScrollDemo_Run();
-#endif
-  // Keep the uniform FPGA background unless graphical tests are requested.
-#if LCD_BOOT_TESTS
-  if (fpga_ok && g_spi_test.state == 2) {
-    LCD_Demo_Run();
-    if(g_lcd_demo_state==2) {
-      LCD_Stress_Run();
-      if(g_lcd_stress.state==2) LCD_Demo_Run();
-    }
-  }
-
-#endif
   /* USER CODE END 2 */
+
+  /* Init scheduler */
+  osKernelInitialize();
+
+  /* Call init function for freertos objects (in freertos.c) */
+  MX_FREERTOS_Init();
+
+  /* Start scheduler */
+  osKernelStart();
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
-  g_fpga_irq_level=HAL_GPIO_ReadPin(FPGA_IRQ_N_GPIO_Port,FPGA_IRQ_N_Pin)==GPIO_PIN_SET;
   while (1)
   {
     /* USER CODE END WHILE */

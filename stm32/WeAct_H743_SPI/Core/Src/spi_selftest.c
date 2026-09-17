@@ -2,6 +2,11 @@
 #include "spi.h"
 #include "main.h"
 #include "spi_diag_config.h"
+#include "display_task.h"
+#include "app_freertos.h"
+#include "cmsis_os2.h"
+#include "FreeRTOS.h"
+#include "task.h"
 #include <string.h>
 
 #if SPI_DIAG_MATRIX
@@ -23,6 +28,9 @@ static uint8_t echo_safe(uint8_t first)
 }
 volatile SpiTestResult g_spi_test;
 static volatile uint32_t completed, failed;
+volatile uint32_t g_spi_dma_notifications;
+volatile uint32_t g_spi_dma_waits;
+volatile uint32_t g_spi_dma_timeouts;
 // Slow GPIO probe, independent of SPI/DMA. Each row uses no pull, pull-up,
 // then pull-down on MISO; differing replies expose an undriven return line.
 volatile uint8_t g_spi_gpio_probe[3][8];
@@ -36,8 +44,8 @@ static void reset_transaction_after_config(void)
     io.Pin=GPIO_PIN_13;io.Mode=GPIO_MODE_OUTPUT_PP;io.Speed=GPIO_SPEED_FREQ_LOW;
     HAL_GPIO_Init(GPIOB,&io);
     for(unsigned i=0;i<2;i++) {
-        HAL_GPIO_WritePin(GPIOB,GPIO_PIN_13,GPIO_PIN_SET);HAL_Delay(1);
-        HAL_GPIO_WritePin(GPIOB,GPIO_PIN_13,GPIO_PIN_RESET);HAL_Delay(1);
+        HAL_GPIO_WritePin(GPIOB,GPIO_PIN_13,GPIO_PIN_SET);osDelay(1);
+        HAL_GPIO_WritePin(GPIOB,GPIO_PIN_13,GPIO_PIN_RESET);osDelay(1);
     }
     io.Mode=GPIO_MODE_AF_PP;io.Alternate=GPIO_AF5_SPI2;io.Speed=GPIO_SPEED_FREQ_MEDIUM;
     HAL_GPIO_Init(GPIOB,&io);
@@ -53,21 +61,21 @@ static void probe_gpio(void)
         io.Pin=GPIO_PIN_14; io.Mode=GPIO_MODE_INPUT;
         io.Pull=p==0?GPIO_NOPULL:p==1?GPIO_PULLUP:GPIO_PULLDOWN;
         HAL_GPIO_Init(GPIOB,&io);
-        HAL_GPIO_WritePin(FPGA_CS_GPIO_Port,FPGA_CS_Pin,GPIO_PIN_SET); HAL_Delay(2);
-        HAL_GPIO_WritePin(FPGA_CS_GPIO_Port,FPGA_CS_Pin,GPIO_PIN_RESET); HAL_Delay(2);
+        HAL_GPIO_WritePin(FPGA_CS_GPIO_Port,FPGA_CS_Pin,GPIO_PIN_SET); osDelay(2);
+        HAL_GPIO_WritePin(FPGA_CS_GPIO_Port,FPGA_CS_Pin,GPIO_PIN_RESET); osDelay(2);
         for(unsigned b=0;b<8;b++) {
             uint8_t value=(uint8_t)(0x3C+b*17), reply=0;
             for(unsigned bit=0;bit<8;bit++) {
                 HAL_GPIO_WritePin(GPIOB,GPIO_PIN_15,(value&(0x80>>bit))?GPIO_PIN_SET:GPIO_PIN_RESET);
-                HAL_Delay(1);
+                osDelay(1);
                 HAL_GPIO_WritePin(GPIOB,GPIO_PIN_13,GPIO_PIN_SET);
-                HAL_Delay(1); // Sample after GPIO/pad settling, not immediately after BSRR.
+                osDelay(1); // Sample after GPIO/pad settling, not immediately after BSRR.
                 reply=(uint8_t)((reply<<1)|(HAL_GPIO_ReadPin(GPIOB,GPIO_PIN_14)==GPIO_PIN_SET));
                 HAL_GPIO_WritePin(GPIOB,GPIO_PIN_13,GPIO_PIN_RESET);
             }
             g_spi_gpio_probe[p][b]=reply;
         }
-        HAL_Delay(1); HAL_GPIO_WritePin(FPGA_CS_GPIO_Port,FPGA_CS_Pin,GPIO_PIN_SET);
+        osDelay(1); HAL_GPIO_WritePin(FPGA_CS_GPIO_Port,FPGA_CS_Pin,GPIO_PIN_SET);
     }
     io.Pin=GPIO_PIN_13|GPIO_PIN_14|GPIO_PIN_15; io.Mode=GPIO_MODE_AF_PP;
     io.Pull=GPIO_NOPULL; io.Speed=GPIO_SPEED_FREQ_MEDIUM;
@@ -77,55 +85,99 @@ static void probe_gpio(void)
 
 void HAL_SPI_TxRxCpltCallback(SPI_HandleTypeDef *hspi)
 {
-    if(hspi == &hspi2) completed = 1;
+    if(hspi == &hspi2) {
+        BaseType_t wake=pdFALSE;
+        completed=1;__DMB();g_spi_dma_notifications++;
+        if(DisplayTaskHandle!=NULL) vTaskNotifyGiveFromISR(DisplayTaskHandle,&wake);
+        portYIELD_FROM_ISR(wake);
+    }
 }
 void HAL_SPI_TxCpltCallback(SPI_HandleTypeDef *hspi)
 {
-    if(hspi == &hspi2) completed = 1;
+    if(hspi == &hspi2) {
+        BaseType_t wake=pdFALSE;
+        completed=1;__DMB();g_spi_dma_notifications++;
+        if(DisplayTaskHandle!=NULL) vTaskNotifyGiveFromISR(DisplayTaskHandle,&wake);
+        portYIELD_FROM_ISR(wake);
+    }
 }
 void HAL_SPI_ErrorCallback(SPI_HandleTypeDef *hspi)
 {
-    if(hspi == &hspi2) failed = 1;
+    if(hspi == &hspi2) {
+        BaseType_t wake=pdFALSE;
+        failed=1;__DMB();g_spi_dma_notifications++;
+        if(DisplayTaskHandle!=NULL) vTaskNotifyGiveFromISR(DisplayTaskHandle,&wake);
+        portYIELD_FROM_ISR(wake);
+    }
+}
+
+static void dma_arm_notification(void)
+{
+    // The display task owns the notification slot as well as SPI2. Drain a
+    // notification left by an aborted operation before arming the next one.
+    while(ulTaskNotifyTake(pdTRUE,0)!=0) {}
+    completed=0;failed=0;__DMB();
+}
+
+static int dma_wait_notification(uint32_t timeout_ms)
+{
+    TickType_t ticks=pdMS_TO_TICKS(timeout_ms);
+    if(ticks==0) ticks=1;
+    g_spi_dma_waits++;
+    if(ulTaskNotifyTake(pdTRUE,ticks)==0) {
+        g_spi_dma_timeouts++;
+        return 0;
+    }
+    __DMB();
+    return completed && !failed;
 }
 
 // Synchronous owner of the same DMA buffers/callbacks as the boot test.
 // Caller owns CS. No concurrent transfers are allowed.
 int SPI_Exchange_DMA(const uint8_t *send,uint8_t *receive,uint16_t length)
 {
-    if(!length || length>sizeof(tx)) return 0;
+    if(!DisplayTask_IsOwner() || !length || length>sizeof(tx)) return 0;
     memcpy(tx,send,length);
     uint32_t cache_length=(length+31u)&~31u;
     if(SCB->CCR & SCB_CCR_DC_Msk) {
         SCB_CleanDCache_by_Addr((uint32_t*)tx,cache_length);
         SCB_CleanInvalidateDCache_by_Addr((uint32_t*)rx,cache_length);
     }
-    __DSB();completed=0;failed=0;
-    uint32_t start=HAL_GetTick();
+    __DSB();dma_arm_notification();
     HAL_StatusTypeDef status=HAL_SPI_TransmitReceive_DMA(&hspi2,tx,rx,length);
-    while(status==HAL_OK && !completed && !failed && HAL_GetTick()-start<1000) {}
-    if(status!=HAL_OK || !completed || failed) {HAL_SPI_Abort(&hspi2);return 0;}
+    if(status!=HAL_OK || !dma_wait_notification(1000)) {HAL_SPI_Abort(&hspi2);return 0;}
     if(SCB->CCR & SCB_CCR_DC_Msk) SCB_InvalidateDCache_by_Addr((uint32_t*)rx,cache_length);
     __DSB();memcpy(receive,rx,length);return 1;
 }
 
-int SPI_Transmit_DMA(const uint8_t *send,uint16_t length)
+int SPI_Transmit_DMA_Begin(const uint8_t *send,uint16_t length)
 {
-    if(!length || length>sizeof(tx)) return 0;
+    if(!DisplayTask_IsOwner() || !length || length>sizeof(tx) ||
+       hspi2.State!=HAL_SPI_STATE_READY) return 0;
     memcpy(tx,send,length);
     uint32_t cache_length=(length+31u)&~31u;
     if(SCB->CCR & SCB_CCR_DC_Msk)
         SCB_CleanDCache_by_Addr((uint32_t*)tx,cache_length);
-    __DSB();completed=0;failed=0;
-    uint32_t start=HAL_GetTick();
-    HAL_StatusTypeDef status=HAL_SPI_Transmit_DMA(&hspi2,tx,length);
-    while(status==HAL_OK && !completed && !failed && HAL_GetTick()-start<1000) {}
-    if(status!=HAL_OK || !completed || failed) {HAL_SPI_Abort(&hspi2);return 0;}
-    return 1;
+    __DSB();dma_arm_notification();
+    return HAL_SPI_Transmit_DMA(&hspi2,tx,length)==HAL_OK;
+}
+
+int SPI_Transmit_DMA_Wait(uint32_t timeout_ms)
+{
+    if(!DisplayTask_IsOwner() || !timeout_ms) return 0;
+    if(dma_wait_notification(timeout_ms)) return 1;
+    HAL_SPI_Abort(&hspi2);
+    return 0;
+}
+
+int SPI_Transmit_DMA(const uint8_t *send,uint16_t length)
+{
+    return SPI_Transmit_DMA_Begin(send,length) && SPI_Transmit_DMA_Wait(1000);
 }
 
 int SPI_SetBaudRatePrescaler(uint32_t prescaler)
 {
-    if(hspi2.State!=HAL_SPI_STATE_READY ||
+    if(!DisplayTask_IsOwner() || hspi2.State!=HAL_SPI_STATE_READY ||
        !IS_SPI_BAUDRATE_PRESCALER(prescaler)) return 0;
     __HAL_SPI_DISABLE(&hspi2);
     MODIFY_REG(hspi2.Instance->CFG1,SPI_CFG1_MBR,prescaler);
@@ -146,9 +198,9 @@ static int fpga_answers(void)
     static const uint8_t probe[3] = {0x00, 0x5A, 0xC3};
     uint8_t reply[3] = {0};
     HAL_GPIO_WritePin(FPGA_CS_GPIO_Port, FPGA_CS_Pin, GPIO_PIN_RESET);
-    HAL_Delay(1);
+    osDelay(1);
     int ok = SPI_Exchange_DMA(probe, reply, sizeof(probe));
-    HAL_Delay(1);
+    osDelay(1);
     HAL_GPIO_WritePin(FPGA_CS_GPIO_Port, FPGA_CS_Pin, GPIO_PIN_SET);
     if(!ok) return 0;
     return reply[0]==0xA5 && reply[1]==probe[0] && reply[2]==probe[1];
@@ -203,13 +255,11 @@ void SPI_SelfTest_Run(void)
                 SCB_CleanDCache_by_Addr((uint32_t*)tx,sizeof(tx));
                 SCB_CleanInvalidateDCache_by_Addr((uint32_t*)rx,sizeof(rx));
             }
-            __DSB(); completed=0; failed=0;
+            __DSB();dma_arm_notification();
             HAL_GPIO_WritePin(FPGA_CS_GPIO_Port, FPGA_CS_Pin, GPIO_PIN_RESET);
-            HAL_Delay(1);
-            uint32_t transfer_start=HAL_GetTick();
+            osDelay(1);
             HAL_StatusTypeDef status=HAL_SPI_TransmitReceive_DMA(&hspi2,tx,rx,length);
-            while(status==HAL_OK && !completed && !failed && HAL_GetTick()-transfer_start<1000) {}
-            if(status!=HAL_OK || failed || !completed) {
+            if(status!=HAL_OK || !dma_wait_notification(1000)) {
                 g_spi_test.hal_error=HAL_SPI_GetError(&hspi2);
                 if(!g_spi_test.hal_error) g_spi_test.hal_error=0x80000000u | (uint32_t)status;
                 HAL_SPI_Abort(&hspi2);
@@ -217,7 +267,7 @@ void SPI_SelfTest_Run(void)
                 goto fail;
             }
             // H7 HAL TxRx completion follows SPI EOT, not just DMA TC.
-            HAL_Delay(1);
+            osDelay(1);
             HAL_GPIO_WritePin(FPGA_CS_GPIO_Port, FPGA_CS_Pin, GPIO_PIN_SET);
             if(SCB->CCR & SCB_CCR_DC_Msk) SCB_InvalidateDCache_by_Addr((uint32_t*)rx,sizeof(rx));
             __DSB();
@@ -234,7 +284,7 @@ void SPI_SelfTest_Run(void)
                 }
             }
             g_spi_test.transfers++;
-            HAL_Delay(1);
+            osDelay(1);
         }
     }
     if(g_spi_test.mismatches) goto fail;
@@ -281,11 +331,9 @@ static int diag_dma(uint16_t length, volatile DiagCase *result) {
         SCB_CleanDCache_by_Addr((uint32_t*)tx,sizeof(tx));
         SCB_CleanInvalidateDCache_by_Addr((uint32_t*)rx,sizeof(rx));
     }
-    __DSB();completed=0;failed=0;
-    uint32_t start=HAL_GetTick();
+    __DSB();dma_arm_notification();
     HAL_StatusTypeDef status=HAL_SPI_TransmitReceive_DMA(&hspi2,tx,rx,length);
-    while(status==HAL_OK && !completed && !failed && HAL_GetTick()-start<1000) {}
-    if(status!=HAL_OK || failed || !completed) {
+    if(status!=HAL_OK || !dma_wait_notification(1000)) {
         result->hal_error=HAL_SPI_GetError(&hspi2);
         if(!result->hal_error) result->hal_error=0x80000000u|(uint32_t)status;
         HAL_SPI_Abort(&hspi2);return 0;
@@ -299,7 +347,7 @@ static void diagnostic_matrix(void) {
     __HAL_RCC_D2SRAM1_CLK_ENABLE();
     memset((void*)&g_spi_diag,0,sizeof(g_spi_diag));
     g_spi_diag.magic=0x44494147;g_spi_diag.version=1;g_spi_diag.state=1;g_spi_diag.mode=SPI_DIAG_MODE;
-    HAL_GPIO_WritePin(FPGA_CS_GPIO_Port,FPGA_CS_Pin,GPIO_PIN_SET);HAL_Delay(100);
+    HAL_GPIO_WritePin(FPGA_CS_GPIO_Port,FPGA_CS_Pin,GPIO_PIN_SET);osDelay(100);
     reset_transaction_after_config();
     if(SPI_DIAG_MODE==0) probe_gpio();
     // Alternate rates on each repeated sweep to expose time-dependent effects.
@@ -321,17 +369,17 @@ static void diagnostic_matrix(void) {
                     sequence=lfsr_next(sequence);
                     if(i<length) crc=crc_byte(crc,tx[i]);
                 }
-                diag_clock(prescaler,speeds[speed]);HAL_Delay(1);
-                HAL_GPIO_WritePin(FPGA_CS_GPIO_Port,FPGA_CS_Pin,GPIO_PIN_RESET);HAL_Delay(1);
+                diag_clock(prescaler,speeds[speed]);osDelay(1);
+                HAL_GPIO_WritePin(FPGA_CS_GPIO_Port,FPGA_CS_Pin,GPIO_PIN_RESET);osDelay(1);
                 int ok=diag_dma(length,result);
                 if(ok && SPI_DIAG_MODE==2) {
                     // Keep CS asserted: read FPGA's CRC at the conservative rate.
-                    HAL_Delay(1);diag_clock(SPI_BAUDRATEPRESCALER_256,speeds[speed]);HAL_Delay(1);
+                    osDelay(1);diag_clock(SPI_BAUDRATEPRESCALER_256,speeds[speed]);osDelay(1);
                     length=4;memset(tx,0,sizeof(tx));
                     expected_rx[0]=0xC3;expected_rx[1]=crc>>8;expected_rx[2]=crc;expected_rx[3]=0x5A;
                     ok=diag_dma(length,result);
                 }
-                HAL_Delay(1);HAL_GPIO_WritePin(FPGA_CS_GPIO_Port,FPGA_CS_Pin,GPIO_PIN_SET);HAL_Delay(1);
+                osDelay(1);HAL_GPIO_WritePin(FPGA_CS_GPIO_Port,FPGA_CS_Pin,GPIO_PIN_SET);osDelay(1);
                 if(!ok) break;
                 for(unsigned i=0;i<length;i++) {
                     result->checked++;

@@ -69,6 +69,8 @@ void LCD_StreamBench_Run(void);
 extern volatile uint32_t g_lcd_bench_state,g_lcd_bench_b7_ms,g_lcd_bench_bd_ms;
 extern volatile LcdProfile g_lcd_bench_b7,g_lcd_bench_bd;
 extern volatile uint32_t g_lcd_fast_status_counts[5],g_lcd_fast_status_reads;
+// Rows assembled after DMA Begin and before waiting for its ISR notification.
+extern volatile uint32_t g_lcd_stream_overlap_rows;
 // RGB565 colors. Blocking, single-caller APIs: 1 on success, 0 on error.
 // FillRect rejects empty/out-of-screen rectangles without sending pixels.
 // A transport failure may leave a partially updated region, as with WriteRect.

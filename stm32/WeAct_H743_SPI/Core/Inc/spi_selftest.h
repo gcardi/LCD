@@ -9,11 +9,19 @@ typedef struct {
     uint32_t ready_ms, ready_attempts;
 } SpiTestResult;
 extern volatile SpiTestResult g_spi_test;
+extern volatile uint32_t g_spi_dma_notifications;
+extern volatile uint32_t g_spi_dma_waits;
+extern volatile uint32_t g_spi_dma_timeouts;
 int SPI_Exchange_DMA(const uint8_t *send, uint8_t *receive, uint16_t length);
 // TX-only uses the same private DMA buffer and completion machinery. It is
 // intentionally separate from Exchange: no RX DMA is armed and MISO is not
 // sampled by the peripheral.
 int SPI_Transmit_DMA(const uint8_t *send, uint16_t length);
+// Split TX-only operation used by the row-stream pipeline. Begin copies the
+// caller buffer into private DMA SRAM and returns with DMA active. Wait blocks
+// DisplayTask on its direct FreeRTOS notification, never by polling flags.
+int SPI_Transmit_DMA_Begin(const uint8_t *send, uint16_t length);
+int SPI_Transmit_DMA_Wait(uint32_t timeout_ms);
 // Change MBR only while SPI2 is idle and disabled. The caller owns CS and must
 // keep it high while switching rates.
 int SPI_SetBaudRatePrescaler(uint32_t prescaler);

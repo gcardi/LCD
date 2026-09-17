@@ -7,6 +7,9 @@ param(
 $ErrorActionPreference='Stop'
 # Default follows the enabled demo; -RequireScroll also rejects a disabled one.
 $config=Get-Content (Join-Path $PSScriptRoot 'Core/Inc/spi_diag_config.h') -Raw
+$roundMatch=[regex]::Match($config,'(?m)^#define SPI_SELFTEST_ROUNDS (\d+)\s*$')
+if(-not $roundMatch.Success){throw 'SPI_SELFTEST_ROUNDS mancante'}
+$expectedRounds=[int]$roundMatch.Groups[1].Value
 $RequireScroll=$RequireScroll -or ($config -match '(?m)^#define LCD_SCROLL_DEMO 1\s*$')
 if($RequireScroll){
  if($config -notmatch '#define LCD_SCROLL_DEMO 1' -or $config -notmatch '#define LCD_FPGA_TEXT_DEMO 1'){
@@ -75,8 +78,8 @@ do {
 }while($timer.Elapsed.TotalSeconds -lt 25)
 $expectedPresents=if($RequireScroll){50}else{17}
 $result.pass=($result.g_spi_test[0] -eq 0x53504954 -and $result.g_spi_test[1] -eq 1 -and
- $result.g_spi_test[2] -eq 2 -and $result.g_spi_test[3] -eq 5 -and
- $result.g_spi_test[4] -eq 4374 -and $result.g_spi_test[5] -eq 0 -and
+ $result.g_spi_test[2] -eq 2 -and $result.g_spi_test[3] -eq ($expectedRounds*5) -and
+ $result.g_spi_test[4] -eq ($expectedRounds*4374) -and $result.g_spi_test[5] -eq 0 -and
  $result.g_spi_test[9] -eq 0 -and $result.g_spi_test[11] -eq 9375000 -and
  $result.g_lcd_fpga_text_demo_state -eq 2 -and $result.g_lcd_error[0] -eq 0 -and
  $result.g_lcd_present_count -eq $expectedPresents -and $result.g_fpga_irq_count -eq $expectedPresents -and
