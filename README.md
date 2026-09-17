@@ -159,6 +159,7 @@ Misure del raster, risultati e limiti della verifica sono in
 | [LVGL_IMPL.md](docs/LVGL_IMPL.md) | studio speculativo su un controller grafico per LVGL; non descrive codice esistente |
 | [BLITTER.md](docs/BLITTER.md) | COPY, SCROLL con riempimento, protocollo BC e demo terminale |
 | [DOUBLE_BUFFER.md](docs/DOUBLE_BUFFER.md) | double buffering, PRESENT, IRQ, protocollo BA/BB e collaudo |
+| [FREERTOS.md](docs/FREERTOS.md) | architettura delle task, proprietà SPI/FPGA, coda display, memoria DMA e misura degli stack |
 | [RIPRESA.md](docs/RIPRESA.md) | punto di ripresa del lavoro: stato corrente, verifiche superate, punti ancora aperti |
 | [README STM32](stm32/WeAct_H743_SPI/README.md) | cablaggio, firmware, comando unico di build, upload e collaudo |
 

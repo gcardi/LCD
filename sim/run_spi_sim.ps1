@@ -7,6 +7,8 @@ $root = Split-Path -Parent $PSScriptRoot
 . (Join-Path $root 'tools\Invoke-LoggedProcess.ps1')
 $build = Join-Path $PSScriptRoot 'build'
 New-Item -ItemType Directory -Force $build | Out-Null
+Push-Location $root
+try {
 foreach ($top in @('tb_spi_slave', 'tb_spi_diagnostic', 'tb_spi_directions', 'tb_spi_framebuffer', 'tb_font_store', 'tb_text_renderer', 'tb_line_renderer', 'tb_blit_renderer', 'tb_framebuffer_fifo')) {
 $vvp = Join-Path $build ($top + '.vvp')
 $compileLog = Join-Path $build ($top + '_compile.log')
@@ -42,4 +44,7 @@ try {
     $env:YOSYSHQ_ROOT = $savedRoot
 }
 
+}
+} finally {
+    Pop-Location
 }

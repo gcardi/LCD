@@ -1,5 +1,37 @@
 # Punto di ripresa - 17 settembre 2026
 
+## Stato corrente: flush DMA asincrono qualificato sul banco
+
+FreeRTOS 10.6.2/CMSIS-RTOS v2 è ora abilitato nel firmware e nel `.ioc`, con
+timebase HAL su TIM6. La `defaultTask` resta praticamente vuota; `DisplayTask`
+è l'unica proprietaria di SPI2/FPGA e riceve richieste tramite `displayQueue`.
+La sequenza di boot, reset, autotest e demo è stata spostata dalla parte di
+`main()` che non sarebbe più raggiunta dopo `osKernelStart()` alla task display.
+Le attese esplicite usano `osDelay`. Le callback SPI/DMA svegliano ora
+`DisplayTask` con una notifica diretta FreeRTOS: non resta alcun ciclo di
+polling sui flag di completamento.
+
+Build Release PASS: 39.840 byte flash, 59.440 byte DTCM (heap FreeRTOS da
+32 KiB compreso), 8.256 byte RAM D2. Qualifica hardware superata sul prototipo
+STM32 `35FF6C064D53373238602143`: 1200 trasferimenti e 1.049.760 byte senza
+mismatch o errori HAL/LCD; stress grafico da 512 rettangoli e 354.528 pixel;
+50 PRESENT con 50 IRQ, COPY 14 ms, SCROLL 8 ms e PRESENT 18 ms. Tre reset
+aggiuntivi hanno ripetuto 50/50. Stack minimo libero nell'ultima prova:
+`DisplayTask` 3420 byte, `defaultTask` 364 byte; `g_freertos_failure = 0`.
+
+Durante la prova `LCD_Present()` poteva osservare il livello IRQ basso e
+confermare l'evento prima dell'esecuzione della callback EXTI. Ora aspetta anche
+l'avanzamento del contatore del fronte prima dell'ACK.
+
+Lo stream `BE/BF` usa `SPI_Transmit_DMA_Begin/Wait` e due pacchetti: mentre il
+DMA trasmette la riga corrente, la task prepara la successiva. Nell'ultima
+prova: 42.462 completamenti notificati su 42.462 attese, zero timeout e 238
+righe sovrapposte. Schermo intero: **172-174 ms**, contro 225 ms dello stream
+sincrono e 528 ms di
+`B7`. Il runner aspetta ora stati terminali reali, perché con il benchmark
+inserito prima delle demo lo zero iniziale significa soltanto “non avviata”.
+Dettagli e invarianti DMA: [FREERTOS.md](FREERTOS.md).
+
 ## Stato corrente: reset della FPGA comandato dalla MCU, con prova
 
 Nuovo filo **STM32 PB1 → Tang Nano IO29**, open drain, pull-up esterna da 10 kΩ

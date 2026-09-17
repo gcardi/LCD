@@ -228,11 +228,27 @@ la latenza flash su una catena di load dipendenti, e **non è cambiato nulla**
 (226 ms contro 225), quindi è tornata `const`. Buffer e tabella stanno comunque
 tutti in DTCM.
 
-Il prossimo guadagno non sta qui. Con il **flush asincrono** — DMA non
-bloccante e callback di fine trasferimento — l'assemblaggio della riga
-successiva si sovrappone al DMA della precedente, e quei 38,8 ms spariscono del
-tutto invece di essere limati. Su 272 transazioni da 978 byte rende molto più
-di quanto avrebbe reso sulle 8160 da 41.
+## Flush asincrono FreeRTOS, 17 settembre 2026
+
+Il flush asincrono è ora implementato. La callback HAL usa
+`vTaskNotifyGiveFromISR()`; `DisplayTask` attende con `ulTaskNotifyTake()`.
+`SPI_Transmit_DMA_Begin()` copia e avvia, mentre `SPI_Transmit_DMA_Wait()`
+chiude il trasferimento. Due pacchetti di riga permettono di assemblare il
+successivo mentre la copia DMA del corrente è già sul filo.
+
+Il benchmark lavora in strip da otto righe per esercitare la pipeline senza
+allocare un frame intero sulla MCU. Qualifica Release dopo un reset completo:
+
+| Percorso | Pacchetti | Tempo frame | Note |
+|---|---:|---:|---|
+| `B7` | 8160 | **528 ms** | riferimento full duplex |
+| `BE/BF` asincrono | 272 | **172-174 ms** | 2-5 retry recuperati |
+
+Sono state preparate 238 righe fra `Begin` e `Wait`. L'intero boot ha prodotto
+42.462 notifiche per altrettante attese e zero timeout nell'ultima prova.
+Rispetto ai 225 ms del
+precedente `BE/BF` sincrono il guadagno è 53 ms, circa il 24%; rispetto a `B7`
+il frame è 3,07 volte più rapido.
 
 ## Verifica
 
