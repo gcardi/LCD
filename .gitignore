@@ -77,3 +77,8 @@
 .DS_Store
 Thumbs.db
 *~
+
+# STM32CubeMX
+.cubemx/
+.cubemx_preview/
+mx.scratch/
