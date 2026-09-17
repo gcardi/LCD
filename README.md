@@ -17,6 +17,16 @@ e degli accessi a burst nel frame buffer.
 
 ![Pattern diagonale di test visualizzato sul pannello LCD](docs/assets/images/TestPattern1.jpg)
 
+### Demo terminale FPGA
+
+![Demo terminale con rendering eseguito nella FPGA](docs/assets/images/FPGATermTestLo.gif)
+
+Questa demo usa i comandi grafici implementati direttamente in hardware nella
+FPGA e i font residenti nella User Flash, senza rasterizzare il testo sul
+microcontrollore. Il collegamento SPI opera in mode 0: il flusso pixel
+write-only `BE` raggiunge 18,75 MHz, i comandi ordinari usano 9,375 MHz e la
+lettura dello stato tramite `BF` usa 1,171875 MHz.
+
 ## Struttura
 
 - `src/TOP.sv`: integrazione di clock, PSRAM, frame buffer, FIFO e display;
@@ -193,9 +203,9 @@ EDA e restano soggetti ai termini di Gowin, non a quelli di questo progetto.
 Il TOP include uno slave SPI mode 0 con scrittura framebuffer e una
 modalita' diagnostica selezionabile. Cablaggio, firmware DMA e comando unico di build/upload/test
 sono nel [README STM32](stm32/WeAct_H743_SPI/README.md).
-Il [collaudo prolungato](docs/SPI_STRESS.md) passa a 12.5 MHz MEDIUM; a 25 MHz
-restano errori grafici intermittenti. Per la diagnosi
-precedente e le prove lunghe a 12.5 MHz vedere
-[SPI_DIAGNOSTIC_RESULTS.md](docs/SPI_DIAGNOSTIC_RESULTS.md). La nuova demo
-grafica e i suoi limiti di verifica sono descritti in
-[SPI_FRAMEBUFFER.md](docs/SPI_FRAMEBUFFER.md).
+Il [collaudo prolungato](docs/SPI_STRESS.md) qualifica il flusso pixel
+write-only a 18,75 MHz con GPIO `MEDIUM`; a 25 MHz restano errori grafici
+intermittenti. Per la diagnosi precedente e i dettagli della qualifica vedere
+[SPI_DIAGNOSTIC_RESULTS.md](docs/SPI_DIAGNOSTIC_RESULTS.md) e
+[SPI_PERFORMANCE.md](docs/SPI_PERFORMANCE.md). La demo grafica e i suoi limiti
+di verifica sono descritti in [SPI_FRAMEBUFFER.md](docs/SPI_FRAMEBUFFER.md).
