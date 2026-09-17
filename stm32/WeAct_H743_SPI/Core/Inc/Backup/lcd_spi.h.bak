@@ -2,8 +2,73 @@
 #define LCD_SPI_H
 #include <stdint.h>
 extern volatile uint32_t g_lcd_demo_state;
+extern volatile uint32_t g_lcd_error[6];
+typedef struct {
+    // reset_seen exists from protocol version 3 and reads 0 before it.
+    uint8_t enabled, front, draw, irq, busy, result, version, reset_seen;
+    uint16_t sequence;
+} LcdBufferStatus;
+
+// Controlled FPGA reset through FPGA_RST_N (PB1 -> IO29), with proof.
+// The FPGA sets reset_seen on every reset and clears it only on ACK_RESET. The
+// cycle clears it, pulses the line, and requires it set again afterwards, so a
+// missing wire or an ineffective pulse is detected instead of assumed away.
+// Returns 1 when the FPGA may be used, 0 when it must not.
+int FPGA_ResetCycle(void);
+// Without a reset line: no pulse and no proof, but a real wait for readiness.
+int FPGA_WaitReady(void);
+// What main() calls after SPI_Setup(): one of the two, per FPGA_RESET_LINE.
+int FPGA_Start(void);
+//   g_fpga_reset_state: 0 not run, 1 running, 3 failed,
+//     with the reset line:    2 reset proven, 4 pulsed but not provable;
+//     without the reset line: 5 ready, FPGA had just restarted (power-up, key),
+//                             6 ready, FPGA was already running with its state.
+//   g_fpga_ready_tick: HAL tick, i.e. ms since MCU start, when the FPGA became
+//     usable. On a common power-up this is how long the MCU really had to wait.
+extern volatile uint32_t g_fpga_reset_state, g_fpga_reset_attempts, g_fpga_reset_ready_ms;
+extern volatile uint32_t g_fpga_ready_tick;
+// Single-caller APIs. Enable waits for previous drawing and selects the back
+// buffer. Its contents are undefined until explicitly cleared/redrawn.
+int LCD_GetBufferStatus(LcdBufferStatus *status);
+int LCD_EnableDoubleBuffer(void);
+// Wait for prior drawing, swap at vertical blanking, observe IRQ, then ACK it.
+// On timeout/transport error do not retry blindly: inspect status first.
+int LCD_Present(uint32_t timeout_ms);
+extern volatile uint32_t g_lcd_present_count, g_lcd_present_ms;
+extern volatile uint32_t g_lcd_front_buffer, g_lcd_present_sequence;
+extern volatile uint32_t g_fpga_irq_count, g_fpga_irq_pending, g_fpga_irq_level;
+// Explicit, disjoint buffers; source must be front and destination back.
+// Reject empty/out-of-screen rectangles. Wait for all PSRAM writes before return.
+int LCD_CopyRect(uint8_t source,uint8_t destination,uint16_t x,uint16_t y,
+                 uint16_t width,uint16_t height,uint16_t dest_x,uint16_t dest_y);
+// Positive dx/dy moves right/down. Fill exposed pixels inside the viewport;
+// leave everything outside it unchanged. PRESENT remains a separate operation.
+int LCD_ScrollRect(uint8_t source,uint8_t destination,uint16_t x,uint16_t y,
+                   uint16_t width,uint16_t height,int16_t dx,int16_t dy,uint16_t fill);
+extern volatile uint32_t g_lcd_copy_count,g_lcd_scroll_count,g_lcd_copy_ms,g_lcd_scroll_ms;
+extern volatile uint32_t g_lcd_scroll_demo_state;
+void LCD_ScrollDemo_Run(void);
 int LCD_WriteRect(uint16_t x, uint16_t y, uint16_t w, uint16_t h,
                   const uint16_t *pixels);
+// Where LCD_WriteRect spends its time. Cycle fields are DWT counts at
+// SystemCoreClock and accumulate freely; packets and retries are counts.
+// A non-zero retries means the FPGA queue was still busy on arrival.
+typedef struct {
+    uint32_t assemble, exchange, fence, packets, retries;
+} LcdProfile;
+extern volatile LcdProfile g_lcd_profile;
+void LCD_ProfileReset(void);
+// One TX-only BE transaction per row plus a slow BF result read. The payload
+// CRC is checked by the FPGA after the stream; MISO is not sampled while pixel
+// bytes are in flight. Same arguments and return value as LCD_WriteRect.
+int LCD_WriteRectStream(uint16_t x, uint16_t y, uint16_t w, uint16_t h,
+                        const uint16_t *pixels);
+// Full screen down both paths, for comparison. Read the two millisecond
+// figures and the two profiles over SWD.
+void LCD_StreamBench_Run(void);
+extern volatile uint32_t g_lcd_bench_state,g_lcd_bench_b7_ms,g_lcd_bench_bd_ms;
+extern volatile LcdProfile g_lcd_bench_b7,g_lcd_bench_bd;
+extern volatile uint32_t g_lcd_fast_status_counts[5],g_lcd_fast_status_reads;
 // RGB565 colors. Blocking, single-caller APIs: 1 on success, 0 on error.
 // FillRect rejects empty/out-of-screen rectangles without sending pixels.
 // A transport failure may leave a partially updated region, as with WriteRect.

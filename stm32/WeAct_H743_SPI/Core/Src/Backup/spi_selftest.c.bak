@@ -11,6 +11,16 @@ static void diagnostic_matrix(void);
 // Separate, cache-line aligned buffers in DMA-accessible SRAM, not DTCM.
 static uint8_t tx[4128] __attribute__((section(".spi_dma"), aligned(32)));
 static uint8_t rx[4128] __attribute__((section(".spi_dma"), aligned(32)));
+// Every opcode the graphics endpoint claims, not just the two that existed
+// when this guard was first written. A leading B7..BD byte takes a command
+// path instead of the plain echo, so the reply is not the previous byte and
+// the comparison below would flag it as a transport error. The pattern makes
+// tx[0] = (round*53) & 0xFF, so BA, BB, BC and BD land on rounds 18, 47, 76
+// and 105: invisible until a run long enough to reach them.
+static uint8_t echo_safe(uint8_t first)
+{
+    return (first>=0xB7 && first<=0xBF) ? (uint8_t)(first^0x80) : first;
+}
 volatile SpiTestResult g_spi_test;
 static volatile uint32_t completed, failed;
 // Slow GPIO probe, independent of SPI/DMA. Each row uses no pull, pull-up,
@@ -69,6 +79,10 @@ void HAL_SPI_TxRxCpltCallback(SPI_HandleTypeDef *hspi)
 {
     if(hspi == &hspi2) completed = 1;
 }
+void HAL_SPI_TxCpltCallback(SPI_HandleTypeDef *hspi)
+{
+    if(hspi == &hspi2) completed = 1;
+}
 void HAL_SPI_ErrorCallback(SPI_HandleTypeDef *hspi)
 {
     if(hspi == &hspi2) failed = 1;
@@ -92,6 +106,31 @@ int SPI_Exchange_DMA(const uint8_t *send,uint8_t *receive,uint16_t length)
     if(status!=HAL_OK || !completed || failed) {HAL_SPI_Abort(&hspi2);return 0;}
     if(SCB->CCR & SCB_CCR_DC_Msk) SCB_InvalidateDCache_by_Addr((uint32_t*)rx,cache_length);
     __DSB();memcpy(receive,rx,length);return 1;
+}
+
+int SPI_Transmit_DMA(const uint8_t *send,uint16_t length)
+{
+    if(!length || length>sizeof(tx)) return 0;
+    memcpy(tx,send,length);
+    uint32_t cache_length=(length+31u)&~31u;
+    if(SCB->CCR & SCB_CCR_DC_Msk)
+        SCB_CleanDCache_by_Addr((uint32_t*)tx,cache_length);
+    __DSB();completed=0;failed=0;
+    uint32_t start=HAL_GetTick();
+    HAL_StatusTypeDef status=HAL_SPI_Transmit_DMA(&hspi2,tx,length);
+    while(status==HAL_OK && !completed && !failed && HAL_GetTick()-start<1000) {}
+    if(status!=HAL_OK || !completed || failed) {HAL_SPI_Abort(&hspi2);return 0;}
+    return 1;
+}
+
+int SPI_SetBaudRatePrescaler(uint32_t prescaler)
+{
+    if(hspi2.State!=HAL_SPI_STATE_READY ||
+       !IS_SPI_BAUDRATE_PRESCALER(prescaler)) return 0;
+    __HAL_SPI_DISABLE(&hspi2);
+    MODIFY_REG(hspi2.Instance->CFG1,SPI_CFG1_MBR,prescaler);
+    hspi2.Init.BaudRatePrescaler=prescaler;
+    return 1;
 }
 
 // Readiness handshake over the existing link, in place of a blind delay.
@@ -158,8 +197,7 @@ void SPI_SelfTest_Run(void)
         for(uint32_t t=0;t<sizeof(lengths)/sizeof(lengths[0]);t++) {
             uint16_t length=lengths[t];
             for(uint32_t i=0;i<sizeof(tx);i++) tx[i]=(uint8_t)((i*37+round*53)^(i>>3));
-            // B7 and B8 are application opcodes, never send them as echo opcodes.
-            if(tx[0]==0xB7 || tx[0]==0xB8) tx[0]^=0x80;
+            tx[0]=echo_safe(tx[0]);
             memset(rx,0,sizeof(rx));
             if(SCB->CCR & SCB_CCR_DC_Msk) {
                 SCB_CleanDCache_by_Addr((uint32_t*)tx,sizeof(tx));
@@ -268,7 +306,7 @@ static void diagnostic_matrix(void) {
     for(unsigned repeat=0;repeat<3;repeat++) for(unsigned rate=0;rate<2;rate++) for(unsigned speed=0;speed<3;speed++) {
         volatile DiagCase *result=&g_spi_diag.cases[g_spi_diag.count];
         uint32_t prescaler=rate?SPI_BAUDRATEPRESCALER_16:SPI_BAUDRATEPRESCALER_32;
-        result->hz=rate?12500000:6250000;result->speed=speeds[speed];result->repeat=repeat;
+        result->hz=rate?9375000:4687500;result->speed=speeds[speed];result->repeat=repeat;
         uint32_t start=HAL_GetTick();
         for(unsigned round=0;round<SPI_DIAG_ROUNDS && !result->hal_error;round++) {
             unsigned tests=SPI_DIAG_MODE==2?1:5;
@@ -278,6 +316,7 @@ static void diagnostic_matrix(void) {
                 uint8_t sequence=0xA5;
                 for(unsigned i=0;i<sizeof(tx);i++) {
                     tx[i]=(uint8_t)((i*37+round*53)^(i>>3));
+                    if(i==0) tx[0]=echo_safe(tx[0]);
                     expected_rx[i]=SPI_DIAG_MODE==1?sequence:(i==0?0xA5:tx[i-1]);
                     sequence=lfsr_next(sequence);
                     if(i<length) crc=crc_byte(crc,tx[i]);

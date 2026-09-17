@@ -57,8 +57,6 @@ volatile uint32_t g_fpga_irq_pending; // 1 = evento non ancora consumato
 volatile uint32_t g_fpga_irq_level;   // livello letto a regime: 1 atteso
 /* USER CODE END PV */
 
-/* USER CODE END PV */
-
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 static void MPU_Config(void);
@@ -77,8 +75,6 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
         g_fpga_irq_pending=1;
     }
 }
-/* USER CODE END 0 */
-
 /* USER CODE END 0 */
 
 /**

@@ -2,7 +2,13 @@
 #include "spi_selftest.h"
 #include "lcd_spi.h"
 #include "main.h"
+#include "spi_diag_config.h"
 #include <stdint.h>
+#include <stdio.h>
+#include <string.h>
+#define LCD_PIXEL_STREAM_PRESCALER SPI_BAUDRATEPRESCALER_8
+#define LCD_NORMAL_PRESCALER       SPI_BAUDRATEPRESCALER_16
+#define LCD_STATUS_PRESCALER       SPI_BAUDRATEPRESCALER_128
 // State: 0 diagnostic endpoint, 1 running, 2 submitted, 3 failure.
 volatile uint32_t g_lcd_demo_state;
 volatile uint32_t g_lcd_fpga_text_demo_state;
@@ -17,12 +23,25 @@ static int bad(uint32_t phase,uint32_t index,uint32_t expected,uint32_t actual)
     }
     return 0;
 }
-static void spi_guard(void)
+static void dwt_enable(void)
 {
     CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA_Msk;
     DWT->CTRL |= DWT_CTRL_CYCCNTENA_Msk;
+}
+static void spi_guard(void)
+{
+    dwt_enable();
     uint32_t start=DWT->CYCCNT;
     while((uint32_t)(DWT->CYCCNT-start)<SystemCoreClock/1000000u) {}
+}
+// Where the pixel path spends its time, in DWT cycles at SystemCoreClock.
+// Free-running accumulators: read them around a known workload, or call
+// LCD_ProfileReset() first. Counts are packets and busy retries, not cycles.
+volatile LcdProfile g_lcd_profile;
+void LCD_ProfileReset(void)
+{
+    dwt_enable();
+    g_lcd_profile=(LcdProfile){0};
 }
 static int exchange(uint8_t *tx, uint8_t *rx, uint16_t n)
 {
@@ -33,6 +52,17 @@ static int exchange(uint8_t *tx, uint8_t *rx, uint16_t n)
     spi_guard(); // Hold CS after EOT, with SCK settled low.
     HAL_GPIO_WritePin(FPGA_CS_GPIO_Port, FPGA_CS_Pin, GPIO_PIN_SET);
     if(status!=HAL_OK) { bad(1,0,HAL_OK,status);HAL_SPI_Abort(&hspi2); return 0; }
+    return 1;
+}
+static int transmit_only(uint8_t *tx,uint16_t n)
+{
+    spi_guard();
+    HAL_GPIO_WritePin(FPGA_CS_GPIO_Port,FPGA_CS_Pin,GPIO_PIN_RESET);
+    spi_guard();
+    int ok=SPI_Transmit_DMA(tx,n);
+    spi_guard();
+    HAL_GPIO_WritePin(FPGA_CS_GPIO_Port,FPGA_CS_Pin,GPIO_PIN_SET);
+    if(!ok) {bad(50,0,HAL_OK,HAL_ERROR);HAL_SPI_Abort(&hspi2);return 0;}
     return 1;
 }
 static int ready(void)
@@ -49,12 +79,359 @@ static int ready(void)
     return bad(4,1,0xC3,rx[1]);
 }
 
+// CRC16-CCITT, polynomial 1021, one table lookup per byte. The bit-at-a-time
+// form this replaces cost ~334 cycles per byte, and BD streams 960 payload
+// bytes per row: measured on the bench, it spent 183 ms per full screen in the
+// CRC alone and gave back the whole 150 ms the new transport had saved.
+// Each entry is one byte pushed through the shift register from crc = i << 8.
+// Moving it to RAM was tried and measured: no change at all, 226 ms against
+// 225. The remaining assembly cost is not flash latency on the table.
+static const uint16_t crc16_table[256] = {
+    0x0000, 0x1021, 0x2042, 0x3063, 0x4084, 0x50A5, 0x60C6, 0x70E7,
+    0x8108, 0x9129, 0xA14A, 0xB16B, 0xC18C, 0xD1AD, 0xE1CE, 0xF1EF,
+    0x1231, 0x0210, 0x3273, 0x2252, 0x52B5, 0x4294, 0x72F7, 0x62D6,
+    0x9339, 0x8318, 0xB37B, 0xA35A, 0xD3BD, 0xC39C, 0xF3FF, 0xE3DE,
+    0x2462, 0x3443, 0x0420, 0x1401, 0x64E6, 0x74C7, 0x44A4, 0x5485,
+    0xA56A, 0xB54B, 0x8528, 0x9509, 0xE5EE, 0xF5CF, 0xC5AC, 0xD58D,
+    0x3653, 0x2672, 0x1611, 0x0630, 0x76D7, 0x66F6, 0x5695, 0x46B4,
+    0xB75B, 0xA77A, 0x9719, 0x8738, 0xF7DF, 0xE7FE, 0xD79D, 0xC7BC,
+    0x48C4, 0x58E5, 0x6886, 0x78A7, 0x0840, 0x1861, 0x2802, 0x3823,
+    0xC9CC, 0xD9ED, 0xE98E, 0xF9AF, 0x8948, 0x9969, 0xA90A, 0xB92B,
+    0x5AF5, 0x4AD4, 0x7AB7, 0x6A96, 0x1A71, 0x0A50, 0x3A33, 0x2A12,
+    0xDBFD, 0xCBDC, 0xFBBF, 0xEB9E, 0x9B79, 0x8B58, 0xBB3B, 0xAB1A,
+    0x6CA6, 0x7C87, 0x4CE4, 0x5CC5, 0x2C22, 0x3C03, 0x0C60, 0x1C41,
+    0xEDAE, 0xFD8F, 0xCDEC, 0xDDCD, 0xAD2A, 0xBD0B, 0x8D68, 0x9D49,
+    0x7E97, 0x6EB6, 0x5ED5, 0x4EF4, 0x3E13, 0x2E32, 0x1E51, 0x0E70,
+    0xFF9F, 0xEFBE, 0xDFDD, 0xCFFC, 0xBF1B, 0xAF3A, 0x9F59, 0x8F78,
+    0x9188, 0x81A9, 0xB1CA, 0xA1EB, 0xD10C, 0xC12D, 0xF14E, 0xE16F,
+    0x1080, 0x00A1, 0x30C2, 0x20E3, 0x5004, 0x4025, 0x7046, 0x6067,
+    0x83B9, 0x9398, 0xA3FB, 0xB3DA, 0xC33D, 0xD31C, 0xE37F, 0xF35E,
+    0x02B1, 0x1290, 0x22F3, 0x32D2, 0x4235, 0x5214, 0x6277, 0x7256,
+    0xB5EA, 0xA5CB, 0x95A8, 0x8589, 0xF56E, 0xE54F, 0xD52C, 0xC50D,
+    0x34E2, 0x24C3, 0x14A0, 0x0481, 0x7466, 0x6447, 0x5424, 0x4405,
+    0xA7DB, 0xB7FA, 0x8799, 0x97B8, 0xE75F, 0xF77E, 0xC71D, 0xD73C,
+    0x26D3, 0x36F2, 0x0691, 0x16B0, 0x6657, 0x7676, 0x4615, 0x5634,
+    0xD94C, 0xC96D, 0xF90E, 0xE92F, 0x99C8, 0x89E9, 0xB98A, 0xA9AB,
+    0x5844, 0x4865, 0x7806, 0x6827, 0x18C0, 0x08E1, 0x3882, 0x28A3,
+    0xCB7D, 0xDB5C, 0xEB3F, 0xFB1E, 0x8BF9, 0x9BD8, 0xABBB, 0xBB9A,
+    0x4A75, 0x5A54, 0x6A37, 0x7A16, 0x0AF1, 0x1AD0, 0x2AB3, 0x3A92,
+    0xFD2E, 0xED0F, 0xDD6C, 0xCD4D, 0xBDAA, 0xAD8B, 0x9DE8, 0x8DC9,
+    0x7C26, 0x6C07, 0x5C64, 0x4C45, 0x3CA2, 0x2C83, 0x1CE0, 0x0CC1,
+    0xEF1F, 0xFF3E, 0xCF5D, 0xDF7C, 0xAF9B, 0xBFBA, 0x8FD9, 0x9FF8,
+    0x6E17, 0x7E36, 0x4E55, 0x5E74, 0x2E93, 0x3EB2, 0x0ED1, 0x1EF0,
+};
 static uint16_t crc16_byte(uint16_t crc,uint8_t value)
 {
-    crc^=(uint16_t)value<<8;
-    for(unsigned bit=0;bit<8;bit++)
-        crc=(uint16_t)((crc<<1)^((crc&0x8000u)?0x1021u:0u));
-    return crc;
+    return (uint16_t)((crc<<8)^crc16_table[(uint8_t)((crc>>8)^value)]);
+}
+
+volatile uint32_t g_lcd_present_count, g_lcd_present_ms;
+volatile uint32_t g_lcd_front_buffer, g_lcd_present_sequence;
+
+int LCD_GetBufferStatus(LcdBufferStatus *status)
+{
+    uint8_t tx[11]={0xBB},rx[11];
+    if(!status || !exchange(tx,rx,sizeof(tx))) return 0;
+    if(rx[0]!=0xA5 || rx[1]!=0xD2 || rx[2]<1 || rx[2]>3 || rx[3]!=2)
+        return bad(23,1,0xD2,rx[1]);
+    uint16_t crc=0xFFFF;
+    for(unsigned i=1;i<=8;i++) crc=crc16_byte(crc,rx[i]);
+    uint16_t received=(uint16_t)((uint16_t)rx[9]<<8)|rx[10];
+    if(crc!=received) return bad(24,9,crc,received);
+    // Bit 4 (reset_seen) is defined from version 3; before that it is reserved.
+    uint8_t reserved=rx[2]>=3?0xE0:0xF0;
+    if((rx[4]&reserved) || rx[5]>1) return bad(25,4,0,rx[4]);
+    *status=(LcdBufferStatus){.enabled=rx[4]&1,.front=(rx[4]>>1)&1,
+        .draw=rx[5],.irq=(rx[4]>>2)&1,.busy=(rx[4]>>3)&1,
+        .result=rx[8],.version=rx[2],.reset_seen=(rx[4]>>4)&1,
+        .sequence=(uint16_t)((uint16_t)rx[6]<<8)|rx[7]};
+    return 1;
+}
+
+static int buffer_idle(LcdBufferStatus *status,uint32_t timeout_ms)
+{
+    uint32_t start=HAL_GetTick();
+    do {
+        if(!LCD_GetBufferStatus(status)) return 0;
+        if(!status->busy) return 1;
+        HAL_Delay(1);
+    } while(HAL_GetTick()-start<timeout_ms);
+    return bad(26,0,0,1);
+}
+
+// AC acknowledges acceptance only. The BB mailbox reports completion.
+static int buffer_command(uint8_t op,uint8_t buffer,uint16_t sequence)
+{
+    uint8_t tx[10]={0xBA,0,op,buffer,(uint8_t)(sequence>>8),(uint8_t)sequence},rx[10];
+    uint16_t crc=0xFFFF;
+    for(unsigned i=2;i<=5;i++) crc=crc16_byte(crc,tx[i]);
+    tx[6]=(uint8_t)(crc>>8);tx[7]=(uint8_t)crc;tx[8]=0xA6;
+    if(!exchange(tx,rx,sizeof(tx))) return 0;
+    if(rx[0]!=0xA5 || rx[1]!=0xC3) return bad(27,1,0xC3,rx[1]);
+    for(unsigned i=2;i<=8;i++)
+        if(rx[i]!=tx[i-1]) return bad(28,i,tx[i-1],rx[i]);
+    if(rx[9]!=0xAC) return bad(29,9,0xAC,rx[9]);
+    return 1;
+}
+
+static int acknowledge_present(uint16_t sequence)
+{
+    LcdBufferStatus status;
+    if(!buffer_command(3,0,sequence) || !buffer_idle(&status,1000)) return 0;
+    if(status.result || status.irq) return bad(30,0,0,status.result?status.result:status.irq);
+    // No other caller can issue PRESENT between this ACK and flag clearing.
+    g_fpga_irq_pending=0;
+    g_fpga_irq_level=HAL_GPIO_ReadPin(FPGA_IRQ_N_GPIO_Port,FPGA_IRQ_N_Pin)==GPIO_PIN_SET;
+    if(!g_fpga_irq_level) return bad(31,0,1,0);
+    return 1;
+}
+
+// ---- Controlled FPGA reset -------------------------------------------------
+volatile uint32_t g_fpga_reset_state, g_fpga_reset_attempts, g_fpga_reset_ready_ms;
+volatile uint32_t g_fpga_ready_tick;
+
+#define FPGA_RESET_PULSE_MS  10u   // the RTL filter ignores anything under 1 ms
+#define FPGA_RESET_READY_MS  3000u // PSRAM calibration plus the initial fill
+#define FPGA_RESET_ATTEMPTS  3u
+#define FPGA_ACK_RESET       6u
+
+static void clear_lcd_error(void)
+{
+    for(unsigned i=0;i<6;i++) g_lcd_error[i]=0;
+}
+
+// ACK_RESET is served only after calibration and the initial fill, so waiting
+// for it to complete is also waiting for the memory side to be ready to draw.
+static int acknowledge_reset(LcdBufferStatus *status)
+{
+    if(!buffer_command(FPGA_ACK_RESET,0,0) || !buffer_idle(status,FPGA_RESET_READY_MS))
+        return 0;
+    if(status->result || status->reset_seen)
+        return bad(58,0,0,status->result?status->result:status->reset_seen);
+    return 1;
+}
+
+// One attempt. Returns 2 proven, 4 pulsed but not provable, 0 failed.
+static uint32_t reset_attempt(void)
+{
+    LcdBufferStatus status;
+    clear_lcd_error();
+
+    // Arm the proof: clear reset_seen, so that finding it set again can only
+    // mean this pulse. Impossible if the FPGA is silent or predates version 3;
+    // the pulse still goes out, but the outcome can then only be "not provable".
+    // A silent FPGA fails the very first BB on its signature, without waiting.
+    int armed=buffer_idle(&status,1000) && status.version>=3 && acknowledge_reset(&status);
+    if(!armed) clear_lcd_error(); // expected when the FPGA is hung or older
+
+    // Pulse. SPI deselected, and EXTI masked: while the fabric resets, the IRQ
+    // line must not be able to produce a phantom PRESENT event.
+    HAL_GPIO_WritePin(FPGA_CS_GPIO_Port,FPGA_CS_Pin,GPIO_PIN_SET);
+    HAL_NVIC_DisableIRQ(FPGA_IRQ_N_EXTI_IRQn);
+    HAL_GPIO_WritePin(FPGA_RST_N_GPIO_Port,FPGA_RST_N_Pin,GPIO_PIN_RESET);
+    HAL_Delay(FPGA_RESET_PULSE_MS);
+    HAL_GPIO_WritePin(FPGA_RST_N_GPIO_Port,FPGA_RST_N_Pin,GPIO_PIN_SET);
+    uint32_t released=HAL_GetTick();
+
+    uint32_t outcome=0;
+    if(!SPI_Setup()) {
+        bad(59,0,1,0);                          // no SPI answer after the pulse
+    } else if(!buffer_idle(&status,FPGA_RESET_READY_MS)) {
+        // buffer_idle has recorded the reason
+    } else if(status.version<3) {
+        outcome=4;                              // bitstream without reset proof
+    } else if(!status.reset_seen) {
+        bad(60,0,1,0);                          // pulse did not reset the fabric
+    } else if(acknowledge_reset(&status)) {
+        outcome=armed?2:4;
+        g_fpga_reset_ready_ms=HAL_GetTick()-released;
+    }
+
+    // Nothing from before the reset is a valid event any more.
+    __HAL_GPIO_EXTI_CLEAR_IT(FPGA_IRQ_N_Pin);
+    g_fpga_irq_pending=0;
+    g_fpga_irq_level=HAL_GPIO_ReadPin(FPGA_IRQ_N_GPIO_Port,FPGA_IRQ_N_Pin)==GPIO_PIN_SET;
+    HAL_NVIC_EnableIRQ(FPGA_IRQ_N_EXTI_IRQn);
+    return outcome;
+}
+
+int FPGA_ResetCycle(void)
+{
+    g_fpga_reset_state=1;
+    g_fpga_reset_attempts=0;
+    g_fpga_reset_ready_ms=0;
+    uint32_t outcome=0;
+    while(g_fpga_reset_attempts<FPGA_RESET_ATTEMPTS && !outcome) {
+        g_fpga_reset_attempts++;
+        outcome=reset_attempt();
+    }
+    g_fpga_reset_state=outcome?outcome:3;
+    if(outcome) g_fpga_ready_tick=HAL_GetTick();
+    return outcome!=0;
+}
+
+int FPGA_WaitReady(void)
+{
+    LcdBufferStatus status;
+    g_fpga_reset_state=1;
+    g_fpga_reset_attempts=1;
+    g_fpga_reset_ready_ms=0;
+    clear_lcd_error();
+    uint32_t start=HAL_GetTick();
+    if(!buffer_idle(&status,FPGA_RESET_READY_MS)) {g_fpga_reset_state=3;return 0;}
+    if(status.version<3) {
+        // Older bitstream: no readiness to wait for beyond answering BB.
+        g_fpga_reset_state=4;g_fpga_ready_tick=HAL_GetTick();return 1;
+    }
+    // reset_seen before acknowledging tells a freshly started FPGA from one
+    // that kept running while only the MCU restarted.
+    uint32_t fresh=status.reset_seen;
+    if(!acknowledge_reset(&status)) {g_fpga_reset_state=3;return 0;}
+    g_fpga_reset_ready_ms=HAL_GetTick()-start;
+    g_fpga_ready_tick=HAL_GetTick();
+    g_fpga_reset_state=fresh?5:6;
+    return 1;
+}
+
+int FPGA_Start(void)
+{
+#if FPGA_RESET_LINE
+    return FPGA_ResetCycle();
+#else
+    return FPGA_WaitReady();
+#endif
+}
+
+int LCD_EnableDoubleBuffer(void)
+{
+    LcdBufferStatus status;
+    if(!buffer_idle(&status,1000)) return 0;
+    // Recover a completed presentation after an MCU-only reset.
+    if(status.irq && !acknowledge_present(status.sequence)) return 0;
+    if(!buffer_command(1,0,0) || !buffer_idle(&status,1000)) return 0;
+    if(status.result || !status.enabled || status.draw==status.front)
+        return bad(32,0,1,status.enabled);
+    g_lcd_front_buffer=status.front;g_lcd_present_sequence=status.sequence;
+    return 1;
+}
+
+int LCD_Present(uint32_t timeout_ms)
+{
+    LcdBufferStatus status;
+    if(!timeout_ms || !buffer_idle(&status,timeout_ms)) return 0;
+    if(!status.enabled || status.irq) return bad(33,0,1,status.enabled);
+    uint8_t target=status.draw;
+    uint16_t sequence=(uint16_t)(status.sequence+1u);
+    g_fpga_irq_pending=0;
+    if(!buffer_command(2,target,sequence)) return 0;
+    uint32_t start=HAL_GetTick(),last_poll=start;
+    do {
+        // EXTI is the normal wakeup; the level also covers a missed edge.
+        // Occasional status polls diagnose rejection or a disconnected wire.
+        uint32_t now=HAL_GetTick();
+        uint32_t low=HAL_GPIO_ReadPin(FPGA_IRQ_N_GPIO_Port,FPGA_IRQ_N_Pin)==GPIO_PIN_RESET;
+        if(g_fpga_irq_pending || low || now-last_poll>=5) {
+            last_poll=now;
+            if(!LCD_GetBufferStatus(&status)) return 0;
+            if(!status.busy) {
+                if(status.result || !status.irq || status.sequence!=sequence || status.front!=target)
+                    return bad(34,0,sequence,status.sequence);
+                if(!low) return bad(35,0,0,1);
+                g_lcd_present_ms=HAL_GetTick()-start;
+                g_lcd_front_buffer=status.front;g_lcd_present_sequence=status.sequence;
+                if(!acknowledge_present(sequence)) return 0;
+                g_lcd_present_count++;
+                return 1;
+            }
+        }
+        HAL_Delay(1);
+    } while(HAL_GetTick()-start<timeout_ms);
+    return bad(36,0,sequence,status.sequence);
+}
+
+volatile uint32_t g_lcd_copy_count,g_lcd_scroll_count,g_lcd_copy_ms,g_lcd_scroll_ms;
+volatile uint32_t g_lcd_scroll_demo_state;
+
+static int blit_command(uint8_t operation,uint8_t source,uint8_t destination,
+                        uint16_t x,uint16_t y,uint16_t width,uint16_t height,
+                        uint16_t arg_x,uint16_t arg_y,uint16_t fill)
+{
+    LcdBufferStatus status;
+    if(!buffer_idle(&status,1000))return 0;
+    if(status.version<2)return bad(38,2,2,status.version);
+    if(!status.enabled || source!=status.front || destination!=status.draw)
+        return bad(39,4,status.draw,destination);
+    uint8_t tx[24]={0xBC,0,operation,source,destination,0},rx[24];
+    const uint16_t fields[7]={x,y,width,height,arg_x,arg_y,fill};
+    for(unsigned i=0;i<7;i++){
+        tx[6+2*i]=(uint8_t)(fields[i]>>8);tx[7+2*i]=(uint8_t)fields[i];
+    }
+    uint16_t crc=0xFFFF;
+    for(unsigned i=2;i<=19;i++)crc=crc16_byte(crc,tx[i]);
+    tx[20]=(uint8_t)(crc>>8);tx[21]=(uint8_t)crc;tx[22]=0xA6;
+    uint32_t start=HAL_GetTick();
+    if(!exchange(tx,rx,sizeof(tx)))return 0;
+    if(rx[0]!=0xA5 || rx[1]!=0xC3)return bad(40,1,0xC3,rx[1]);
+    for(unsigned i=2;i<=22;i++)if(rx[i]!=tx[i-1])return bad(41,i,tx[i-1],rx[i]);
+    if(rx[23]!=0xAC)return bad(42,23,0xAC,rx[23]);
+    if(!buffer_idle(&status,1000))return 0;
+    if(status.result)return bad(43,8,0,status.result);
+    if(operation){g_lcd_scroll_ms=HAL_GetTick()-start;g_lcd_scroll_count++;}
+    else {g_lcd_copy_ms=HAL_GetTick()-start;g_lcd_copy_count++;}
+    return 1;
+}
+
+int LCD_CopyRect(uint8_t source,uint8_t destination,uint16_t x,uint16_t y,
+                 uint16_t width,uint16_t height,uint16_t dest_x,uint16_t dest_y)
+{
+    if(source>1 || destination>1 || source==destination || !width || !height ||
+       x>=480 || y>=272 || width>480-x || height>272-y ||
+       dest_x>=480 || dest_y>=272 || width>480-dest_x || height>272-dest_y)return 0;
+    return blit_command(0,source,destination,x,y,width,height,dest_x,dest_y,0);
+}
+
+int LCD_ScrollRect(uint8_t source,uint8_t destination,uint16_t x,uint16_t y,
+                   uint16_t width,uint16_t height,int16_t dx,int16_t dy,uint16_t fill)
+{
+    if(source>1 || destination>1 || source==destination || !width || !height ||
+       x>=480 || y>=272 || width>480-x || height>272-y)return 0;
+    return blit_command(1,source,destination,x,y,width,height,(uint16_t)dx,(uint16_t)dy,fill);
+}
+
+void LCD_ScrollDemo_Run(void)
+{
+    LcdBufferStatus status;
+    char line[64];
+    static const char *messages[]={"PSRAM: copia interna, nessun pixel sulla SPI",
+        "Viewport: 442 x 176, bordi non allineati",
+        "Area scoperta riempita dal comando SCROLL",
+        "Nuova riga disegnata nel back buffer",
+        "PRESENT: swap al blanking, IRQ confermato"};
+    g_lcd_scroll_demo_state=1;
+    uint32_t irq_start=g_fpga_irq_count;
+    if(!LCD_EnableDoubleBuffer() || !LCD_Clear(0x0841) ||
+       !LCD_DrawTextFPGA(20,8,0,0,LCD_FONT_12X24,0,0x07FF,0x0841,"Terminale FPGA") ||
+       !LCD_DrawTextFPGA(20,36,0,0,LCD_FONT_8X16,0,0xFFFF,0x0841,
+                        "COPY / SCROLL / fill RGB565 / VSYNC + IRQ") ||
+       !LCD_FillRect(18,59,444,178,0x07E0) || !LCD_FillRect(19,60,442,176,0) ||
+       !LCD_DrawTextFPGA(20,248,0,0,LCD_FONT_8X16,0,0xFFE0,0x0841,
+                        "32 righe - cornice e sfondo preservati") || !LCD_Present(1000) ||
+       !LCD_GetBufferStatus(&status) ||
+       !LCD_CopyRect(status.front,status.draw,0,0,480,272,0,0))goto fail;
+    // Both buffers now have identical borders/background. Only the viewport
+    // needs updating on subsequent frames; no full-frame copy in the loop.
+    for(unsigned n=1;n<=32;n++){
+        if(!LCD_GetBufferStatus(&status) ||
+           !LCD_ScrollRect(status.front,status.draw,19,60,442,176,0,-16,0))goto fail;
+        (void)snprintf(line,sizeof(line),"%02u > %s",n,messages[(n-1)%5]);
+        if(!LCD_DrawTextFPGA(23,220,434,16,LCD_FONT_8X16,LCD_TEXT_TRANSPARENT,
+                            (n%5)==0?0x07FF:0xFFFF,0,line) || !LCD_Present(1000))goto fail;
+        HAL_Delay(120);
+    }
+    if(g_fpga_irq_count-irq_start!=33){bad(44,0,33,g_fpga_irq_count-irq_start);goto fail;}
+    g_lcd_scroll_demo_state=2;return;
+fail:
+    g_lcd_scroll_demo_state=3;
 }
 
 static int text_ready(void)
@@ -133,6 +510,21 @@ volatile uint32_t g_lcd_clear_ms16;
 void LCD_FPGATextDemo_Run(void)
 {
     g_lcd_fpga_text_demo_state=1;
+    if(!LCD_EnableDoubleBuffer()) {g_lcd_fpga_text_demo_state=3;return;}
+    // Rebuild every back frame: partial redraws would retain older contents.
+    // Exercise both physical buffers and the IRQ/ACK cycle before the sample.
+    uint32_t irq_start=g_fpga_irq_count;
+    for(unsigned frame=0;frame<16;frame++) {
+        if(!LCD_Clear(0x0000) ||
+           !LCD_DrawTextFPGA(24,32,0,0,LCD_FONT_12X24,0,0x07FF,0,
+                            "Double buffer / VSYNC / IRQ") ||
+           !LCD_FillRect((uint16_t)(24+frame*24),112,40,64,(frame&1)?0x07E0:0xF800) ||
+           !LCD_Present(1000)) {g_lcd_fpga_text_demo_state=3;return;}
+        HAL_Delay(80);
+    }
+    if(g_fpga_irq_count-irq_start!=16) {
+        bad(37,0,16,g_fpga_irq_count-irq_start);g_lcd_fpga_text_demo_state=3;return;
+    }
     uint32_t clear_start=HAL_GetTick();
     for(unsigned i=0;i<16;i++)
         if(!LCD_Clear(0x0000)) {g_lcd_fpga_text_demo_state=3;return;}
@@ -144,7 +536,7 @@ void LCD_FPGATextDemo_Run(void)
        !LCD_FillRect(300,118,101,53,0x0010) ||
        !LCD_DrawTextFPGA(16,12,0,0,LCD_FONT_16X32,0,0x07FF,0,"Tang Nano 9K") ||
        !LCD_DrawTextFPGA(20,54,0,0,LCD_FONT_12X24,0,0xFFFF,0,
-                         "STM32 -> FPGA @ 12.5 MHz") ||
+                         "STM32 -> FPGA @ 18.75 MHz") ||
        !LCD_DrawTextFPGA(20,88,0,0,LCD_FONT_8X16,0,0x07E0,0,
                          "Accenti: \xC3\xA0 \xC3\xA8 \xC3\xA9 \xC3\xAC \xC3\xB2 \xC3\xB9  Frecce: \xE2\x86\x90 \xE2\x86\x91 \xE2\x86\x92 \xE2\x86\x93") ||
        !LCD_DrawTextFPGA(20,120,220,72,LCD_FONT_12X24,LCD_TEXT_WRAP,
@@ -171,7 +563,10 @@ void LCD_FPGATextDemo_Run(void)
        !LCD_DrawLine(350,193,385,208,0x001F) ||
        !LCD_DrawLine(350,193,365,211,0xF81F) ||
        !LCD_DrawLine(350,193,335,211,0xFFFF) ||
-       !LCD_DrawLine(350,193,315,208,0xFD20)) {
+       !LCD_DrawLine(350,193,315,208,0xFD20) ||
+       !LCD_DrawTextFPGA(20,244,0,0,LCD_FONT_8X16,0,0x07E0,0,
+                        "Double buffer + VSYNC + IRQ: OK") ||
+       !LCD_Present(1000)) {
         g_lcd_fpga_text_demo_state=3;return;
     }
     g_lcd_fpga_text_demo_state=2;
@@ -181,10 +576,13 @@ int LCD_WriteRect(uint16_t x, uint16_t y, uint16_t w, uint16_t h,
                   const uint16_t *pixels)
 {
     if(!pixels || !w || !h || x>=480 || y>=272 || w>480-x || h>272-y) return 0;
+    uint32_t mark;
+    dwt_enable();
     for(unsigned row=0;row<h;row++) for(unsigned bx=x&~15u;bx<x+w;bx+=16) {
         uint8_t tx[41]={0xB7,0},rx[41];
         uint32_t address=(y+row)*480+bx;
         if(!g_lcd_error[0]) g_lcd_error[1]=address;
+        mark=DWT->CYCCNT;
         uint16_t mask=0;
         tx[2]=address>>16;tx[3]=address>>8;tx[4]=address;
         for(unsigned i=0;i<16;i++) if(bx+i>=x && bx+i<x+w) {
@@ -192,14 +590,169 @@ int LCD_WriteRect(uint16_t x, uint16_t y, uint16_t w, uint16_t h,
             mask|=(uint16_t)(1u<<i);tx[7+2*i]=pixel;tx[8+2*i]=pixel>>8;
         }
         tx[5]=mask>>8;tx[6]=mask;tx[39]=0x5A;
-        if(!ready() || !exchange(tx,rx,41)) return 0;
-        if(rx[0]!=0xA5) return bad(5,0,0xA5,rx[0]);
-        if(rx[1]!=0xC3) return bad(6,1,0xC3,rx[1]);
+        g_lcd_profile.assemble+=DWT->CYCCNT-mark;
+        // No separate B7 poll: byte 1 of this very packet carries the same
+        // readiness, because the FPGA latches accept_packet from that condition
+        // at index 0. A busy answer commits nothing, so resending the identical
+        // packet is safe and idempotent.
+        uint32_t start=HAL_GetTick();
+        for(;;) {
+            mark=DWT->CYCCNT;
+            int sent=exchange(tx,rx,41);
+            g_lcd_profile.exchange+=DWT->CYCCNT-mark;
+            if(!sent) return 0;
+            if(rx[0]!=0xA5) return bad(5,0,0xA5,rx[0]);
+            if(rx[1]==0xC3) break;
+            if(rx[1]!=0) return bad(6,1,0xC3,rx[1]);
+            g_lcd_profile.retries++;
+            if(HAL_GetTick()-start>=1000) return bad(4,1,0xC3,rx[1]);
+        }
         if(rx[40]!=0xAC) return bad(7,40,0xAC,rx[40]);
         for(unsigned i=2;i<40;i++) if(rx[i]!=tx[i-1]) return bad(8,i,tx[i-1],rx[i]);
+        g_lcd_profile.packets++;
         if(g_lcd_stress.state==1) g_lcd_stress.packets++;
     }
-    return ready();
+    mark=DWT->CYCCNT;
+    int done=ready();
+    g_lcd_profile.fence+=DWT->CYCCNT-mark;
+    return done;
+}
+// BD carries one row per transaction: header, contiguous RGB565 payload, a
+// CRC over that payload, and a commit. At most 12 + 2*480 + 4 = 976 bytes, so
+// a full-width row always fits a single DMA. Returns 1 accepted, 0 hard error,
+// -1 retryable (the FPGA was busy, or reported overflow / payload CRC).
+static uint8_t stream_tx[1024];
+// BF result counters: busy, bad header, overflow, bad payload CRC/commit,
+// incomplete packet. They make a successful retrying run diagnosable by SWD.
+volatile uint32_t g_lcd_fast_status_counts[5],g_lcd_fast_status_reads;
+
+// Read the BE completion mailbox through BF. Pixel traffic may later run at a
+// substantially higher clock; this status transaction remains at 1.171875 MHz,
+// where the existing MISO path has ample margin. Restore the qualified normal
+// rate before returning so every other command retains its original timing.
+static int fast_stream_status(uint16_t y)
+{
+    uint8_t tx[9]={0xBF},rx[9];
+    uint32_t start=HAL_GetTick();
+    for(;;) {
+        if(!SPI_SetBaudRatePrescaler(LCD_STATUS_PRESCALER))
+            return bad(51,0,LCD_STATUS_PRESCALER,hspi2.Instance->CFG1&SPI_CFG1_MBR);
+        int exchanged=exchange(tx,rx,sizeof(tx));
+        int restored=SPI_SetBaudRatePrescaler(LCD_NORMAL_PRESCALER);
+        if(!exchanged || !restored) return bad(52,0,1,0);
+        if(rx[0]!=0xA5 || rx[1]!=0xD3 || rx[2]!=1 || (rx[3]&0xFC) || !(rx[3]&1))
+            return bad(53,1,0xD3,rx[1]);
+        uint16_t crc=0xFFFF;
+        for(unsigned i=1;i<=6;i++) crc=crc16_byte(crc,rx[i]);
+        uint16_t received=(uint16_t)((uint16_t)rx[7]<<8)|rx[8];
+        if(crc!=received) return bad(54,7,crc,received);
+        uint16_t reported_y=(uint16_t)((uint16_t)rx[4]<<8)|rx[5];
+        if(reported_y!=y) return bad(55,4,y,reported_y);
+        g_lcd_fast_status_reads++;
+        if(rx[6]==0xAC) {
+            if(rx[3]&2) return 1;
+            if(HAL_GetTick()-start>=1000) return bad(56,3,2,rx[3]);
+            continue;
+        }
+        if(rx[6]==0x00) {g_lcd_fast_status_counts[0]++;return -1;}
+        if(rx[6]==0xE1) {g_lcd_fast_status_counts[1]++;return bad(57,6,0xAC,rx[6]);}
+        if(rx[6]==0xE2) {g_lcd_fast_status_counts[2]++;return -1;}
+        if(rx[6]==0xE3) {g_lcd_fast_status_counts[3]++;return -1;}
+        if(rx[6]==0xFE) {g_lcd_fast_status_counts[4]++;return -1;}
+        return bad(57,6,0xAC,rx[6]);
+    }
+}
+static int stream_row(uint16_t y,uint16_t x,uint16_t count,const uint16_t *row)
+{
+    unsigned last_column=x+count-1u;
+    unsigned first=x>>4, groups=(last_column>>4)-first+1u;
+    uint16_t head=(uint16_t)(0xFFFFu<<(x&15u));
+    uint16_t tail=(uint16_t)(0xFFFFu>>(15u-(last_column&15u)));
+    uint32_t mark=DWT->CYCCNT;
+    uint8_t *p=stream_tx;
+    p[0]=0xBE;p[1]=0;
+    p[2]=(uint8_t)(y>>8);p[3]=(uint8_t)y;
+    p[4]=(uint8_t)first;p[5]=(uint8_t)groups;
+    p[6]=(uint8_t)(head>>8);p[7]=(uint8_t)head;
+    p[8]=(uint8_t)(tail>>8);p[9]=(uint8_t)tail;
+    uint16_t crc=0xFFFF;
+    for(unsigned i=2;i<=9;i++) crc=crc16_byte(crc,p[i]);
+    p[10]=(uint8_t)(crc>>8);p[11]=(uint8_t)crc;p[12]=0xA6;p[13]=0;
+    crc=0xFFFF;
+    unsigned n=14;
+    // Whole groups only, built as three contiguous runs instead of a decision
+    // per pixel: pad, the source row verbatim, pad. RGB565 low byte first is
+    // exactly how a uint16_t already sits in memory here, so the body is a
+    // straight copy. Then one tight pass for the CRC over the whole payload.
+    unsigned pad_head=x-first*16u;
+    unsigned pad_tail=(first+groups)*16u-1u-last_column;
+    unsigned payload=n;
+    if(pad_head) {memset(p+n,0,pad_head*2u);n+=pad_head*2u;}
+    memcpy(p+n,row,count*2u);n+=count*2u;
+    if(pad_tail) {memset(p+n,0,pad_tail*2u);n+=pad_tail*2u;}
+    for(unsigned i=payload;i<n;i++)
+        crc=(uint16_t)((crc<<8)^crc16_table[(uint8_t)((crc>>8)^p[i])]);
+    p[n]=(uint8_t)(crc>>8);p[n+1]=(uint8_t)crc;p[n+2]=0xA6;p[n+3]=0;
+    n+=4u;
+    // Split the two costs the way the B7 path does, so the payload CRC and
+    // the padding loop are not hidden inside the transfer figure.
+    g_lcd_profile.assemble+=DWT->CYCCNT-mark;
+    mark=DWT->CYCCNT;
+    if(!SPI_SetBaudRatePrescaler(LCD_PIXEL_STREAM_PRESCALER) ||
+       !transmit_only(stream_tx,(uint16_t)n)) {
+        (void)SPI_SetBaudRatePrescaler(LCD_NORMAL_PRESCALER);
+        return 0;
+    }
+    int outcome=fast_stream_status(y);
+    g_lcd_profile.exchange+=DWT->CYCCNT-mark;
+    return outcome;
+}
+
+// Same contract as LCD_WriteRect. BE sends each row TX-only; BF obtains its
+// CRC/result later and slowly. Rows commit as they stream, so resending after
+// an error is idempotent and nothing reaches the panel before PRESENT.
+int LCD_WriteRectStream(uint16_t x, uint16_t y, uint16_t w, uint16_t h,
+                        const uint16_t *pixels)
+{
+    if(!pixels || !w || !h || x>=480 || y>=272 || w>480-x || h>272-y) return 0;
+    uint32_t mark;
+    dwt_enable();
+    for(unsigned row=0;row<h;row++) {
+        uint32_t start=HAL_GetTick();
+        for(;;) {
+            int outcome=stream_row((uint16_t)(y+row),x,w,pixels+(size_t)row*w);
+            if(outcome>0) break;
+            if(outcome==0) return 0;
+            g_lcd_profile.retries++;
+            if(HAL_GetTick()-start>=1000) return bad(49,0,0xAC,0xE1);
+        }
+        g_lcd_profile.packets++;
+    }
+    mark=DWT->CYCCNT;
+    int done=ready();
+    g_lcd_profile.fence+=DWT->CYCCNT-mark;
+    return done;
+}
+
+// Full screen down both paths, one row at a time so a single row buffer does.
+// State: 1 running, 2 done, 3 B7 failed, 4 BD failed.
+volatile uint32_t g_lcd_bench_state,g_lcd_bench_b7_ms,g_lcd_bench_bd_ms;
+volatile LcdProfile g_lcd_bench_b7,g_lcd_bench_bd;
+void LCD_StreamBench_Run(void)
+{
+    static uint16_t row[480];
+    uint32_t start;
+    for(unsigned i=0;i<480;i++) row[i]=(uint16_t)(i*37u+1u);
+    g_lcd_bench_state=1;
+    LCD_ProfileReset();start=HAL_GetTick();
+    for(unsigned y=0;y<272;y++)
+        if(!LCD_WriteRect(0,(uint16_t)y,480,1,row)){g_lcd_bench_state=3;return;}
+    g_lcd_bench_b7_ms=HAL_GetTick()-start;g_lcd_bench_b7=g_lcd_profile;
+    LCD_ProfileReset();start=HAL_GetTick();
+    for(unsigned y=0;y<272;y++)
+        if(!LCD_WriteRectStream(0,(uint16_t)y,480,1,row)){g_lcd_bench_state=4;return;}
+    g_lcd_bench_bd_ms=HAL_GetTick()-start;g_lcd_bench_bd=g_lcd_profile;
+    g_lcd_bench_state=2;
 }
 // Shared B9 transport. Callers validate coordinates before any SPI traffic.
 static int draw_shape(uint8_t shape,uint16_t x,uint16_t y,

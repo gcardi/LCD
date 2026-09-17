@@ -10,6 +10,13 @@ typedef struct {
 } SpiTestResult;
 extern volatile SpiTestResult g_spi_test;
 int SPI_Exchange_DMA(const uint8_t *send, uint8_t *receive, uint16_t length);
+// TX-only uses the same private DMA buffer and completion machinery. It is
+// intentionally separate from Exchange: no RX DMA is armed and MISO is not
+// sampled by the peripheral.
+int SPI_Transmit_DMA(const uint8_t *send, uint16_t length);
+// Change MBR only while SPI2 is idle and disabled. The caller owns CS and must
+// keep it high while switching rates.
+int SPI_SetBaudRatePrescaler(uint32_t prescaler);
 // Bring the link up: deselect, pulse SCK, and wait for the FPGA to answer.
 // Always call this before any other transfer. The wait is adaptive, so it costs
 // a few milliseconds when the FPGA is already configured and gives up after
