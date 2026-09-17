@@ -79,6 +79,7 @@ Il cablaggio e' implementato nel TOP e nei vincoli del progetto LCD.
 | PB14 | 26 | MISO |
 | PB12 / FPGA_CS | 27 | CS attivo basso |
 | PB0 / FPGA_IRQ_N | 28 | notifica PRESENT, attiva bassa fino ad ACK |
+| PB1 / FPGA_RST_N | 29 | reset logico della FPGA, open drain, attivo basso; pull-up 10 kΩ verso il 3V3 della Tang Nano |
 
 Collegamento IRQ IO28 -> PB0 confermato dall'utente. Lato MCU sono predisposti
 EXTI0 sul fronte di discesa, pull-up e priorità NVIC 5 (subpriorità 0).

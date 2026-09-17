@@ -19,7 +19,7 @@ l'API STM32 prepara i pacchetti e gestisce attese, risposte ed errori.
 | `B8` | disegna una stringa UTF-8 con i font della User Flash |
 | `B9` | riempie un rettangolo o traccia una linea RGB565, senza trasferire i singoli pixel |
 | `BC` | COPY/SCROLL front → back, con riempimento RGB565; [protocollo](BLITTER.md) |
-| `BA` | abilita double buffering, richiede PRESENT o conferma IRQ |
+| `BA` | abilita double buffering, richiede PRESENT, conferma IRQ o conferma il reset (`ACK_RESET`) |
 | `BB` | legge capacità e stato coerente con CRC |
 | altro | percorso di eco diagnostica: risponde `A5` e poi l'eco del byte precedente |
 
@@ -285,6 +285,9 @@ la prima volta, non l'ultima.
 | 32–33 | double buffering | stato incompatibile con enable o PRESENT |
 | 34–36 | PRESENT | esito/sequenza/front errati, GPIO IRQ non basso, timeout |
 | 37 | demo | conteggio fronti EXTI diverso dalle 16 presentazioni iniziali |
+| 58 | reset FPGA | `ACK_RESET` non ha spento `reset_seen`, oppure ha dato errore |
+| 59 | reset FPGA | nessuna risposta SPI dopo l'impulso su `FPGA_RST_N` |
+| 60 | reset FPGA | **`reset_seen` ancora spento dopo l'impulso: il reset non è arrivato** |
 
 La fase più informativa è la **22**. Significa che il pacchetto è arrivato
 integro ma il renderer non lo ha accettato, e le cause sono poche: CRC16

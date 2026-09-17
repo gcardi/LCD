@@ -1,6 +1,52 @@
-# Punto di ripresa - 16 settembre 2026
+# Punto di ripresa - 17 settembre 2026
 
-## Stato corrente: percorso pixel in streaming
+## Stato corrente: reset della FPGA comandato dalla MCU, con prova
+
+Nuovo filo **STM32 PB1 → Tang Nano IO29**, open drain, pull-up esterna da 10 kΩ
+verso il 3V3 della Tang Nano. Pin scelti sugli schemi ufficiali: IO29 è nel
+banco 2 a 3,3 V e affianca IO28 (IRQ) su J5; PB1 affianca PB0 (IRQ) sul
+connettore P2 della WeAct e non ha funzioni sulla scheda. Il pulsante di reset
+esistente sta sul pin 4, banco a **1,8 V**: è il motivo per cui la MCU ha un pin
+suo invece di condividere quella rete. `RECONFIG_N` non è su nessun connettore,
+quindi il reset possibile è solo quello logico.
+
+**RTL.** `ResetRequestFilter` combina pulsante e linea MCU sul quarzo a 27 MHz e
+agisce solo dopo **1 ms** di livello basso continuo: un disturbo sul filo non
+resetta la logica, e lo stesso filtro chiude finalmente il debounce del pulsante
+rimasto in sospeso. La richiesta filtrata alimenta sia l'albero di reset sia
+l'IP PSRAM, che quindi ricalibra. `FramebufferController` ha il flag
+`reset_seen`, acceso a ogni reset e spento solo da `BA` operazione 6
+`ACK_RESET`; `BB` passa alla versione 3 e lo espone nel bit 4 del byte 4.
+
+**Firmware.** `FPGA_ResetCycle()` gira subito dopo `SPI_Setup()`: spegne
+`reset_seen`, dà un impulso di 10 ms con SPI deselezionata ed EXTI0 mascherato,
+aspetta la FPGA e pretende di ritrovare `reset_seen` acceso. Poi rimanda
+`ACK_RESET`, che viene servito solo dopo calibrazione e riempimento iniziale, e
+quindi dice anche che la FPGA è pronta. Se il reset non è dimostrato dopo tre
+tentativi, le demo grafiche non partono. PB1 è configurato nel `.ioc` e nel
+codice generato come lo produrrebbe CubeMX: open drain, livello iniziale alto,
+nessuna pull. Estesi anche i controlli di `LCD_GetBufferStatus`, che accettava
+solo le versioni 1 e 2 e riservava il bit 4: col bitstream nuovo avrebbe spento
+il doppio buffer con le fasi 23 e 25.
+
+**Verifiche.** Simulazione `tb_double_buffer` in tutte e tre le varianti, con
+glitch da 0,5 ms ignorato, reset effettivo dopo 1 ms, IRQ inattiva durante il
+reset, `reset_seen` riacceso, riempimento iniziale rieseguito e `ACK_RESET`.
+Suite SPI con nove banchi PASS. Build: gate di timing PASS, cinque endpoint di
+calibrazione ammessi, worst −0,739 ns, zero hold/recovery/removal; 5896/8640
+logiche, 3802 registri, **CLS 87%**, da tenere d'occhio. Al banco:
+**`g_fpga_reset_state = 2` al primo tentativo, FPGA pronta 16 ms dopo il
+rilascio**, autotest SPI a zero errori, demo testo e scroll complete, 50 PRESENT
+con 50 fronti IRQ.
+
+Due trappole del banco di simulazione, emerse qui. L'impulso di reset di 400 ns
+che inizializzava il progetto viene giustamente ignorato dal filtro: ora dura
+2 ms. E il controllo di scansione non azzerava il conteggio dei fotogrammi al
+reset, quindi dopo un reset comandato fotografava la memoria prima del nuovo
+riempimento iniziale. La prima ipotesi, una corsa fra reset asincrono e fronte
+di clock, era sbagliata: l'ha smentita una stampa dei tempi, non un ragionamento.
+
+## Stato precedente: percorso pixel in streaming (16 settembre)
 
 **Punto operativo finale del 16 settembre.** PLL2 alimenta SPI2 a 150 MHz:
 `BE` usa `/8` (18,75 MHz, TX-only), i comandi ordinari `/16` (9,375 MHz) e

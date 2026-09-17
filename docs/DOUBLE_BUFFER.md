@@ -17,7 +17,9 @@ nel percorso critico degli indirizzi. L'IP locale W955D8MBYA espone indirizzi
 pixel a 21 bit; gli slot usano soltanto i primi 18 bit. Non vengono esposti
 indirizzi fisici arbitrari al master.
 
-Al reset: front 0, disegno 0, double buffering disabilitato, sequenza 0, IRQ alto.
+Al reset: front 0, disegno 0, double buffering disabilitato, sequenza 0, IRQ alto,
+`reset_seen` acceso. Vale per qualunque reset: accensione, pulsante e linea
+`FPGA_RST_N` comandata dalla MCU (vedi sotto, *Reset comandato dalla MCU*).
 L'inizializzazione a nero del buffer 0 e la compatibilità B7/B8/B9 restano attive.
 `ENABLE_DOUBLE` aspetta le operazioni precedenti e seleziona come destinazione
 il buffer opposto al front. **Il back non viene inizializzato né copiato:**
@@ -75,6 +77,7 @@ CRC errato, operazione sconosciuta e campi riservati non validi non vengono acce
 | 1 ENABLE_DOUBLE | 0 | 0 | Attende i produttori, abilita disegno sul back; idempotente |
 | 2 PRESENT | 0 o 1 | ultima completata + 1, modulo 65536 | Presenta il back al confine del frame |
 | 3 ACK_PRESENT | 0 | ultima completata | Rilascia IRQ; ripetibile |
+| 6 ACK_RESET | 0 | 0 | Spegne `reset_seen`; servito dopo calibrazione PSRAM e riempimento iniziale |
 
 `AC` conferma **l'accettazione**, non il completamento né la validità semantica.
 La lettura BB distingue occupato, completato e risultato. Un PRESENT richiede
@@ -101,9 +104,9 @@ TX: `BB` seguito da dieci dummy `00`.
 |---:|---|
 | 0 | `A5` |
 | 1 | firma `D2` |
-| 2 | versione protocollo `02` (`01` prima del blitter) |
+| 2 | versione protocollo `03` (`02` prima di `reset_seen`, `01` prima del blitter) |
 | 3 | numero di buffer `02` |
-| 4 | bit 0 double abilitato; bit 1 front; bit 2 IRQ pendente; bit 3 controllo occupato |
+| 4 | bit 0 double abilitato; bit 1 front; bit 2 IRQ pendente; bit 3 controllo occupato; bit 4 `reset_seen` (dalla versione 3) |
 | 5 | buffer di disegno, 0 o 1 |
 | 6–7 | ultima sequenza PRESENT completata, byte alto prima |
 | 8 | risultato ultimo controllo: `00` successo, `E1` errore |
@@ -114,6 +117,43 @@ il dominio SPI come dati stabili associati al toggle di completamento: viene
 acquisito dopo la sincronizzazione del toggle, non sincronizzando separatamente
 i bit della sequenza. Durante busy descrive l'ultimo controllo completato.
 BB distingue anche un bitstream precedente, che risponderebbe con l'eco di BB.
+
+## Reset comandato dalla MCU
+
+La MCU può resettare la logica della FPGA attraverso `FPGA_RST_N`: STM32 PB1,
+open drain, verso Tang Nano IO29, con pull-up esterna da 10 kΩ. Nell'RTL la
+linea e il pulsante di reset passano per `ResetRequestFilter`, che richiede il
+livello basso per almeno **1 ms** sul quarzo a 27 MHz prima di agire: un disturbo
+raccolto dal filo non resetta niente, e lo stesso filtro elimina i rimbalzi del
+pulsante. È un reset **logico**: ricalibra la PSRAM, ricontrolla i font e
+ripulisce code e parser, ma non ricarica il bitstream. `RECONFIG_N` non è
+raggiungibile dai connettori della Tang Nano 9K.
+
+Un impulso sul filo non dimostra niente da solo: con il filo staccato la MCU non
+se ne accorgerebbe. Per questo la FPGA espone **`reset_seen`**, bit 4 del byte 4
+di `BB`: si accende a ogni reset e si spegne soltanto con `BA ACK_RESET`.
+`FPGA_ResetCycle()` lo usa così, all'avvio e prima di qualunque altro uso:
+
+1. legge `BB` e manda `ACK_RESET`: `reset_seen` spento, prova **armata**;
+2. deseleziona la SPI, maschera EXTI0 e tiene PB1 basso per 10 ms;
+3. aspetta la risposta SPI (`SPI_Setup`) e rilegge `BB`: `reset_seen` deve
+   essere di nuovo **acceso**, altrimenti l'impulso non è arrivato (fase 60);
+4. manda di nuovo `ACK_RESET` e ne attende il completamento: siccome viene
+   servito dopo calibrazione e riempimento iniziale, questo è anche il segnale
+   che la FPGA è pronta per disegnare;
+5. ripulisce lo stato IRQ lato MCU e riabilita EXTI0.
+
+| `g_fpga_reset_state` | Significato |
+|---:|---|
+| 0 | ciclo non eseguito |
+| 1 | in corso |
+| 2 | **reset dimostrato** |
+| 3 | fallito dopo tre tentativi: la FPGA non va usata, le demo non partono |
+| 4 | impulso inviato ma non dimostrabile: bitstream precedente alla versione 3, oppure FPGA muta prima dell'impulso e viva dopo |
+
+`g_fpga_reset_attempts` conta i tentativi, `g_fpga_reset_ready_ms` misura il tempo
+dal rilascio della linea alla FPGA pronta. Sul banco, il 17 settembre 2026:
+stato 2 al primo tentativo, **16 ms**.
 
 ## API STM32 e demo
 
