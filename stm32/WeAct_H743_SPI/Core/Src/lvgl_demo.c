@@ -28,7 +28,7 @@ void LVGL_Demo_Create(void)
     lv_obj_align(title,LV_ALIGN_TOP_MID,0,22);
 
     lv_obj_t *description=lv_label_create(screen);
-    lv_label_set_text(description,"RGB565 partial flush via DisplayTask");
+    lv_label_set_text(description,"RGB565 partial flush | COPY + PRESENT");
     lv_obj_set_style_text_color(description,lv_color_hex(0xCBD5E1),0);
     lv_obj_align(description,LV_ALIGN_TOP_MID,0,58);
 
@@ -46,7 +46,7 @@ void LVGL_Demo_Create(void)
     lv_obj_align(value_label,LV_ALIGN_CENTER,0,52);
 
     lv_obj_t *footer=lv_label_create(screen);
-    lv_label_set_text(footer,"Single FPGA framebuffer | no PRESENT yet");
+    lv_label_set_text(footer,"Double buffer | anti-tearing presentation");
     lv_obj_set_style_text_color(footer,lv_color_hex(0x94A3B8),0);
     lv_obj_align(footer,LV_ALIGN_BOTTOM_MID,0,-24);
 

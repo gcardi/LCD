@@ -185,9 +185,10 @@ Riferimento completo:
 
 La prima integrazione [LVGL 9](docs/LVGL_DEMO.md) e' implementata sullo STM32:
 usa due draw buffer parziali, `GuiTask` e la coda di `DisplayTask` per inviare
-rettangoli RGB565 al framebuffer FPGA. Il primo stadio usa volutamente il
-framebuffer singolo; COPY e PRESENT restano un'evoluzione separata. Lo studio
-[LVGL_IMPL.md](docs/LVGL_IMPL.md) conserva le alternative architetturali.
+rettangoli RGB565 al framebuffer FPGA. Ogni frame completo e' presentato al
+vertical blanking, poi una COPY front-to-draw preserva la base per i flush
+parziali seguenti. Lo studio [LVGL_IMPL.md](docs/LVGL_IMPL.md) conserva le
+alternative architetturali.
 Lo studio [BLITTING_ROP_STUDY.md](docs/BLITTING_ROP_STUDY.md) valuta copie
 fra framebuffer, scroll e ROP come XOR, ancora da implementare.
 La parte di presentazione ha ora un riferimento implementativo in DOUBLE_BUFFER.md.

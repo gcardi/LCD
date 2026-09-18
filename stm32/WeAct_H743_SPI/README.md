@@ -14,9 +14,10 @@ Le sezioni datate sotto conservano la cronologia dei collaudi.
 
 Il submodule `../../third_party/lvgl` fornisce LVGL v9.6.0. `GuiTask` esegue
 la UI e posta ogni flush a `DisplayTask`, che resta il proprietario esclusivo
-di SPI2. Il demo usa RGB565 partial con due buffer da 20 righe in RAM D2 e,
-in questo primo stadio, framebuffer FPGA singolo senza `PRESENT`. Dettagli,
-stati SWD e limiti: [LVGL_DEMO.md](../../docs/LVGL_DEMO.md).
+di SPI2. Il demo usa RGB565 partial con due buffer da 20 righe in RAM D2. Al
+termine di ogni frame LVGL, `DisplayTask` esegue `PRESENT` e una `COPY`
+front-to-draw per preservare la base dei successivi aggiornamenti parziali
+senza tearing. Dettagli, stati SWD e limiti: [LVGL_DEMO.md](../../docs/LVGL_DEMO.md).
 
 ## Double buffering e PRESENT
 

@@ -12,8 +12,10 @@ il protocollo streaming `BE/BF` gia' esistente.
 coordinate e puntatore del draw buffer in una richiesta persistente e la posta
 a `DisplayTask`. Quest'ultima resta l'unica proprietaria di SPI2, esegue
 `LCD_WriteRectStream()` e chiama `lv_display_flush_ready()` solo dopo il fence
-FPGA. LVGL puo' quindi riusare il buffer senza sovrascrivere dati ancora in
-transito.
+FPGA. All'ultimo flush del frame esegue inoltre `PRESENT`, attende l'IRQ di
+vertical blanking e copia il nuovo front buffer nel nuovo draw buffer con
+`COPY`. LVGL puo' quindi riusare il buffer senza sovrascrivere dati ancora in
+transito, e il prossimo aggiornamento parziale parte da un'immagine coerente.
 
 I due draw buffer sono 480 x 20 pixel RGB565 (19.200 byte ciascuno) nella
 sezione `.lvgl_draw` in RAM D2. Non sono nello stack, nell'heap FreeRTOS o in
@@ -36,17 +38,17 @@ cd stm32\WeAct_H743_SPI
 
 Via SWD si possono osservare `g_lvgl_demo_state` (2 = UI creata),
 `g_lvgl_port_state` (2 = display LVGL pronto), `g_lvgl_flush_count`,
-`g_lvgl_flush_failed` e `g_lvgl_flush_pixels`.
+`g_lvgl_flush_failed`, `g_lvgl_flush_pixels`, `g_lvgl_present_count`,
+`g_lvgl_present_failed`, `g_lvgl_frame_count` e `g_lvgl_frame_ms`.
 
 ## Limiti intenzionali del primo stadio
 
 - nessun touch/input device;
-- framebuffer FPGA singolo: nessun `PRESENT`, quindi un aggiornamento puo'
-  essere visibile mentre arriva al pannello;
-- nessuna qualifica hardware LVGL ancora eseguita: il build dimostra
-  integrazione e limiti di memoria, non la resa fisica;
-- `COPY` e `PRESENT` saranno introdotti solo nel secondo stadio, con una
-  politica di coerenza front/back definita.
+- la COPY e' volutamente full-screen: e' la politica piu' semplice e robusta
+  per i flush parziali, ma aggiunge il suo tempo a ogni frame; una futura
+  ottimizzazione potra' copiare solo le aree danneggiate quando la semantica
+  LVGL sara' misurata con il touch reale;
+- la qualifica visiva del tearing richiede il pannello e un'animazione rapida.
 
 Il CMake non scarica dipendenze: richiede la checkout del submodule e fallisce
 con istruzioni esplicite se `third_party/lvgl` non e' inizializzato.
