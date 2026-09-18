@@ -44,6 +44,7 @@ module tb_logo_command;
 
     reg command_valid = 1'b0;
     wire command_take;
+    wire boot_complete;
     wire update_valid;
     wire [20:0] update_address;
     wire [255:0] update_data;
@@ -54,6 +55,7 @@ module tb_logo_command;
         .clk(clk), .rst_n(rst_n), .fonts_ready(fonts_ready),
         .logo_valid(logo_valid), .logo_width(logo_width), .logo_height(logo_height),
         .logo_x(logo_x), .logo_y(logo_y), .logo_base(logo_base),
+        .boot_complete(boot_complete),
         .command_valid(command_valid), .command_take(command_take),
         .command_kind(1'b1), .command_font_id(2'd0), .command_flags(8'd0),
         .command_x(FILL_X[8:0]), .command_y(FILL_Y[8:0]),
@@ -130,6 +132,7 @@ module tb_logo_command;
         if (!logo_valid) fail("no logo descriptor was accepted");
 
         logo_pixels = logo_width * logo_height;
+        if (boot_complete) fail("boot completed before the logo was drawn");
 
         fork : draw
             begin
@@ -145,6 +148,7 @@ module tb_logo_command;
         join
 
         $display("logo drawn: %0d pixels at %0t", writes, $time);
+        if (!boot_complete) fail("boot did not complete after the logo");
 
         // Now the part nothing else covers: a command, after the logo.
         counting_fill = 1'b1;

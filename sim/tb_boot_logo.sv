@@ -48,11 +48,13 @@ module tb_boot_logo;
     // own sequencing rather than the handshake's.
     wire update_take = update_valid;
     wire command_take;
+    wire boot_complete;
 
     TextRenderer renderer (
         .clk(clk), .rst_n(rst_n), .fonts_ready(fonts_ready),
         .logo_valid(logo_valid), .logo_width(logo_width), .logo_height(logo_height),
         .logo_x(logo_x), .logo_y(logo_y), .logo_base(logo_base),
+        .boot_complete(boot_complete),
         .command_valid(1'b0), .command_take(command_take),
         .command_kind(1'b0), .command_font_id(2'd0), .command_flags(8'd0),
         .command_x(9'd0), .command_y(9'd0),
@@ -147,6 +149,7 @@ module tb_boot_logo;
             // Long enough for the renderer to have drawn one had it tried.
             repeat (200_000) @(posedge clk);
             if (writes != 0) fail("something was drawn without a logo");
+            if (!boot_complete) fail("boot did not complete without a logo");
             if (errors == 0)
                 $display("PASS: boot_logo fonts came up with no logo and nothing was drawn");
             else
@@ -159,6 +162,8 @@ module tb_boot_logo;
                  $time, logo_width, logo_height, logo_x, logo_y, logo_base);
 
         expected_pixels = logo_width * logo_height;
+
+        if (boot_complete) fail("boot completed before the logo was drawn");
 
         // Drawing is bounded by one flash word per two pixels; give it room.
         fork : draw
@@ -177,6 +182,7 @@ module tb_boot_logo;
 
         if (writes != expected_pixels)
             fail("wrong number of pixels written");
+        if (!boot_complete) fail("boot did not complete after the logo");
 
         // Every stored pixel, in the order the section holds them, must have
         // landed on its own square of the panel.

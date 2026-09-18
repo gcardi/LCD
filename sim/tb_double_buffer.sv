@@ -9,6 +9,7 @@ module tb_double_buffer;
  reg [7:0] reply,st[0:10];integer irq_edges=0,checked_frames=0,pixel_count=0;
  integer raster_phase=0,reference_phase,px,py,front_at_start=0;
  reg [15:0] expected_frame[0:130559];
+ reg [15:0] boot_frame[0:130559];
  reg check_frame=0;integer restarts=0;
  always @(negedge irq) if(rst) irq_edges=irq_edges+1;
  // Independent raster coordinates, with one-cycle registered video outputs.
@@ -127,6 +128,21 @@ module tb_double_buffer;
      if(dut.psram_inst.fb[slot*131072+i]!==color)$fatal(1,"memory slot %0d pixel %0d",slot,i);
    end
  endtask
+ task capture_boot;
+   integer changed;begin changed=0;
+     for(integer i=0;i<130560;i=i+1)begin
+       boot_frame[i]=dut.psram_inst.fb[i];
+       if(boot_frame[i]!==16'h0000)changed=changed+1;
+     end
+     if(changed==0)$fatal(1,"boot logo did not change the cleared frame");
+   end
+ endtask
+ task audit_boot(input integer slot);
+   begin for(integer i=0;i<130560;i=i+1)
+     if(dut.psram_inst.fb[slot*131072+i]!==boot_frame[i])
+       $fatal(1,"boot frame slot %0d pixel %0d",slot,i);
+   end
+ endtask
  task wait_shape;
    begin
      do begin cs=0;#1000;byte_io(8'hB9,reply);byte_io(0,reply);
@@ -173,7 +189,14 @@ module tb_double_buffer;
    // SCK resynchronizer startup, as on STM32.
    repeat(3)begin #40;sck=1;#40;sck=0;end
    wait(dut.graphics.fonts_ready);wait(dut.framebuffer_controller_inst.state==4);
-   audit(0,0);status();if(st[4]!=8'h10 || st[5]!=0)$fatal(1,"reset state, reset_seen expected");
+   // Font validation precedes the logo.  BB must expose that interval as busy
+   // and direct graphics must remain unavailable, otherwise an MCU flush can
+   // race the boot painter and be overwritten afterwards.
+   status();if(st[4]!=8'h18 || st[5]!=0)$fatal(1,"logo boot barrier expected");
+   poll(8'hB7,0);poll(8'hB9,0);
+   wait(dut.graphics.boot_complete);
+   repeat(3)begin #40;sck=1;#40;sck=0;end
+   capture_boot();status();if(st[4]!=8'h10 || st[5]!=0)$fatal(1,"reset state, reset_seen expected");
    control(6,1,0,0,10,8'hC3,8'hE1); // ACK_RESET: reserved buffer
    control(6,0,1,0,10,8'hC3,8'hE1); // ACK_RESET: reserved sequence
    control(6,0,0,0,10,8'hC3,8'hAC);idle(0);
@@ -194,7 +217,7 @@ module tb_double_buffer;
    fill(16'hFFFF,0,8'hE1); // blocked command cannot mutate pending renderer
    control(3,0,0,0,10,0,8'hE1); // occupied control mailbox
    idle(0);if(irq || st[4]!=7 || {st[6],st[7]}!=1 || st[5]!=0)$fatal(1,"first PRESENT");
-   audit(1,16'hF800);audit(0,0);
+   audit(1,16'hF800);audit_boot(0);
    if(irq_edges!=1)$fatal(1,"IRQ edge count");
    control(2,1,1,0,10,8'hC3,8'hAC);idle(0); // duplicate while IRQ pending
    control(3,0,9,0,10,8'hC3,8'hAC);idle(8'hE1);
@@ -234,10 +257,11 @@ module tb_double_buffer;
    if(dut.global_rst_n)$fatal(1,"reset request not asserted after 3 ms low");
    if(!irq)$fatal(1,"IRQ active during reset");
    #7000000;mcu_rst=1;
-   wait(dut.graphics.fonts_ready);wait(dut.framebuffer_controller_inst.state==4);
+   wait(dut.graphics.fonts_ready);wait(dut.graphics.boot_complete);
+   wait(dut.framebuffer_controller_inst.state==4);
    repeat(3)begin #40;sck=1;#40;sck=0;end
    status();if(st[4]!=8'h10 || st[5]!=0)$fatal(1,"reset proof missing after MCU reset: %h",st[4]);
-   audit(0,0); // initial fill ran again
+   audit_boot(0); // initial fill and logo both ran again
    control(6,0,0,0,10,8'hC3,8'hAC);idle(0);
    if(st[4]!=0)$fatal(1,"ACK_RESET after MCU reset");
    if(!irq)$fatal(1,"IRQ left active after reset");

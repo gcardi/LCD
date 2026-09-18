@@ -1,6 +1,7 @@
 `timescale 1ns/1ps
 module tb_spi_framebuffer;
  reg clk=0,rst=1,sck=0,cs=1,mosi=0,allow=0,restart=0,text_take=0,text_enabled=1;
+ reg graphics_enabled=0;
  wire text_kind;
  always #6 clk=~clk;
  wire miso,oe,valid,take,text_valid; wire [20:0] address,addr;
@@ -12,7 +13,7 @@ module tb_spi_framebuffer;
  SpiFramebuffer endpoint(.rst_n(rst),.sck(sck),.cs_n(cs),.mosi(mosi),
  .miso(miso),.miso_oe(oe),.clk(clk),.mem_rst_n(rst),.valid(valid),.take(take),
  .address(address),.pixels(pixels),.mask(mask),.text_clk(clk),.text_rst_n(rst),
- .text_enabled(text_enabled),.text_kind(text_kind),
+ .text_enabled(text_enabled),.graphics_enabled(graphics_enabled),.text_kind(text_kind),
  .text_valid(text_valid),.text_take(text_take),.text_font_id(text_font),
  .text_flags(text_flags),.text_x(text_x),.text_y(text_y),.text_box_width(text_bw),
  .text_box_height(text_bh),.text_foreground(text_fg),.text_background(text_bg),
@@ -194,6 +195,12 @@ module tb_spi_framebuffer;
    wait(writes==8160 && !writing);#1000;
    for(i=0;i<130560;i=i+1)
      if(memory[i] !== 16'h0000) $fatal(1,"startup pixel %d is not black",i);
+   // The reset handshake may complete before FontStore and the optional logo.
+   // No direct write may enter that window, or the logo could later overwrite
+   // host pixels.  The two SCK flops also make release deliberately delayed.
+   packet(496,32,8'h00);#200;
+   if(valid)$fatal(1,"graphics accepted before boot completion");
+   graphics_enabled=1;repeat(3)begin #20;sck=1;#20;sck=0;end
    before0=memory[496];before15=memory[511];
    packet(496,5,8'hC3);#200;if(valid)$fatal(1,"partial committed");
    packet(497,32,8'hC3);#200;if(valid)$fatal(1,"unaligned committed");
