@@ -95,3 +95,9 @@ e 238 righe costruite fra `Begin` e `Wait`. Il benchmark a otto righe per strip
 misura 528 ms per `B7` e 172-174 ms per `BE/BF`; la precedente implementazione
 sincrona `BE/BF` misurava 225 ms. Stress, 50 PRESENT/50 IRQ e reset ripetuto
 restano PASS.
+
+Il logo di boot aggiunto in seguito introduce uno sbarramento FPGA esplicito:
+`BB` resta busy e nessun comando grafico, incluso `BE`, viene accettato prima
+che l'ultimo burst del logo sia stato consegnato al controller PSRAM. Le API e
+la pipeline DMA non cambiano; il polling già usato da `FPGA_ResetCycle()`
+assorbe il breve tempo aggiuntivo prima di `ACK_RESET`.

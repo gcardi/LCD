@@ -32,6 +32,32 @@ sincrono e 528 ms di
 inserito prima delle demo lo zero iniziale significa soltanto “non avviata”.
 Dettagli e invarianti DMA: [FREERTOS.md](FREERTOS.md).
 
+**Riparazione dopo il logo di boot.** Il renderer ora produce `boot_complete`
+soltanto dopo l'ultimo burst del logo. Il livello è risincronizzato nel dominio
+SCK e tiene `BB busy` e tutti i comandi grafici, compreso `BE`, in backpressure.
+In questo modo il primo flush asincrono non può più correre col logo e venire
+poi parzialmente sovrascritto. Suite SPI e integrazione TOP/double buffer
+passano.
+
+**Collaudo sul banco superato, 18 settembre 2026.** Il bitstream delle 00:04,
+il primo che contiene `boot_complete`, è stato programmato in flash insieme
+all'immagine User Flash versione 2 da 43.600 byte: openFPGALoader, due passate,
+`CRC check: Success`. Dopo il ciclo di reset **il prototipo parte
+perfettamente** — il logo compare al centro e l'avvio prosegue regolare, senza
+la sovrascrittura parziale del primo flush che aveva motivato lo sbarramento.
+È la prova sul banco che mancava.
+
+Su quel bitstream restano due cose non verificate, e vanno accertate prima di
+considerarlo qualificato: l'esito di `Test-TimingReport.ps1` sul report delle
+00:04, e quello della suite SPI lanciata in parallelo alla sintesi, di cui non
+è stato raccolto il risultato. Sulla build precedente delle 22:46 del 17
+settembre, che il logo ce l'aveva ma `boot_complete` no, il gate aveva bocciato
+per una violazione setup di -0,119 ns su
+`framebuffer_controller_inst/state.UPDATE_COMMAND → update_words_67`
+(`psram_clk_81`, RTL nostro e non IP PSRAM). Che il prototipo parta non
+cancella quel debito: 119 ps su un percorso del framebuffer possono non dare
+sintomi visibili e mordere altrove.
+
 ## Stato corrente: reset della FPGA comandato dalla MCU, con prova
 
 Nuovo filo **STM32 PB1 → Tang Nano IO29**, open drain, pull-up esterna da 10 kΩ

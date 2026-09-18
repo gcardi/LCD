@@ -110,10 +110,16 @@ vengono saltate senza toccare il flusso.
 Non serve un multiply per scorrere l'immagine: un puntatore a parola che avanza
 basta, perché la larghezza è pari e ogni parola porta i due pixel successivi.
 
-Il logo **non consuma un comando SPI**: `command_take` resta basso finché sta
-disegnando, quindi un comando che arrivasse nel frattempo aspetta e viene
-eseguito dopo, intero. Dal punto di vista dell'MCU il logo semplicemente non
-esiste.
+Il logo **non consuma un comando SPI**. `TextRenderer` alza `boot_complete`
+solo dopo che l'ultimo burst è stato accettato; `SpiFramebuffer` risincronizza
+quel livello nel dominio SCK con due flip-flop. Fino ad allora `BB` espone
+`busy=1` e B7/B8/B9/BA/BC/BD/BE non accettano lavoro. Il firmware resta quindi
+nel polling di disponibilità e non può sovrapporre il primo flush al logo.
+
+Questo sbarramento è necessario anche se `command_take` resta basso durante il
+logo: B7/BD/BE usano la coda diretta e non passano da `TextRenderer`. Senza il
+segnale esplicito avrebbero potuto scrivere mentre il logo era ancora in coda,
+lasciando che gli ultimi burst di avvio sovrascrivessero pixel dell'MCU.
 
 L'ordine rispetto al riempimento iniziale del framebuffer non richiede logica
 dedicata: `FramebufferController` non serve alcun update finché la calibrazione
@@ -138,6 +144,11 @@ rettangolo è scritto **esattamente una volta**, con il colore memorizzato in
 flash, all'indirizzo che il framebuffer si aspetta; che nulla fuori dal
 rettangolo viene toccato; e che il logo non consuma un comando. Non dimostra
 l'handshake CDC in `TOP` né l'arbitraggio PSRAM.
+
+`tb_spi_framebuffer` verifica inoltre che una scrittura diretta venga respinta
+prima di `boot_complete`; `tb_double_buffer` attraversa il `TOP`, controlla
+`BB busy`, prova B7 e B9 durante lo sbarramento, quindi confronta l'intero
+framebuffer di boot anche dopo un secondo reset comandato dalla MCU.
 
 ```powershell
 .\sim\run_spi_sim.ps1
