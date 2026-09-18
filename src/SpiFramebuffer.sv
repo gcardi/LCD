@@ -10,6 +10,10 @@ module SpiFramebuffer (
  output reg [255:0] pixels,
  output reg [15:0] mask,
  input wire text_clk,text_rst_n,text_enabled,
+ // Level from the boot renderer, synchronised locally into SCK.  Until it is
+ // high even write-only B7/BD/BE and BA/BC are backpressured, preventing host
+ // pixels from racing the logo for the framebuffer.
+ input wire graphics_enabled,
  output wire text_valid, input wire text_take,
  // 0 = comando testo B8, 1 = forma B9. Le due condividono coda e registri.
  output reg text_kind,
@@ -44,6 +48,7 @@ module SpiFramebuffer (
  (* async_reg = "true" *) reg ack1,ack2,req1,req2;
  (* async_reg = "true" *) reg text_ack1,text_ack2,text_req1,text_req2;
  (* async_reg = "true" *) reg text_enabled1,text_enabled2;
+ (* async_reg = "true" *) reg graphics_enabled1,graphics_enabled2;
  reg [15:0] text_crc,text_expected_crc;
  reg text_invalid;
  reg [7:0] text_memory[0:63];
@@ -78,7 +83,7 @@ module SpiFramebuffer (
  reg [7:0] fast_status_result;
  reg fast_status_valid,fast_status_ready;
  wire control_available = control_request == control_seen;
- wire graphics_available = control_available;
+ wire graphics_available = control_available && graphics_enabled2;
  // 1 ENABLE_DOUBLE, 2 PRESENT, 3 ACK_PRESENT, 6 ACK_RESET. Codes 4 and 5 are
  // COPY and SCROLL, reachable only through BC, never through BA.
  wire control_fields_valid = ((staging_op>=1 && staging_op<=3) || staging_op==6) &&
@@ -223,9 +228,11 @@ module SpiFramebuffer (
    if(!rst_n) begin
      ack1<=0;ack2<=0;text_ack1<=0;text_ack2<=0;
      text_enabled1<=0;text_enabled2<=0;
+     graphics_enabled1<=0;graphics_enabled2<=0;
    end else begin
      ack1<=ack;ack2<=ack1;text_ack1<=text_ack;text_ack2<=text_ack1;
      text_enabled1<=text_enabled;text_enabled2<=text_enabled1;
+     graphics_enabled1<=graphics_enabled;graphics_enabled2<=graphics_enabled1;
    end
  end
 
@@ -359,11 +366,14 @@ module SpiFramebuffer (
        echo_byte<=(text_available && graphics_available)?8'hC3:8'h00;
      if(index==0 && rx==8'hBD)
        echo_byte<=(available && graphics_available)?8'hC3:8'h00;
-     if(index==0 && rx==8'hBA) echo_byte<=control_available?8'hC3:8'h00;
-     if(index==0 && rx==8'hBC) echo_byte<=control_available?8'hC3:8'h00;
+     if(index==0 && rx==8'hBA) echo_byte<=graphics_available?8'hC3:8'h00;
+     if(index==0 && rx==8'hBC) echo_byte<=graphics_available?8'hC3:8'h00;
      if(index==0 && rx==8'hBB) begin
        echo_byte<=8'hD2;status_packet<=status_snapshot;
-       status_busy<=!control_available;status_crc<=crc16_byte(16'hFFFF,8'hD2);
+       // Report the boot barrier as ordinary busy.  Firmware already polls
+       // BB before issuing ACK_RESET, so it waits instead of treating an
+       // early BA rejection as a protocol failure.
+       status_busy<=!graphics_available;status_crc<=crc16_byte(16'hFFFF,8'hD2);
      end
      if(index==0 && rx==8'hBF) begin
        echo_byte<=8'hD3;fast_status_ready<=available && graphics_available;
@@ -408,7 +418,7 @@ module SpiFramebuffer (
        selected_control<=rx==8'hBA;selected_status<=rx==8'hBB;
        selected_fast_status<=rx==8'hBF;
        selected_blit<=rx==8'hBC;
-       accept_control<=control_available;
+       accept_control<=graphics_available;
        text_crc<=16'hFFFF;text_invalid<=0;
      end
      if(control_crc_enable) control_crc<=crc16_byte(control_crc,rx);

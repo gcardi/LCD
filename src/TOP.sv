@@ -87,6 +87,7 @@ module TOP
     wire [8:0] logo_width,logo_height,logo_x,logo_y;
     wire [14:0] logo_base;
     wire text_kind;
+    wire boot_complete;
     wire text_update_valid_slow,text_update_valid_fast,text_update_take_slow;
     reg text_update_valid_fast1,text_update_valid_fast2,text_update_ack_fast;
     (* async_reg = "true" *) reg text_update_ack_slow1,text_update_ack_slow2;
@@ -97,6 +98,7 @@ module TOP
         .valid(direct_valid), .take(direct_take), .address(direct_addr),
         .pixels(direct_data), .mask(direct_mask),.text_clk(XTAL_IN),
         .text_rst_n(font_rst_n),.text_enabled(fonts_ready),
+        .graphics_enabled(boot_complete || fonts_error),
         .text_valid(text_command_valid),.text_take(text_command_take),
         .text_font_id(text_font_id),.text_flags(text_flags),.text_x(text_x),.text_y(text_y),
         .text_box_width(text_box_width),.text_box_height(text_box_height),
@@ -132,7 +134,7 @@ module TOP
         .clk(XTAL_IN),.rst_n(font_rst_n),.fonts_ready(fonts_ready),
         .logo_valid(logo_valid),.logo_width(logo_width),
         .logo_height(logo_height),.logo_x(logo_x),.logo_y(logo_y),
-        .logo_base(logo_base),
+        .logo_base(logo_base),.boot_complete(boot_complete),
         .command_valid(text_command_valid),.command_take(text_command_take),
         .command_kind(text_kind),
         .command_font_id(text_font_id),.command_flags(text_flags),

@@ -8,6 +8,10 @@ module TextRenderer (
  input wire logo_valid,
  input wire [8:0] logo_width,logo_height,logo_x,logo_y,
  input wire [14:0] logo_base,
+ // High only after the optional boot logo has retired.  This is a level, not
+ // a pulse, so TOP can safely synchronise it into SCK before admitting any
+ // host graphics command.
+ output reg boot_complete,
  input wire command_valid,output wire command_take,
  // kind 0 = testo; kind 1 = forma B9, font_id 0 fill / 1 linea.
  // Testo e forme condividono coda, campi e percorso dei burst. Per le linee
@@ -123,6 +127,7 @@ module TextRenderer (
      update_data<=0;update_mask<=0;row_visible<=0;kind<=0;
      line_dx<=0;line_dy<=0;line_error<=0;line_left<=0;line_up<=0;line_last<=0;
      logo<=0;logo_pending<=1;logo_phase<=0;logo_have<=0;logo_pair<=0;logo_ptr<=0;
+     boot_complete<=0;
    end else case(state)
      // Un riempimento non tocca la User Flash, quindi resta disponibile
      // anche quando i font mancano o non superano il CRC.
@@ -142,7 +147,7 @@ module TextRenderer (
          clip_bottom<=logo_y+logo_height;
          logo_ptr<=logo_base;logo_phase<=0;logo_have<=0;
          state<=FILL_PREP;
-       end
+       end else boot_complete<=1;
      end else if(command_valid && (command_kind || fonts_ready)) begin
        kind<=command_kind;glyph_row<=0;
        burst_x<={1'b0,command_x[8:4],4'd0};
@@ -343,7 +348,10 @@ module TextRenderer (
      end
      // A command always reloads kind on its way out of IDLE, so dropping the
      // logo flag is all the logo leaves behind.
-     DONE:begin logo<=0;state<=logo?IDLE:WAIT_CLEAR;end
+     DONE:begin
+       if(logo) boot_complete<=1;
+       logo<=0;state<=logo?IDLE:WAIT_CLEAR;
+     end
      WAIT_CLEAR:if(!command_valid)state<=IDLE;
      default:state<=IDLE;
    endcase
