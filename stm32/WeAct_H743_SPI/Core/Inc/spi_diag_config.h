@@ -18,15 +18,15 @@
 // test-hardware.ps1, che ne pretende l'esito.
 #define SPI_GPIO_PROBE 1
 // Opt in to destructive on-screen demo/stress drawing at boot.
-#define LCD_BOOT_TESTS 1
+#define LCD_BOOT_TESTS 0
 // CPU-rendered reference and FPGA/User-Flash rendered demo are independent.
 #define LCD_TEXT_DEMO 0
-#define LCD_FPGA_TEXT_DEMO 1
-#define LCD_SCROLL_DEMO 1
+#define LCD_FPGA_TEXT_DEMO 0
+#define LCD_SCROLL_DEMO 0
 // Full-screen B7 versus BD comparison. Destructive like LCD_BOOT_TESTS: it
 // paints the whole screen twice and takes roughly half a second, so it is
 // opt-in. Read g_lcd_bench_* over SWD afterwards.
-#define LCD_STREAM_BENCH 1
+#define LCD_STREAM_BENCH 0
 // Linea di reset FPGA_RST_N (PB1 -> IO29) montata su questa scheda?
 // 1: all'avvio la MCU resetta la FPGA e pretende la prova che il reset sia
 //    arrivato; senza prova la FPGA non viene usata.

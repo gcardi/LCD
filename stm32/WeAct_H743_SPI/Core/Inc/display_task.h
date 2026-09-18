@@ -21,6 +21,10 @@ extern volatile uint32_t g_display_stack_high_water_bytes;
 extern volatile uint32_t g_default_stack_high_water_words;
 extern volatile uint32_t g_default_stack_high_water_bytes;
 extern volatile uint32_t g_freertos_failure;
+/* Set after the one-owner SPI/FPGA boot sequence.  GUI producers must wait
+ * for boot_complete and only submit work when ready is non-zero. */
+extern volatile uint32_t g_display_boot_complete;
+extern volatile uint32_t g_display_ready;
 
 osStatus_t DisplayTask_Post(DisplayRequestHandler execute, void *context,
                             uint32_t timeout_ticks);

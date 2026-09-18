@@ -13,6 +13,8 @@ volatile uint32_t g_display_stack_high_water_bytes;
 volatile uint32_t g_default_stack_high_water_words;
 volatile uint32_t g_default_stack_high_water_bytes;
 volatile uint32_t g_freertos_failure;
+volatile uint32_t g_display_boot_complete;
+volatile uint32_t g_display_ready;
 
 static void record_stack_margin(void)
 {
@@ -38,6 +40,8 @@ osStatus_t DisplayTask_Post(DisplayRequestHandler execute, void *context,
 void DisplayTask_Run(void)
 {
     /* Bring up and qualify the link before accepting display requests. */
+    g_display_boot_complete=0;
+    g_display_ready=0;
     SPI_Setup();
     int fpga_ok = FPGA_Start();
     (void)fpga_ok;
@@ -67,6 +71,9 @@ void DisplayTask_Run(void)
 
     g_fpga_irq_level =
         HAL_GPIO_ReadPin(FPGA_IRQ_N_GPIO_Port, FPGA_IRQ_N_Pin) == GPIO_PIN_SET;
+    g_display_ready=fpga_ok && g_spi_test.state==2 && !g_lcd_error[0];
+    __DMB();
+    g_display_boot_complete=1;
     record_stack_margin();
 
     for (;;) {

@@ -156,7 +156,8 @@ Misure del raster, risultati e limiti della verifica sono in
 | [SPI_DIAGNOSTIC_RESULTS.md](docs/SPI_DIAGNOSTIC_RESULTS.md) | diagnosi dei fronti che ha portato a 12.5 MHz con GPIO `MEDIUM` |
 | [SPI_STRESS.md](docs/SPI_STRESS.md) | qualifica prolungata del collegamento, e perché 25 MHz non passa |
 | [SPI_PERFORMANCE.md](docs/SPI_PERFORMANCE.md) | cronologia della salita in frequenza con GPIO `VERY_HIGH`; non è la configurazione attuale |
-| [LVGL_IMPL.md](docs/LVGL_IMPL.md) | studio speculativo su un controller grafico per LVGL; non descrive codice esistente |
+| [LVGL_DEMO.md](docs/LVGL_DEMO.md) | demo LVGL 9 implementata sullo STM32: task, flush RGB565 e limiti del primo stadio |
+| [LVGL_IMPL.md](docs/LVGL_IMPL.md) | studio storico sulle possibili evoluzioni del controller grafico per LVGL |
 | [BLITTER.md](docs/BLITTER.md) | COPY, SCROLL con riempimento, protocollo BC e demo terminale |
 | [DOUBLE_BUFFER.md](docs/DOUBLE_BUFFER.md) | double buffering, PRESENT, IRQ, protocollo BA/BB e collaudo |
 | [FREERTOS.md](docs/FREERTOS.md) | architettura delle task, proprietà SPI/FPGA, coda display, memoria DMA e misura degli stack |
@@ -182,9 +183,11 @@ tramite le API STM32.
 Riferimento completo:
 [GRAPHICS_COMMANDS.md](docs/GRAPHICS_COMMANDS.md).
 
-[LVGL_IMPL.md](docs/LVGL_IMPL.md) raccoglie uno studio speculativo su come
-trasformare la scheda in un controller grafico SPI pilotabile da un
-microcontrollore con LVGL. Non descrive funzionalità presenti nel codice.
+La prima integrazione [LVGL 9](docs/LVGL_DEMO.md) e' implementata sullo STM32:
+usa due draw buffer parziali, `GuiTask` e la coda di `DisplayTask` per inviare
+rettangoli RGB565 al framebuffer FPGA. Il primo stadio usa volutamente il
+framebuffer singolo; COPY e PRESENT restano un'evoluzione separata. Lo studio
+[LVGL_IMPL.md](docs/LVGL_IMPL.md) conserva le alternative architetturali.
 Lo studio [BLITTING_ROP_STUDY.md](docs/BLITTING_ROP_STUDY.md) valuta copie
 fra framebuffer, scroll e ROP come XOR, ancora da implementare.
 La parte di presentazione ha ora un riferimento implementativo in DOUBLE_BUFFER.md.

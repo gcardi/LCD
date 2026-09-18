@@ -18,6 +18,7 @@ extern "C" {
 
 extern osThreadId_t defaultTaskHandle;
 extern osThreadId_t DisplayTaskHandle;
+extern osThreadId_t GuiTaskHandle;
 extern osMessageQueueId_t displayQueueHandle;
 
 void MX_FREERTOS_Init(void);

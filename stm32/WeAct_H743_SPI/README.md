@@ -10,6 +10,14 @@ estremi inclusi e richiede anche il nuovo bitstream FPGA. API e protocollo:
 Release collaudata: [confronto dimensioni e tempi](../../docs/MCU_RELEASE_COMPARISON.md).
 Le sezioni datate sotto conservano la cronologia dei collaudi.
 
+## LVGL 9
+
+Il submodule `../../third_party/lvgl` fornisce LVGL v9.6.0. `GuiTask` esegue
+la UI e posta ogni flush a `DisplayTask`, che resta il proprietario esclusivo
+di SPI2. Il demo usa RGB565 partial con due buffer da 20 righe in RAM D2 e,
+in questo primo stadio, framebuffer FPGA singolo senza `PRESENT`. Dettagli,
+stati SWD e limiti: [LVGL_DEMO.md](../../docs/LVGL_DEMO.md).
+
 ## Double buffering e PRESENT
 
 Implementati BA/BB e `LCD_EnableDoubleBuffer`, `LCD_GetBufferStatus`, `LCD_Present`.
