@@ -18,6 +18,7 @@
 #include "lvgl_demo.h"
 #include "lvgl_port.h"
 #include "touch_probe.h"
+#include "gt911_port.h"
 /* USER CODE END Includes */
 
 osThreadId_t defaultTaskHandle;
@@ -98,10 +99,12 @@ static void StartGuiTask(void *argument)
 {
   (void)argument;
   while (!g_display_boot_complete && !g_freertos_failure) osDelay(1);
+  while (g_touch_probe_state != 2 && !g_freertos_failure) osDelay(1);
   if (!g_display_ready || g_freertos_failure || !LVGL_Port_Init()) {
     g_lvgl_demo_state = 3;
     osThreadExit();
   }
+  (void)GT911_Port_Init();
   LVGL_Demo_Create();
   for (;;) {
     LVGL_Port_Service(5);

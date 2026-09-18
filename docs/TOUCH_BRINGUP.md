@@ -25,3 +25,13 @@ specifici del controller. I risultati SWD sono:
 Il primo indirizzo trovato identifica la famiglia di controller da cui
 derivera' il driver LVGL. Non collegare `CTP-RST` alla linea di reset FPGA:
 il touch deve poter essere resettato in modo indipendente.
+
+## Driver LVGL GT911
+
+Il Product ID rilevato e' `911`, all'indirizzo `0x5D`: il firmware registra un
+input device LVGL di tipo pointer in polling ogni 10 ms. Legge lo status da
+`0x814E`, il primo punto da `0x8150` e conferma ogni frame al GT911 scrivendo
+zero nello status. Le coordinate native vengono scalate automaticamente alla
+risoluzione del display 480 x 272; i dati SWD `g_gt911_sensor_width` e
+`g_gt911_sensor_height` permettono di verificare o correggere in seguito
+l'orientamento fisico.
