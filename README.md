@@ -157,6 +157,7 @@ Misure del raster, risultati e limiti della verifica sono in
 | [SPI_STRESS.md](docs/SPI_STRESS.md) | qualifica prolungata del collegamento, e perché 25 MHz non passa |
 | [SPI_PERFORMANCE.md](docs/SPI_PERFORMANCE.md) | cronologia della salita in frequenza con GPIO `VERY_HIGH`; non è la configurazione attuale |
 | [LVGL_DEMO.md](docs/LVGL_DEMO.md) | demo LVGL 9 implementata sullo STM32: task, flush RGB565 e limiti del primo stadio |
+| [TOUCH_BRINGUP.md](docs/TOUCH_BRINGUP.md) | cablaggio e scansione I2C del touch capacitivo su PB8/PB9 |
 | [LVGL_IMPL.md](docs/LVGL_IMPL.md) | studio storico sulle possibili evoluzioni del controller grafico per LVGL |
 | [BLITTER.md](docs/BLITTER.md) | COPY, SCROLL con riempimento, protocollo BC e demo terminale |
 | [DOUBLE_BUFFER.md](docs/DOUBLE_BUFFER.md) | double buffering, PRESENT, IRQ, protocollo BA/BB e collaudo |

@@ -17,6 +17,7 @@
 #include "display_task.h"
 #include "lvgl_demo.h"
 #include "lvgl_port.h"
+#include "touch_probe.h"
 /* USER CODE END Includes */
 
 osThreadId_t defaultTaskHandle;
@@ -74,6 +75,7 @@ static void StartDefaultTask(void *argument)
 {
   /* USER CODE BEGIN StartDefaultTask */
   (void)argument;
+  Touch_Probe_Run();
   for (;;) {
     UBaseType_t words = uxTaskGetStackHighWaterMark(NULL);
     g_default_stack_high_water_words = (uint32_t)words;

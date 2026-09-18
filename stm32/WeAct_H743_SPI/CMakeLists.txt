@@ -99,6 +99,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     Core/Src/display_task.c
     Core/Src/lvgl_port.c
     Core/Src/lvgl_demo.c
+    Core/Src/touch_probe.c
     # Add user sources here
 )
 
