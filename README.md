@@ -27,6 +27,18 @@ microcontrollore. Il collegamento SPI opera in mode 0: il flusso pixel
 write-only `BE` raggiunge 18,75 MHz, i comandi ordinari usano 9,375 MHz e la
 lettura dello stato tramite `BF` usa 1,171875 MHz.
 
+### Demo touch LVGL
+
+La demo LVGL integra il driver del controller touch capacitivo GT911 come input
+pointer. Il firmware esegue il polling ogni 10 ms, scala automaticamente le
+coordinate alla risoluzione LCD 480x272 e inoltra gli eventi a LVGL: nella barra
+di avanzamento e' possibile verificare visivamente la pressione e il rilascio.
+
+![Demo LVGL con gestione del touch capacitivo](docs/assets/images/LVGLTouchDemo.gif)
+
+Il cablaggio I2C, il rilevamento del controller e i registri diagnostici SWD
+sono descritti in [TOUCH_BRINGUP.md](docs/TOUCH_BRINGUP.md).
+
 ## Struttura
 
 - `src/TOP.sv`: integrazione di clock, PSRAM, frame buffer, FIFO e display;
