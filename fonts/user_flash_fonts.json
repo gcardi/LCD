@@ -1,11 +1,11 @@
 {
   "format": "LCD User Flash Fonts",
   "magic": "LCDF",
-  "version": 2,
+  "version": 3,
   "flash_bytes": 77824,
-  "image_bytes": 43600,
-  "free_bytes": 34224,
-  "payload_crc32": "9FD502C8",
+  "image_bytes": 30612,
+  "free_bytes": 47212,
+  "payload_crc32": "96DA44E4",
   "glyph_count": 196,
   "encoding": "UTF-8 subset: ASCII printable, Latin-1, euro, arrows",
   "fonts": [
@@ -45,15 +45,17 @@
   ],
   "logo": {
     "source": "BootLogo.png",
-    "source_sha256": "60FC8C84C94F482CFB9FAB24428718FB7C9BBE6D2CC7AB52C74DB9F4966536E4",
-    "width": 128,
-    "height": 72,
-    "format": "RGB565",
+    "source_sha256": "47842A465762397989BD93C025E41672ED4FF14F433BBFB7F6E55527113677CA",
+    "width": 256,
+    "height": 144,
+    "format": "RGB565-RLE",
     "header_bytes": 16,
-    "pixel_bytes": 18432,
-    "origin_x": 176,
-    "origin_y": 100,
-    "distinct_colors": 345,
+    "raw_pixel_bytes": 73728,
+    "encoded_bytes": 5444,
+    "rle_words": 1361,
+    "origin_x": 112,
+    "origin_y": 64,
+    "distinct_colors": 49,
     "section_offset": 25152
   }
 }

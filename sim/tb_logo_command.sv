@@ -28,6 +28,7 @@ module tb_logo_command;
     wire fonts_ready, fonts_error;
     wire logo_valid;
     wire [8:0] logo_width, logo_height, logo_x, logo_y;
+    wire [1:0] logo_format;
     wire [14:0] logo_base;
     wire flash_request, flash_ready, flash_valid;
     wire [14:0] flash_address;
@@ -39,7 +40,7 @@ module tb_logo_command;
         .read_request(flash_request), .read_address(flash_address),
         .read_ready(flash_ready), .read_valid(flash_valid), .read_data(flash_data),
         .logo_valid(logo_valid), .logo_width(logo_width), .logo_height(logo_height),
-        .logo_x(logo_x), .logo_y(logo_y), .logo_base(logo_base)
+        .logo_x(logo_x), .logo_y(logo_y), .logo_format(logo_format), .logo_base(logo_base)
     );
 
     reg command_valid = 1'b0;
@@ -54,7 +55,7 @@ module tb_logo_command;
     TextRenderer renderer (
         .clk(clk), .rst_n(rst_n), .fonts_ready(fonts_ready),
         .logo_valid(logo_valid), .logo_width(logo_width), .logo_height(logo_height),
-        .logo_x(logo_x), .logo_y(logo_y), .logo_base(logo_base),
+        .logo_x(logo_x), .logo_y(logo_y), .logo_format(logo_format), .logo_base(logo_base),
         .boot_complete(boot_complete),
         .command_valid(command_valid), .command_take(command_take),
         .command_kind(1'b1), .command_font_id(2'd0), .command_flags(8'd0),

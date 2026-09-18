@@ -99,7 +99,7 @@ Per caricarlo nella SRAM volatile da PowerShell:
 Per programmare insieme Embedded Flash e User Flash:
 
 ```powershell
-python .\tools\generate_user_flash_fonts.py .\third_party\terminus-font-4.49.1-master .\fonts
+python .\tools\generate_user_flash_fonts.py .\third_party\terminus-font-4.49.1-master .\fonts --logo .\resources\BootLogo.png
 .\program_tang_nano_flash.ps1
 ```
 

@@ -25,6 +25,7 @@ module tb_boot_logo;
     wire fonts_ready, fonts_error;
     wire logo_valid;
     wire [8:0] logo_width, logo_height, logo_x, logo_y;
+    wire [1:0] logo_format;
     wire [14:0] logo_base;
     wire flash_request, flash_ready, flash_valid;
     wire [14:0] flash_address;
@@ -36,7 +37,7 @@ module tb_boot_logo;
         .read_request(flash_request), .read_address(flash_address),
         .read_ready(flash_ready), .read_valid(flash_valid), .read_data(flash_data),
         .logo_valid(logo_valid), .logo_width(logo_width), .logo_height(logo_height),
-        .logo_x(logo_x), .logo_y(logo_y), .logo_base(logo_base)
+        .logo_x(logo_x), .logo_y(logo_y), .logo_format(logo_format), .logo_base(logo_base)
     );
 
     wire update_valid;
@@ -53,7 +54,7 @@ module tb_boot_logo;
     TextRenderer renderer (
         .clk(clk), .rst_n(rst_n), .fonts_ready(fonts_ready),
         .logo_valid(logo_valid), .logo_width(logo_width), .logo_height(logo_height),
-        .logo_x(logo_x), .logo_y(logo_y), .logo_base(logo_base),
+        .logo_x(logo_x), .logo_y(logo_y), .logo_format(logo_format), .logo_base(logo_base),
         .boot_complete(boot_complete),
         .command_valid(1'b0), .command_take(command_take),
         .command_kind(1'b0), .command_font_id(2'd0), .command_flags(8'd0),
@@ -120,6 +121,8 @@ module tb_boot_logo;
     integer expected_pixels;
     integer stream_index;
     integer word_index;
+    integer rle_word_index;
+    integer rle_run_left;
     reg [15:0] expected_pixel;
 
     reg expect_logo;
@@ -187,11 +190,24 @@ module tb_boot_logo;
         // Every stored pixel, in the order the section holds them, must have
         // landed on its own square of the panel.
         stream_index = 0;
+        rle_word_index = 0;
+        rle_run_left = 0;
         for (pixel_y = 0; pixel_y < logo_height; pixel_y = pixel_y + 1) begin
             for (pixel_x = 0; pixel_x < logo_width; pixel_x = pixel_x + 1) begin
-                word_index = logo_base + (stream_index >> 1);
-                expected_pixel = stream_index[0] ? expected_flash[word_index][31:16]
-                                                 : expected_flash[word_index][15:0];
+                if(logo_format==2) begin
+                    if(rle_run_left==0) begin
+                        word_index = logo_base + rle_word_index;
+                        rle_run_left = expected_flash[word_index][15:0];
+                        expected_pixel = expected_flash[word_index][31:16];
+                        rle_word_index = rle_word_index + 1;
+                        if(rle_run_left==0) fail("zero-length RLE run in User Flash");
+                    end
+                    rle_run_left = rle_run_left - 1;
+                end else begin
+                    word_index = logo_base + (stream_index >> 1);
+                    expected_pixel = stream_index[0] ? expected_flash[word_index][31:16]
+                                                     : expected_flash[word_index][15:0];
+                end
                 index = (logo_y + pixel_y) * FRAME_WIDTH + logo_x + pixel_x;
                 if (!written[index]) fail("a logo pixel was never written");
                 else if (frame[index] !== expected_pixel) begin

@@ -22,6 +22,7 @@ module FontStore (
     output reg  [8:0]  logo_height,
     output reg  [8:0]  logo_x,
     output reg  [8:0]  logo_y,
+    output reg  [1:0]  logo_format,
     output reg  [14:0] logo_base
 );
     localparam [3:0] HEADER_REQUEST=0, HEADER_WAIT=1,
@@ -60,14 +61,16 @@ module FontStore (
             verify_address<=0;byte_index<=0;bit_index<=0;
             fonts_ready<=0;fonts_error<=0;
             logo_word<=0;logo_section<=0;logo_present<=0;logo_valid<=0;
-            logo_width<=0;logo_height<=0;logo_x<=0;logo_y<=0;logo_base<=0;
+            logo_width<=0;logo_height<=0;logo_x<=0;logo_y<=0;logo_format<=0;logo_base<=0;
         end else case(state)
           HEADER_REQUEST: if(flash_ready) state<=HEADER_WAIT;
           HEADER_WAIT: if(flash_valid) begin
               case(header_word)
                 0: if(flash_data!=32'h4644434C) state<=ERROR;
                    else begin header_word<=1;verify_address<=1;state<=HEADER_REQUEST;end
-                1: if(flash_data!=32'h00400002) state<=ERROR;
+                // V3 adds the RGB565-RLE logo payload while retaining the
+                // original raw RGB565 descriptor format for the renderer.
+                1: if(flash_data!=32'h00400003) state<=ERROR;
                    else begin header_word<=2;verify_address<=2;state<=HEADER_REQUEST;end
                 2: if(flash_data<64 || flash_data>77824 || flash_data[1:0]!=0)
                        state<=ERROR;
@@ -121,8 +124,10 @@ module FontStore (
                 0: if(flash_data!=32'h314F474C) begin fonts_ready<=1;state<=READY;end
                    else begin logo_word<=1;verify_address<=verify_address+15'd1;
                        state<=LOGO_REQUEST;end
-                // An odd width would put every second row out of step with the
-                // pixel pair carried by a flash word, so it is refused here.
+                // Raw RGB565 uses two pixels per word and therefore needs an
+                // even width. RLE can represent any width, but the generator
+                // deliberately keeps the same constraint for one simple
+                // image contract across both encodings.
                 1: if(flash_data[15:0]==0 || flash_data[0] ||
                       flash_data[15:0]>16'd480 ||
                       flash_data[31:16]==0 || flash_data[31:16]>16'd272)
@@ -131,8 +136,8 @@ module FontStore (
                        logo_height<=flash_data[24:16];
                        logo_word<=2;verify_address<=verify_address+15'd1;
                        state<=LOGO_REQUEST;end
-                2: if(flash_data!=32'd1) begin fonts_ready<=1;state<=READY;end
-                   else begin logo_word<=3;verify_address<=verify_address+15'd1;
+                2: if(flash_data!=32'd1 && flash_data!=32'd2) begin fonts_ready<=1;state<=READY;end
+                   else begin logo_format<=flash_data[1:0];logo_word<=3;verify_address<=verify_address+15'd1;
                        state<=LOGO_REQUEST;end
                 // The rectangle must close inside the panel. TextRenderer
                 // consumes exactly one stored pixel per selected column, so a

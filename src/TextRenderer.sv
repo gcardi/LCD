@@ -7,6 +7,7 @@ module TextRenderer (
  // logo is drawn once per reset, before the first command is accepted.
  input wire logo_valid,
  input wire [8:0] logo_width,logo_height,logo_x,logo_y,
+ input wire [1:0] logo_format,
  input wire [14:0] logo_base,
  // High only after the optional boot logo has retired.  This is a level, not
  // a pulse, so TOP can safely synchronise it into SCK before admitting any
@@ -67,11 +68,13 @@ module TextRenderer (
  reg [15:0] glyph_bits;
  reg second_burst;
  // Boot logo. The rectangle is walked by the fill path; these carry the
- // pixel stream that replaces the fill colour. The logo is stored row by row
- // with an even width, so scanning it is a single advancing word pointer and
- // never a multiply: one flash word is the next two selected pixels.
- reg logo,logo_pending,logo_phase,logo_have;
+ // pixel stream that replaces the fill colour. V3 images normally use RLE:
+ // each word is { RGB565 colour, run length }. Legacy raw RGB565 pairs are
+ // still understood by this renderer. Both forms need only an advancing
+ // pointer and never a multiply.
+ reg logo,logo_pending,logo_phase,logo_have,logo_rle;
  reg [31:0] logo_pair;
+ reg [15:0] logo_run_left,logo_color;
  reg [14:0] logo_ptr;
  reg [9:0] burst_x;
  reg [4:0] pixel_index;
@@ -126,7 +129,8 @@ module TextRenderer (
      second_burst<=0;burst_x<=0;pixel_index<=0;update_address<=0;
      update_data<=0;update_mask<=0;row_visible<=0;kind<=0;
      line_dx<=0;line_dy<=0;line_error<=0;line_left<=0;line_up<=0;line_last<=0;
-     logo<=0;logo_pending<=1;logo_phase<=0;logo_have<=0;logo_pair<=0;logo_ptr<=0;
+     logo<=0;logo_pending<=1;logo_phase<=0;logo_have<=0;logo_rle<=0;
+     logo_pair<=0;logo_run_left<=0;logo_color<=0;logo_ptr<=0;
      boot_complete<=0;
    end else case(state)
      // Un riempimento non tocca la User Flash, quindi resta disponibile
@@ -146,6 +150,7 @@ module TextRenderer (
          clip_right<={1'b0,logo_x}+{1'b0,logo_width};
          clip_bottom<=logo_y+logo_height;
          logo_ptr<=logo_base;logo_phase<=0;logo_have<=0;
+         logo_rle<=logo_format==2;logo_run_left<=0;
          state<=FILL_PREP;
        end else boot_complete<=1;
      end else if(command_valid && (command_kind || fonts_ready)) begin
@@ -288,29 +293,38 @@ module TextRenderer (
        update_data<=0;update_mask<=0;pixel_index<=0;
        state<=logo?LOGO_PIXEL:BUILD_PIXEL;
      end
-     // Same walk as the fill, one stored pixel consumed per selected column.
-     // Columns outside the rectangle are skipped without touching the stream,
-     // so an even width keeps every row starting on a fresh flash word.
+     // Same walk as the fill, one decoded pixel consumed per selected column.
+     // Columns outside the rectangle are skipped without touching the stream.
      LOGO_PIXEL:begin
        if(!fill_selected)begin
          update_data<={16'd0,update_data[255:16]};
          update_mask<={1'b0,update_mask[15:1]};
          if(pixel_index==15)state<=ISSUE_BURST;
          else pixel_index<=pixel_index+1'b1;
-       end else if(!logo_have) state<=LOGO_FETCH;
+       end else if(logo_rle && logo_run_left==0) state<=LOGO_FETCH;
+       else if(!logo_rle && !logo_have) state<=LOGO_FETCH;
        else begin
-         update_data<={logo_phase?logo_pair[31:16]:logo_pair[15:0],
+         update_data<={logo_rle?logo_color:(logo_phase?logo_pair[31:16]:logo_pair[15:0]),
                        update_data[255:16]};
          update_mask<={1'b1,update_mask[15:1]};
-         logo_phase<=~logo_phase;
-         if(logo_phase)begin logo_have<=0;logo_ptr<=logo_ptr+15'd1;end
+         if(logo_rle) logo_run_left<=logo_run_left-1'b1;
+         else begin
+           logo_phase<=~logo_phase;
+           if(logo_phase)begin logo_have<=0;logo_ptr<=logo_ptr+15'd1;end
+         end
          if(pixel_index==15)state<=ISSUE_BURST;
          else pixel_index<=pixel_index+1'b1;
        end
      end
      LOGO_FETCH:if(flash_ready)state<=LOGO_WAIT;
      LOGO_WAIT:if(flash_valid)begin
-       logo_pair<=flash_data;logo_have<=1;state<=LOGO_PIXEL;
+       if(logo_rle) begin
+         logo_color<=flash_data[31:16];logo_run_left<=flash_data[15:0];
+         logo_ptr<=logo_ptr+15'd1;
+       end else begin
+         logo_pair<=flash_data;logo_have<=1;
+       end
+       state<=LOGO_PIXEL;
      end
      PREP_BURST:begin
        burst_x<=candidate_burst_x;

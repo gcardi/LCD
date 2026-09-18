@@ -85,6 +85,7 @@ module TOP
     wire [31:0] flash_data;
     wire logo_valid;
     wire [8:0] logo_width,logo_height,logo_x,logo_y;
+    wire [1:0] logo_format;
     wire [14:0] logo_base;
     wire text_kind;
     wire boot_complete;
@@ -129,12 +130,12 @@ module TOP
         .read_valid(flash_valid),.read_data(flash_data),
         .logo_valid(logo_valid),.logo_width(logo_width),
         .logo_height(logo_height),.logo_x(logo_x),.logo_y(logo_y),
-        .logo_base(logo_base));
+        .logo_format(logo_format),.logo_base(logo_base));
     TextRenderer text_renderer(
         .clk(XTAL_IN),.rst_n(font_rst_n),.fonts_ready(fonts_ready),
         .logo_valid(logo_valid),.logo_width(logo_width),
         .logo_height(logo_height),.logo_x(logo_x),.logo_y(logo_y),
-        .logo_base(logo_base),.boot_complete(boot_complete),
+        .logo_format(logo_format),.logo_base(logo_base),.boot_complete(boot_complete),
         .command_valid(text_command_valid),.command_take(text_command_take),
         .command_kind(text_kind),
         .command_font_id(text_font_id),.command_flags(text_flags),

@@ -3,7 +3,9 @@ module tb_line_renderer;
  reg clk=0,rst=0,valid=0,take=0;always #18.5 clk=~clk;
  reg [8:0] x=0,y=0,y1=0;reg [9:0] x1=0;
  wire done,uv;wire [20:0] address;wire [255:0] data;wire [15:0] mask;
- TextRenderer dut(.clk(clk),.rst_n(rst),.fonts_ready(1'b0),
+TextRenderer dut(.clk(clk),.rst_n(rst),.fonts_ready(1'b0),
+  .logo_valid(1'b0),.logo_width(9'd0),.logo_height(9'd0),
+  .logo_x(9'd0),.logo_y(9'd0),.logo_format(2'd0),.logo_base(15'd0),
   .command_valid(valid),.command_take(done),.command_kind(1'b1),
   .command_font_id(2'd1),.command_flags(8'd0),.command_x(x),.command_y(y),
   .command_box_width(x1),.command_box_height(y1),.command_foreground(16'hBEEF),

@@ -30,19 +30,19 @@ FLASH_BYTES = 304 * 64 * 4
 # shared with the bitstream. It was not one.
 HEADER_BYTES = 64
 MAGIC = b"LCDF"
-# Version 2 adds the boot logo descriptor at header word 6. FontStore checks
+# Version 3 adds RLE RGB565 boot-logo support. FontStore checks
 # the version word exactly, so an image and a bitstream of different versions
 # refuse each other instead of drawing from a layout that has moved. They are
 # programmed together anyway: see docs/PROGRAMMING.md.
-VERSION = 2
+VERSION = 3
 # The logo lives in its own self-describing section rather than in the header,
 # where only its byte offset is kept. Geometry travels with the pixels, so the
 # fabric reads the size it is actually about to draw.
 LOGO_MAGIC = b"LGO1"
 LOGO_HEADER_BYTES = 16
-LOGO_FORMAT_RGB565 = 1
-# A 32-bit flash word carries two pixels and every row starts on a word, so an
-# odd width would put half of each row out of step with the burst builder.
+LOGO_FORMAT_RGB565_RLE = 2
+# The renderer can decode an odd RLE row, but keeping logos even-wide preserves
+# the old raw-RGB565 contract and keeps every source asset interchangeable.
 LOGO_WIDTH_ALIGN = 2
 # Clipping in TextRenderer is what the panel measures; a logo wider or taller
 # than the panel would be silently cropped, so it is refused here instead.
@@ -91,7 +91,7 @@ def parse_bdf(path: Path, width: int, height: int) -> dict[int, bytes]:
 
 
 def build_logo(path: Path) -> tuple[bytes, dict[str, object]]:
-    """Convert an image into the RGB565 logo section, opaque over black.
+    """Convert an image into an RLE RGB565 logo section, opaque over black.
 
     Alpha is composited here rather than carried into the flash: the fabric
     draws the logo as a plain rectangle of pixels, with no mask and no read of
@@ -118,17 +118,36 @@ def build_logo(path: Path) -> tuple[bytes, dict[str, object]]:
     origin_y = (PANEL_HEIGHT - height) // 2
 
     raw = rgb.tobytes()
-    payload = bytearray(2 * width * height)
+    pixels: list[int] = []
     for index in range(0, len(raw), 3):
         red, green, blue = raw[index], raw[index + 1], raw[index + 2]
         # Round to nearest representable level instead of truncating, so the
         # top of each channel reaches full scale and white stays white.
-        pixel = ((min(255, red + 4) >> 3) << 11) |                 ((min(255, green + 2) >> 2) << 5) |                 (min(255, blue + 4) >> 3)
-        struct.pack_into("<H", payload, (index // 3) * 2, pixel)
+        pixel = ((min(255, red + 4) >> 3) << 11) | \
+                ((min(255, green + 2) >> 2) << 5) | \
+                (min(255, blue + 4) >> 3)
+        pixels.append(pixel)
+
+    # One 32-bit word is { RGB565 colour, 16-bit run length }, little-endian
+    # in User Flash.  Runs cross row boundaries safely: the FPGA consumes one
+    # decoded pixel for every selected panel pixel.  The black background of
+    # boot logos is therefore virtually free while opaque coloured artwork is
+    # still lossless.
+    payload = bytearray()
+    run_colour = pixels[0]
+    run_length = 0
+    for pixel in pixels:
+        if pixel == run_colour and run_length < 0xFFFF:
+            run_length += 1
+        else:
+            payload.extend(struct.pack("<HH", run_length, run_colour))
+            run_colour = pixel
+            run_length = 1
+    payload.extend(struct.pack("<HH", run_length, run_colour))
 
     section = bytearray(LOGO_HEADER_BYTES)
     section[0:4] = LOGO_MAGIC
-    struct.pack_into("<HHIHH", section, 4, width, height, LOGO_FORMAT_RGB565,
+    struct.pack_into("<HHIHH", section, 4, width, height, LOGO_FORMAT_RGB565_RLE,
                      origin_x, origin_y)
     section.extend(payload)
 
@@ -137,13 +156,14 @@ def build_logo(path: Path) -> tuple[bytes, dict[str, object]]:
         "source_sha256": hashlib.sha256(path.read_bytes()).hexdigest().upper(),
         "width": width,
         "height": height,
-        "format": "RGB565",
+        "format": "RGB565-RLE",
         "header_bytes": LOGO_HEADER_BYTES,
-        "pixel_bytes": len(payload),
+        "raw_pixel_bytes": 2 * width * height,
+        "encoded_bytes": len(payload),
+        "rle_words": len(payload) // 4,
         "origin_x": origin_x,
         "origin_y": origin_y,
-        "distinct_colors": len(set(bytes(payload[index:index + 2])
-                                   for index in range(0, len(payload), 2))),
+        "distinct_colors": len(set(pixels)),
     }
     return bytes(section), manifest
 
@@ -282,8 +302,9 @@ def main() -> None:
     logo = manifest["logo"]
     if logo:
         print(f"logo {logo['width']}x{logo['height']} at "
-              f"({logo['origin_x']},{logo['origin_y']}), "
-              f"{logo['pixel_bytes']} bytes, {logo['distinct_colors']} colours")
+             f"({logo['origin_x']},{logo['origin_y']}), "
+              f"{logo['encoded_bytes']} encoded bytes "
+              f"({logo['raw_pixel_bytes']} raw), {logo['distinct_colors']} colours")
     print(f"generated {len(image)} bytes; {FLASH_BYTES-len(image)} bytes free")
 
 
