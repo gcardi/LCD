@@ -34,4 +34,7 @@ input device LVGL di tipo pointer in polling ogni 10 ms. Legge lo status da
 zero nello status. Le coordinate native vengono scalate automaticamente alla
 risoluzione del display 480 x 272; i dati SWD `g_gt911_sensor_width` e
 `g_gt911_sensor_height` permettono di verificare o correggere in seguito
-l'orientamento fisico.
+l'orientamento fisico. Ogni record punto inizia al registro `0x814F` e usa
+coordinate little-endian; il driver scala la risoluzione nativa rilevata
+(480 x 272 sul modulo provato) al display. Il demo rende cliccabile la barra
+di avanzamento per confermare visivamente la consegna dell'evento a LVGL.

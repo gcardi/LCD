@@ -4,7 +4,17 @@
 volatile uint32_t g_lvgl_demo_state;
 static lv_obj_t *value_label;
 static lv_obj_t *progress_bar;
+static lv_obj_t *footer_label;
 static uint32_t progress_value;
+static uint32_t touch_click_count;
+
+static void progress_clicked(lv_event_t *event)
+{
+    (void)event;
+    touch_click_count++;
+    lv_label_set_text_fmt(footer_label,"LVGL touch event: %lu",
+                          (unsigned long)touch_click_count);
+}
 
 static void progress_timer(lv_timer_t *timer)
 {
@@ -28,7 +38,7 @@ void LVGL_Demo_Create(void)
     lv_obj_align(title,LV_ALIGN_TOP_MID,0,22);
 
     lv_obj_t *description=lv_label_create(screen);
-    lv_label_set_text(description,"RGB565 partial flush | COPY + PRESENT");
+    lv_label_set_text(description,"GT911 touch | tap the progress bar");
     lv_obj_set_style_text_color(description,lv_color_hex(0xCBD5E1),0);
     lv_obj_align(description,LV_ALIGN_TOP_MID,0,58);
 
@@ -37,6 +47,8 @@ void LVGL_Demo_Create(void)
     lv_obj_align(progress_bar,LV_ALIGN_CENTER,0,12);
     lv_bar_set_range(progress_bar,0,100);
     lv_bar_set_value(progress_bar,0,LV_ANIM_OFF);
+    lv_obj_set_clickable(progress_bar,true);
+    lv_obj_add_event_cb(progress_bar,progress_clicked,LV_EVENT_CLICKED,NULL);
     lv_obj_set_style_bg_color(progress_bar,lv_color_hex(0x334155),LV_PART_MAIN);
     lv_obj_set_style_bg_color(progress_bar,lv_color_hex(0x38BDF8),LV_PART_INDICATOR);
 
@@ -45,10 +57,10 @@ void LVGL_Demo_Create(void)
     lv_obj_set_style_text_color(value_label,lv_color_hex(0xF8FAFC),0);
     lv_obj_align(value_label,LV_ALIGN_CENTER,0,52);
 
-    lv_obj_t *footer=lv_label_create(screen);
-    lv_label_set_text(footer,"Double buffer | anti-tearing presentation");
-    lv_obj_set_style_text_color(footer,lv_color_hex(0x94A3B8),0);
-    lv_obj_align(footer,LV_ALIGN_BOTTOM_MID,0,-24);
+    footer_label=lv_label_create(screen);
+    lv_label_set_text(footer_label,"Double buffer | touch ready");
+    lv_obj_set_style_text_color(footer_label,lv_color_hex(0x94A3B8),0);
+    lv_obj_align(footer_label,LV_ALIGN_BOTTOM_MID,0,-24);
 
     lv_timer_create(progress_timer,100,NULL);
     g_lvgl_demo_state=2;

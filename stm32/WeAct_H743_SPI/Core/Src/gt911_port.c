@@ -6,7 +6,7 @@
 #define GT911_PRODUCT_ID 0x8140u
 #define GT911_RESOLUTION 0x8146u
 #define GT911_STATUS 0x814Eu
-#define GT911_POINT_1 0x8150u
+#define GT911_POINT_1 0x814Fu
 #define GT911_MAX_POINTS 5u
 #define GT911_DISPLAY_WIDTH 480u
 #define GT911_DISPLAY_HEIGHT 272u
@@ -67,10 +67,10 @@ static void gt911_read_callback(lv_indev_t *indev,lv_indev_data_t *data)
         g_gt911_touch_count=0;
         (void)gt911_ack_frame();
     } else {
-        /* GT911 stores each contact in eight bytes: id, x low/high, y
-         * low/high, size low/high, reserved.  LVGL's pointer device uses the
-         * first contact; the remaining points stay available to a future
-         * multi-touch gesture adapter. */
+        /* GT911 stores each contact from 0x814F in eight bytes: id, x
+         * low/high, y low/high, size low/high, reserved.  LVGL's pointer
+         * device uses the first contact; the remaining points stay available
+         * to a future multi-touch gesture adapter. */
         uint8_t point[8];
         if(gt911_read(GT911_POINT_1,point,sizeof(point))) {
             uint16_t x=(uint16_t)point[1]|((uint16_t)point[2]<<8);
