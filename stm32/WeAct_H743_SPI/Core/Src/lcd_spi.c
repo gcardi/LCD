@@ -328,14 +328,14 @@ int LCD_Present(uint32_t timeout_ms)
             if(!status.busy) {
                 if(status.result || !status.irq || status.sequence!=sequence || status.front!=target)
                     return bad(34,0,sequence,status.sequence);
-                if(!low) return bad(35,0,0,1);
-                // Do not acknowledge the level before EXTI has consumed the
-                // falling edge. Polling the pin is a useful wake-up fallback,
-                // but a completed PRESENT still has to prove its IRQ.
-                if(g_fpga_irq_count==irq_before) {
-                    osDelay(1);
-                    continue;
-                }
+                /* The status is latched in the FPGA and binds this exact
+                 * sequence to the selected front buffer.  It is therefore the
+                 * protocol proof of completion.  PB0/EXTI is valuable timing
+                 * telemetry, but must not reject an already-completed swap:
+                 * doing so leaves its IRQ uncleared and eventually stalls all
+                 * later partial LVGL frames. */
+                if(!low || g_fpga_irq_count==irq_before)
+                    g_fpga_irq_unobserved_count++;
                 g_lcd_present_ms=HAL_GetTick()-start;
                 g_lcd_front_buffer=status.front;g_lcd_present_sequence=status.sequence;
                 if(!acknowledge_present(sequence)) return 0;

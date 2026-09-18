@@ -51,6 +51,7 @@
 volatile uint32_t g_fpga_irq_count;   // fronti di discesa osservati
 volatile uint32_t g_fpga_irq_pending; // 1 = evento non ancora consumato
 volatile uint32_t g_fpga_irq_level;   // livello letto a regime: 1 atteso
+volatile uint32_t g_fpga_irq_unobserved_count;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/

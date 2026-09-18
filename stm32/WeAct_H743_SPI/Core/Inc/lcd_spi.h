@@ -37,6 +37,10 @@ int LCD_Present(uint32_t timeout_ms);
 extern volatile uint32_t g_lcd_present_count, g_lcd_present_ms;
 extern volatile uint32_t g_lcd_front_buffer, g_lcd_present_sequence;
 extern volatile uint32_t g_fpga_irq_count, g_fpga_irq_pending, g_fpga_irq_level;
+/* Completed PRESENT operations whose latched FPGA status was valid but whose
+ * PB0/EXTI observation was late or absent.  This is diagnostic only: status
+ * plus sequence is the protocol proof and must not strand the back buffer. */
+extern volatile uint32_t g_fpga_irq_unobserved_count;
 // Explicit, disjoint buffers; source must be front and destination back.
 // Reject empty/out-of-screen rectangles. Wait for all PSRAM writes before return.
 int LCD_CopyRect(uint8_t source,uint8_t destination,uint16_t x,uint16_t y,
