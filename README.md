@@ -1,14 +1,13 @@
-# Tang Nano 9K RGB LCD experiment
+# Tang Nano 9K RGB LCD Graphics Platform
 
-Esperimento FPGA per pilotare un pannello LCD RGB 480×272 con una Sipeed
-Tang Nano 9K.
+Usiamo una FPGA economica e moderna, montata su Sipeed Tang Nano 9K, per pilotare un pannello LCD RGB TFT IPS 480×272.
 
-Il progetto inizializza la PSRAM integrata con un frame buffer RGB565 nero, lo
-legge a burst attraverso una FIFO dual-clock e genera i segnali di timing del
-display. Tramite SPI può aggiornare rettangoli o renderizzare testo usando tre
-font bitmap residenti nella User Flash. Supporta double buffering, PRESENT con
-IRQ e copie/scroll di viewport con riempimento RGB565 automatico. Pattern diagnostici e barre colore
-restano disponibili nei test.
+Lo scopo principale è dimostrare che si può usare una FPGA per costruire un display con caratteristiche avanzate (e supporto per LVGL 9) in grado di liberare la MCU da parecchio lavoro, rendendo questa configurazione utilizzabile anche con MCU veramente piccole.
+
+Il progetto inizializza la PSRAM integrata (nel chip GoWIn che è un SiP) con un frame buffer RGB565 nero, lo legge a burst attraverso una FIFO dual-clock e genera i segnali di timing del
+display. Tramite SPI può aggiornare rettangoli o renderizzare testo usando tre font bitmap residenti nella User Flash. Supporta double buffering, PRESENT con IRQ e copie/scroll di viewport con riempimento RGB565 automatico. Pattern diagnostici e barre colore restano disponibili nei test.
+
+![Prototipo completo: Tang Nano 9K, WeAct STM32H743, display RGB e touch GT911](docs/assets/images/Prototype_01.jpg)
 
 ![Barre orizzontali visualizzate sul pannello LCD](docs/assets/images/HBars.jpg)
 
@@ -170,6 +169,7 @@ Misure del raster, risultati e limiti della verifica sono in
 | [SPI_PERFORMANCE.md](docs/SPI_PERFORMANCE.md) | cronologia della salita in frequenza con GPIO `VERY_HIGH`; non è la configurazione attuale |
 | [LVGL_DEMO.md](docs/LVGL_DEMO.md) | demo LVGL 9 implementata sullo STM32: task, flush RGB565 e limiti del primo stadio |
 | [TOUCH_BRINGUP.md](docs/TOUCH_BRINGUP.md) | cablaggio e scansione I2C del touch capacitivo su PB8/PB9 |
+| [HARDWARE.md](docs/HARDWARE.md) | schema Mermaid e tabella dei collegamenti STM32, Tang Nano, display e touch |
 | [LVGL_IMPL.md](docs/LVGL_IMPL.md) | studio storico sulle possibili evoluzioni del controller grafico per LVGL |
 | [BLITTER.md](docs/BLITTER.md) | COPY, SCROLL con riempimento, protocollo BC e demo terminale |
 | [DOUBLE_BUFFER.md](docs/DOUBLE_BUFFER.md) | double buffering, PRESENT, IRQ, protocollo BA/BB e collaudo |

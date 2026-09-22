@@ -11,6 +11,8 @@ Il connettore touch a sei contatti usa logica a 3,3 V:
 | `CTP-SDA` | `PB9`, I2C1 SDA |
 | `CTP-SCL` | `PB8`, I2C1 SCL |
 
+![Dettaglio del flat touch e dell'adattatore a sei pin del prototipo](assets/images/Prototype_05.jpg)
+
 `I2C1` e' inizializzato a 400 kHz. Il task di servizio esegue una sola
 scansione degli indirizzi I2C 7-bit da `0x08` a `0x77`, senza inviare comandi
 specifici del controller. I risultati SWD sono:
