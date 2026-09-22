@@ -1,346 +1,363 @@
-# Comandi grafici supportati
+# Graphics commands supported
 
-Riferimento unico di tutto ciò che si può disegnare, aggiornato al 15 settembre
-2026. Verificato contro `src/SpiFramebuffer.sv`, `src/TextRenderer.sv` e le
-implementazioni in `stm32/WeAct_H743_SPI/Core/Src/`. Per il dettaglio byte per
-byte di B7 e B8 vedere [SPI_FRAMEBUFFER.md](SPI_FRAMEBUFFER.md) e
-[SPI_TEXT.md](SPI_TEXT.md); B9 è descritto qui. Qui c'è
-l'elenco completo, i limiti e ciò che **non** esiste.
+Single reference of everything that can be drawn, verified on September 22nd
+2026 against `src/SpiFramebuffer.sv`, `src/TextRenderer.sv`, `src/BlitRenderer.sv`
+and the implementations in `stm32/WeAct_H743_SPI/Core/Src/`. For the byte-level
+layout of `B7`/`BD`/`BE`/`BF` see [SPI_FRAMEBUFFER.md](SPI_FRAMEBUFFER.md) and
+[SPI_STREAM.md](SPI_STREAM.md), for `B8` see [SPI_TEXT.md](SPI_TEXT.md), for
+`BC` see [BLITTER.md](BLITTER.md), and for `BA`/`BB` see
+[DOUBLE_BUFFER.md](DOUBLE_BUFFER.md). `B9` is described here in full, since it
+has no other home. What follows is the complete list, its limitations, and
+what **doesn't** exist.
 
-Il quadro si legge su due livelli: la FPGA espone **tre opcode di disegno SPI e due di controllo/stato**;
-l'API STM32 prepara i pacchetti e gestisce attese, risposte ed errori.
+The picture can be read on two levels: the FPGA exposes **eight SPI opcodes**
+across drawing, streaming, buffering and status; the STM32 API prepares
+packets and handles waits, responses, and errors.
 
-## Livello FPGA: gli opcode SPI
+## FPGA layer: SPI opcodes
 
-| Opcode | Cosa fa |
+| Opcode | What it does |
 |---|---|
-| `B7` | scrive un burst mascherato di 16 pixel RGB565 in PSRAM |
-| `BD` / `BE` | scrive una riga intera in streaming, una transazione sola; `BD` è full-duplex, `BE` è TX-only; [protocollo](SPI_STREAM.md) |
-| `B8` | disegna una stringa UTF-8 con i font della User Flash |
-| `B9` | riempie un rettangolo o traccia una linea RGB565, senza trasferire i singoli pixel |
-| `BC` | COPY/SCROLL front → back, con riempimento RGB565; [protocollo](BLITTER.md) |
-| `BA` | abilita double buffering, richiede PRESENT, conferma IRQ o conferma il reset (`ACK_RESET`) |
-| `BB` | legge capacità e stato coerente con CRC |
-| altro | percorso di eco diagnostica: risponde `A5` e poi l'eco del byte precedente |
+| `B7` | writes a masked burst of 16 RGB565 pixels to PSRAM |
+| `BD` / `BE` | writes an entire line in one streaming transaction; `BD` is full-duplex, `BE` is TX-only; [protocol](SPI_STREAM.md) |
+| `B8` | draws a UTF-8 string with User Flash fonts |
+| `B9` | fills a rectangle or draws a line in RGB565, without transferring individual pixels |
+| `BC` | COPY/SCROLL front → back, with RGB565 fill on exposed pixels; [protocol](BLITTER.md) |
+| `BA` | enable double buffering, request PRESENT, confirm IRQ (`ACK_PRESENT`), or confirm reset (`ACK_RESET`) |
+| `BB` | reads capacity and buffer state, CRC-checked |
+| `BF` | reads the result of the last `BE` row, CRC-checked; [protocol](SPI_STREAM.md) |
+| other | diagnostic echo path: responds `A5`, then echoes the previous byte |
 
-Double buffering e protocollo BA/BB sono descritti in [DOUBLE_BUFFER.md](DOUBLE_BUFFER.md).
-Le API sono `LCD_EnableDoubleBuffer`, `LCD_GetBufferStatus` e `LCD_Present(timeout_ms)`.
-Dopo l’abilitazione, B7/B8/B9 disegnano nel back; PRESENT aspetta le scritture,
-esegue lo swap al confine del frame e conferma IRQ via SPI.
- `B9` permette anche linee orizzontali o
-verticali spesse un pixel tramite rettangoli di altezza o larghezza 1, e di cancellare tutto lo
-schermo riempiendolo con un colore. Non esistono comandi FPGA per tracciare
-cerchi, copiare aree, rileggere i pixel o cambiare il parametro del
-colore di sfondo iniziale.
+Double buffering and the `BA`/`BB` protocol are described in
+[DOUBLE_BUFFER.md](DOUBLE_BUFFER.md). The APIs are `LCD_EnableDoubleBuffer`,
+`LCD_GetBufferStatus` and `LCD_Present(timeout_ms)`. After enabling, `B7`/`BD`/
+`BE`/`B8`/`B9` draw into the back buffer; `PRESENT` waits for pending writes,
+swaps at the frame boundary, and confirms the IRQ over SPI.
 
-Il colore con cui la FPGA inizializza il framebuffer è
-`FramebufferController.BACKGROUND_COLOR`, un **parametro di sintesi**: per
-cambiarlo si ricompila il bitstream, non si manda un comando.
+`B9` also draws one-pixel-thick horizontal or vertical lines through
+rectangles of height or width 1, and clears the whole screen by filling it
+with a color. There is no FPGA command for circles, pixel readback, or
+changing the initial background color at runtime.
 
-### Byte di stato
+The color the FPGA initializes the framebuffer with is
+`FramebufferController.BACKGROUND_COLOR`, a **synthesis parameter**: changing
+it recompiles the bitstream, no command sets it at runtime. The visible
+background can still be changed at runtime with `LCD_Clear`.
 
-Sono condivisi dai tre opcode, con l'eccezione di `E2`, e vanno letti nell'ordine in cui
-arrivano.
+### Status bytes
 
-| Byte | Significato |
+Shared by every opcode except `BF`, and must be read in the order in which
+they arrive.
+
+| Byte | Meaning |
 |---|---|
-| `A5` | primo byte di risposta, sempre presente: lo slave è vivo |
-| `C3` | comando accettabile, c'è posto nella coda |
-| `00` | occupato: coda piena per `B7`, coda/renderer condiviso occupato per `B8` e `B9`; ritentare |
-| `AC` | pacchetto accettato e messo in esecuzione |
-| `E1` | pacchetto rifiutato: parametri fuori campo o CRC errato |
-| `E2` | solo per `B8`: font non validi in User Flash, comando non disponibile |
+| `A5` | first response byte, always present: the slave is alive |
+| `C3` | acceptable command, there is room in the queue |
+| `00` | busy: queue full for `B7`/`BD`/`BE`, shared queue/renderer busy for `B8`/`B9`; retry |
+| `AC` | packet accepted and executed |
+| `E1` | packet rejected: parameters out of range or bad CRC |
+| `E2` | only for `B8`: invalid fonts in User Flash, command not available |
 
-`E2` può essere transitorio durante la verifica iniziale dei font; persiste
-quando la User Flash è stata cancellata o scritta male. L'API attende fino a
-un secondo: il timeout di disponibilità di B8, anche per occupato persistente,
-produce la fase 11 in `g_lcd_error`, spiegata sotto in
-[Diagnostica](#diagnostica-leggere-lerrore). B9 non usa i font e resta
-disponibile anche con User Flash non valida. Vedi
+`E2` may be transient during initial font verification; it persists when the
+User Flash has been erased or is malformed. The API waits up to one second —
+the availability timeout of `B8` — and even a persistent busy or `E2`
+produces phase 9–11 in `g_lcd_error`, explained below in
+[Diagnostics](#diagnostics-reading-the-error). `B9` does not use fonts and
+stays available even with invalid User Flash. See
 [PROGRAMMING.md](PROGRAMMING.md).
 
-### `B7`, scrittura framebuffer
+### `B7`, write framebuffer
 
-Un burst copre 16 pixel a partire da un indirizzo lineare **multiplo di 16** e
-minore di 130.560 (480×272). Una maschera a 16 bit sceglie quali dei 16 pixel
-scrivere davvero, ed è ciò che permette rettangoli non allineati: i bordi
-usano maschere parziali. Il commit avviene alla ricezione del byte `5A`.
+A burst covers 16 pixels starting from a linear address **multiple of 16**
+and less than 130,560 (480×272). A 16-bit mask selects which of the 16
+pixels are actually written, which is what allows non-16-aligned rectangles:
+the edge bursts use partial masks. The commit happens on receipt of the `5A`
+byte.
 
-Non c'è CRC prima del commit, né rollback: un errore di trasmissione può essere
-segnalato dall'eco *dopo* che la scrittura è stata accettata.
+There is no CRC before commit and no rollback: a transmission error can only
+be caught by the echo *after* the write has already been accepted.
 
-### `BD` / `BE`, scrittura in streaming di una riga
+### `BD` / `BE`, stream write one line
 
-È il percorso pixel preferito. Una sola transazione porta header, payload
-contiguo, CRC sul payload e commit: per una riga piena 976 byte in un DMA,
-contro i trenta pacchetti `B7` da 41 byte che servivano prima. `x` e `count`
-sono al pixel, non al gruppo di 16, quindi il payload non ha padding e coincide
-con la mappa di pixel che un client fornisce già.
+This is the preferred pixel path. A single transaction carries a header, a
+contiguous payload, a CRC over the payload, and a commit: 976 bytes in one
+DMA for a full line, against the thirty 41-byte `B7` packets that used to be
+needed. `x` and `count` are expressed in pixels, not in groups of 16, so the
+payload carries no padding and matches the pixel map a client already
+provides.
 
-`BD` mantiene le risposte inline full-duplex per compatibilità e diagnostica.
-`BE` trasmette gli stessi byte senza campionare MISO e legge l'esito in seguito
-con `BF`: riduce il lavoro di ricezione e l'overhead del percorso pixel. Questa
-variante è pensata per ottenere un frame rate più alto quando il display sarà
-gestito da LVGL tramite una callback `flush`; LVGL non è ancora integrato nel
-progetto, ma il contratto per trasferire una riga è già disponibile.
+`BD` keeps full-duplex inline responses for compatibility and diagnostics.
+`BE` transmits the same bytes without sampling MISO and reports the result
+later through `BF`, which reduces receive work and pixel-path overhead. This
+variant targets a higher frame rate when the display is driven by LVGL
+through a `flush` callback: `GuiTask` and `DisplayTask` already use it to
+send RGB565 rectangles to the FPGA framebuffer.
 
-Come `B7` non è atomico: i gruppi si scrivono mentre arrivano, il CRC finale
-segnala senza annullare, e la riparazione è rispedire la riga. Formato completo,
-semantica dell'overflow e API in [SPI_STREAM.md](SPI_STREAM.md).
+Like `B7`, this write is not atomic: groups are written as they arrive, the
+final CRC reports without cancelling, and recovery means resending the line.
+Full format, overflow semantics and API in [SPI_STREAM.md](SPI_STREAM.md).
 
-### `B8`, testo
+### `B8`, text
 
-Pacchetto unico chiuso da un CRC16-CCITT (init `FFFF`, polinomio `1021`) e da
-un byte di commit `A6`. Il CRC è verificato **prima** di disegnare, quindi qui
-un errore di trasmissione fa rifiutare il comando invece di sporcare lo
-schermo — a differenza di `B7`.
+A single packet closed by a CRC16-CCITT (init `FFFF`, polynomial `1021`) and
+an `A6` commit byte. The CRC is checked **before** drawing, so a transmission
+error here causes the command to be rejected instead of corrupting the
+screen — unlike `B7`.
 
-| Parametro | Valori |
+| Parameter | Values |
 |---|---|
 | font_id | 0 = 8x16, 1 = 12x24, 2 = 16x32 |
-| flags | bit 0 sfondo trasparente, bit 1 ritorno a capo automatico |
-| box | riquadro di clipping; 0 in larghezza o altezza si estende al bordo schermo |
-| stringa | UTF-8, al massimo 64 byte codificati |
+| flags | bit 0 transparent background, bit 1 word wrapping |
+| box | clipping frame; 0 in width or height extends to the edge of the screen |
+| string | UTF-8, at most 64 encoded bytes |
 
-Il subset di glifi è ASCII stampabile, Latin-1, euro e le quattro frecce; un
-codepoint assente diventa `?`. Le celle sono monospaziate. Il clipping al box e
-allo schermo è sempre attivo. Il ritorno a capo avviene sul carattere di
-nuova riga, e in più automaticamente se è impostato il flag wrap; senza wrap la
-parte a destra del box viene scartata.
+The glyph subset is printable ASCII, Latin-1, the euro sign, and the four
+arrows; an absent codepoint becomes `?`. Cells are monospaced. Clipping to
+the box and to the screen is always active. A new line starts on the newline
+character, and also automatically when the wrap flag is set; without wrap,
+the part of the string to the right of the box is discarded.
 
-### `B9`, rettangoli e linee
+### `B9`, rectangles and lines
 
-Un pacchetto di **18 byte**, indipendentemente dall'area, descrive la forma.
-La FPGA genera i burst mascherati in PSRAM. Condivide coda e renderer con B8:
-testo e riempimenti vengono eseguiti uno alla volta.
+An 18-byte packet, regardless of area, describes the shape. The FPGA
+generates the masked bursts in PSRAM. It shares the queue and renderer with
+`B8`: text and fills execute one at a time.
 
-È qui che sta il guadagno, ed è aritmetica del protocollo, non una stima:
-`B7` trasporta 16 pixel per pacchetto da 41 byte, quindi cancellare lo schermo
-significa 8160 pacchetti e circa 334 kB sul filo; `B9` fa la stessa cosa con
-**un pacchetto da 18 byte**. Per questo l'interfaccia resta usabile da una MCU
-piccola, che non deve né generare né trasferire i pixel.
+The gain here is protocol arithmetic, not an estimate: `B7` carries 16
+pixels per 41-byte packet, so clearing the screen means 8160 packets and
+about 334 kB on the wire; `B9` does the same thing with **one 18-byte
+packet**. This keeps the interface usable from a small MCU that neither
+generates nor transfers pixels.
 
-Misurato al banco il 10 settembre 2026, con `g_lcd_clear_ms16`: **128 ms per
-sedici clear a schermo intero, cioè 8 ms l'uno**. Il limite non è più la SPI ma
-il renderer, che costruisce i burst in serie: 8160 burst da 16 pixel a 27 MHz,
-più l'handshake verso il dominio PSRAM. Restano circa 37 volte meno dei ~300 ms
-che la stessa operazione costa passando pixel per pixel da `B7`.
+Measured on the bench with `g_lcd_clear_ms16`: **128 ms for sixteen
+full-screen clears, i.e. 8 ms each**. The bottleneck is no longer the SPI but
+the renderer, which builds the bursts serially: 8160 bursts of 16 pixels at
+27 MHz, plus the handshake into the PSRAM domain. That is roughly 37 times
+less than the ~300 ms the same operation costs pixel by pixel through `B7`.
 
-| Offset | Campo MOSI |
+| Offset | MOSI field |
 |---:|---|
 | 0 | opcode `B9` |
-| 1 | dummy/status, inviato a zero dall'API |
-| 2 | tipo forma: `00` = rettangolo, `01` = linea |
-| 3 | flags riservati: `00` |
-| 4..5 | x del rettangolo / x0 della linea, big endian |
-| 6..7 | y del rettangolo / y0 della linea, big endian |
-| 8..9 | larghezza del rettangolo / x1 della linea, big endian |
-| 10..11 | altezza del rettangolo / y1 della linea, big endian |
-| 12..13 | colore RGB565, big endian |
-| 14..15 | CRC16-CCITT sui byte 2..13, init `FFFF`, polinomio `1021`, big endian |
+| 1 | dummy/status, sent as zero by the API |
+| 2 | shape type: `00` = rectangle, `01` = line |
+| 3 | reserved flags: `00` |
+| 4..5 | x of the rectangle / x0 of the line, big endian |
+| 6..7 | y of the rectangle / y0 of the line, big endian |
+| 8..9 | width of the rectangle / x1 of the line, big endian |
+| 10..11 | height of the rectangle / y1 of the line, big endian |
+| 12..13 | RGB565 color, big endian |
+| 14..15 | CRC16-CCITT on bytes 2..13, init `FFFF`, polynomial `1021`, big endian |
 | 16 | commit `A6` |
-| 17 | dummy per leggere l'esito |
+| 17 | dummy, reads the outcome |
 
-Tenere CS basso per il pacchetto. MISO restituisce `A5` all'offset 0,
-`C3` oppure `00` all'offset 1, eco del byte MOSI precedente agli offset
-2..16, infine `AC` o `E1` all'offset 17. Un poll separato di due byte
-`B9 00` legge la disponibilità senza disegnare. Dopo `AC`, fare polling
-finché torna `C3`, come fa `LCD_FillRect`; non equivale ad attendere il vblank.
+Keep CS low for the whole packet. MISO returns `A5` at offset 0, `C3` or `00`
+at offset 1, the echo of the previous MOSI byte through offsets 2..16, and
+finally `AC` or `E1` at offset 17. A separate two-byte poll `B9 00` reads
+availability without drawing. After `AC`, poll until `C3` returns, as
+`LCD_FillRect` does; this is not the same as waiting for vblank.
 
-Per il rettangolo, sul filo x deve essere 0..479 e y 0..271;
-larghezza 0..1023, altezza 0..511.
-Il renderer taglia al bordo dello schermo; dimensione zero estende fino al
-bordo corrispondente. **L'API C è più restrittiva**: richiede dimensioni non
-nulle e rettangolo interamente nello schermo.
+For the rectangle, on the wire x must be 0..479 and y 0..271; width 0..1023,
+height 0..511. The renderer clips to the edge of the screen; a zero
+dimension extends to the corresponding edge. **The C API is more
+restrictive**: it requires non-null dimensions and a rectangle entirely on
+screen.
 
-Per la linea, entrambi gli estremi devono stare nello schermo: x0/x1 0..479,
-y0/y1 0..271. Estremi inclusi, spessore un pixel, tutte le direzioni, nessun
-clipping o antialiasing. Estremi coincidenti disegnano un punto.
-La FPGA usa Bresenham intero: `dx=abs(x1-x0)`, `dy=-abs(y1-y0)`,
-`err=dx+dy`; per ogni passo usa lo stesso `e2=2*err`, avanza X se `e2>=dy`
-e Y se `e2<=dx`. Nei casi esattamente a metà, invertire gli estremi può
-selezionare un pixel diverso. I pixel consecutivi sullo stesso burst
-allineato e sulla stessa riga vengono riuniti in una maschera unica.
+For the line, both endpoints must fit on screen: x0/x1 0..479, y0/y1 0..271.
+Endpoints included, one pixel thick, any direction, no clipping or
+anti-aliasing. Coincident endpoints draw a single point. The FPGA uses
+integer Bresenham: `dx=abs(x1-x0)`, `dy=-abs(y1-y0)`, `err=dx+dy`; each step
+uses the same `e2=2*err`, advancing X if `e2>=dy` and Y if `e2<=dx`. On exact
+ties, swapping the endpoints can select a different pixel. Consecutive
+pixels that land in the same aligned burst on the same line are merged into
+a single mask.
 
-I bitstream precedenti, che supportano solo tipo 0, rifiutano tipo 1 con
-`E1`: aggiornare anche la FPGA quando si usa `LCD_DrawLine` per linee oblique.
-Il protocollo non espone ancora una negoziazione delle capacità.
+Older bitstreams that only support type 0 reject type 1 with `E1`: update
+the FPGA before using `LCD_DrawLine` for diagonal lines. The protocol does
+not yet expose capability negotiation.
 
-Tipo, flags, coordinate o CRC non validi fanno rifiutare il comando prima
-del disegno. Dopo il commit accettato, alzare CS non annulla l'operazione.
-La verifica CRC non rende l'aggiornamento visivamente atomico: la FPGA
-scrive progressivamente nel target selezionato. Con double buffering abilitato
-le modifiche diventano visibili insieme dopo PRESENT.
+Invalid type, flags, coordinates or CRC reject the command before drawing.
+After the commit is accepted, raising CS does not cancel the operation. CRC
+checking does not make the update visually atomic: the FPGA writes
+progressively to the selected target. With double buffering enabled, the
+changes become visible together after `PRESENT`.
 
-## Livello STM32: l'API C e l'uso da C++
+## STM32 level: the C API and use from C++
 
-Da `Core/Inc/lcd_spi.h`. Tutte bloccanti, non rientranti, un solo chiamante.
-Ritornano 1 in caso di successo e 0 per errore.
+Declared in `Core/Inc/lcd_spi.h`. All calls block, none re-enter, and each
+has a single caller. They return 1 on success, 0 on error.
 
-| Funzione | Cosa fa | Come |
+| Function | What it does | How |
 |---|---|---|
-| `LCD_WriteRect(x,y,w,h,pixels)` | rettangolo di pixel RGB565 arbitrari | burst `B7` |
-| `LCD_FillRect(x,y,w,h,color)` | riempimento uniforme | un comando `B9` più polling |
-| `LCD_Clear(color)` | riempie tutto il display | `LCD_FillRect(0,0,480,272,color)`, quindi `B9` |
-| `LCD_DrawHLine(x,y,length,color)` | linea orizzontale, spessore 1 pixel | `LCD_FillRect(x,y,length,1,color)`, quindi `B9` |
-| `LCD_DrawVLine(x,y,length,color)` | linea verticale, spessore 1 pixel | `LCD_FillRect(x,y,1,length,color)`, quindi `B9` |
-| `LCD_DrawLine(x0,y0,x1,y1,color)` | linea con estremi inclusi, qualsiasi direzione | B9 tipo 1; H/V e punto usano il percorso fill tipo 0 |
-| `LCD_DrawTextFPGA(...)` | testo reso **dalla FPGA** | comando `B8` |
+| `LCD_WriteRect(x,y,w,h,pixels)` | arbitrary RGB565 pixel rectangle | `B7` bursts |
+| `LCD_WriteRectStream(x,y,w,h,pixels)` | same contract, one row per SPI transaction | `BE` write, `BF` result |
+| `LCD_FillRect(x,y,w,h,color)` | uniform fill | one `B9` command plus polling |
+| `LCD_Clear(color)` | fills the entire display | `LCD_FillRect(0,0,480,272,color)` |
+| `LCD_DrawHLine(x,y,length,color)` | horizontal line, 1 pixel thick | `LCD_FillRect(x,y,length,1,color)` |
+| `LCD_DrawVLine(x,y,length,color)` | vertical line, 1 pixel thick | `LCD_FillRect(x,y,1,length,color)` |
+| `LCD_DrawLine(x0,y0,x1,y1,color)` | line with inclusive endpoints, any direction | H/V delegates to `LCD_DrawHLine`/`LCD_DrawVLine`; diagonal uses `B9` type 1 |
+| `LCD_DrawTextFPGA(...)` | text rendered **by the FPGA** | `B8` command |
+| `LCD_CopyRect(source,dest,x,y,w,h,dest_x,dest_y)` | copies a rectangle between the two PSRAM buffers | `BC` COPY; see [BLITTER.md](BLITTER.md) |
+| `LCD_ScrollRect(source,dest,x,y,w,h,dx,dy,fill)` | translates a viewport, fills exposed pixels | `BC` SCROLL; see [BLITTER.md](BLITTER.md) |
 
-`LCD_FillRect` costruisce due buffer locali di 18 byte (TX/RX), senza riga di
-pixel né framebuffer completo. Attende la disponibilità B9 prima dell'invio
-e dopo l'accettazione. `LCD_WriteRect` continua a inviare i pixel arbitrari
-tramite B7; `pixels` contiene `w*h` valori RGB565 contigui, per righe.
-Entrambe rifiutano rettangoli vuoti o fuori schermo **senza clipping**.
-Un errore rilevato dopo un commit non annulla le scritture già accettate:
-un ritorno 0 non garantisce che lo schermo sia rimasto invariato.
+`LCD_FillRect` builds two 18-byte local buffers (TX/RX), without touching
+line pixels or the full framebuffer. It waits for `B9` availability before
+sending and after acceptance. `LCD_WriteRect` sends arbitrary pixels through
+`B7`; `pixels` holds `w*h` contiguous RGB565 values, row by row.
+`LCD_WriteRectStream` follows the same contract through `BE`/`BF` instead,
+overlapping the assembly of the next row with the DMA transfer of the
+current one. Both `LCD_WriteRect` and `LCD_FillRect` reject empty or
+off-screen rectangles **without clipping**. An error detected after a commit
+does not undo writes already accepted: a return of 0 does not guarantee the
+screen is unchanged.
 
-`LCD_DrawTextFPGA` invece fa clipping, perché il riquadro è parte del protocollo.
-L'API accetta x < 480, y < 272, box_width <= 480 e box_height <= 272,
-font_id 0..2, solo i due flag definiti e una stringa C UTF-8 non nulla di
-massimo 64 byte, escluso il terminatore. Attende il renderer dopo l'invio.
+`LCD_DrawTextFPGA` clips, because the box is part of the protocol. The API
+accepts x < 480, y < 272, box_width <= 480, box_height <= 272, font_id 0..2,
+only the two defined flag bits, and a non-null UTF-8 C string of at most 64
+bytes excluding the terminator. It waits for the renderer after sending.
 
-Le linee si estendono a destra/in basso: l'ultimo pixel è rispettivamente
-`x+length-1` o `y+length-1`. Lunghezza zero e linee anche solo parzialmente
-fuori schermo restituiscono 0 senza inviare comandi; lunghezza 1 disegna un pixel.
-Per una linea più spessa usare direttamente `LCD_FillRect`.
+The lines extend right/down: the last pixel is respectively `x+length-1` or
+`y+length-1`. Zero length, and lines even only partially off-screen, return
+0 without sending any command; length 1 draws a single pixel. For a thicker
+line use `LCD_FillRect` directly.
+
+`LCD_CopyRect` and `LCD_ScrollRect` require double buffering enabled, source
+equal to the current front buffer and destination equal to the current back
+buffer; both reject out-of-screen or zero-size rectangles before sending
+anything. See [BLITTER.md](BLITTER.md) for the COPY/SCROLL contract,
+including how `LCD_ScrollDemo_Run` uses them together with `PRESENT`.
 
 ```c
-LCD_DrawHLine(0, 0, 480, 0xFFFF);   // intera prima riga, bianca
-LCD_DrawVLine(479, 0, 272, 0xF800); // intera ultima colonna, rossa
-// Controllare il valore restituito: 1 successo, 0 errore.
+LCD_DrawHLine(0, 0, 480, 0xFFFF);   // whole first row, white
+LCD_DrawVLine(479, 0, 272, 0xF800); // whole last column, red
+// Check the return value: 1 success, 0 error.
 ```
 
-Le firme complete sono in
+Complete signatures are in
 [`lcd_spi.h`](../stm32/WeAct_H743_SPI/Core/Inc/lcd_spi.h).
-Non esiste un wrapper C++ separato; gli header grafici attuali non includono
-guardie `extern "C"`. Per chiamare le implementazioni compilate come C da
-un file C++, includerli così:
+There is no separate C++ wrapper; the current graphics headers do not
+include `extern "C"` guards. To call implementations compiled as C from a
+C++ file, include them like this:
 
 ```cpp
 extern "C" {
 #include "lcd_spi.h"
-#include "lcd_text.h" // solo se si usa anche il renderer CPU
+#include "lcd_text.h" // only if the CPU-rendered path is also used
 }
 ```
 
-### Testo renderizzato dalla CPU: esiste ancora, ma è superato
+### CPU-rendered text: still there, but outdated
 
-`Core/Inc/lcd_text.h` espone `LCD_DrawCodepoint` e `LCD_DrawText`, che
-disegnano con una tabella 12x24 residente nella flash **dell'STM32** e mandano
-i pixel come rettangoli `B7`. È il prototipo che ha preceduto il renderer FPGA:
-cella fissa 12x24 soltanto, sfondo sempre opaco, nessun clipping né wrap
-automatico. `LCD_DrawText` gestisce `\n` e ignora `\r`; valida l'intero
-riquadro prima di inviare i pixel. Si usa `LCD_DrawTextFPGA` al suo posto; resta perché è un utile
-termine di paragone e non dipende dalla User Flash.
+`Core/Inc/lcd_text.h` exposes `LCD_DrawCodepoint` and `LCD_DrawText`, which
+draw from a fixed 12x24 glyph table resident in **STM32** flash and send
+pixels as `B7` rectangles. It is the prototype that preceded the FPGA
+renderer: fixed 12x24 cell only, background always opaque, no clipping or
+automatic wrap. `LCD_DrawText` handles `\n` and ignores `\r`; it validates
+the box before sending pixels. Use `LCD_DrawTextFPGA` instead; this path
+stays because it is a useful point of comparison and does not depend on User
+Flash.
 
-## Programmi di collaudo
+## Testing programs
 
-Non sono primitive grafiche ma disegnano, quindi vale la pena sapere che
-esistono. Si accendono dai flag in `Core/Inc/spi_diag_config.h`.
+They are not graphics primitives, but they draw, so it is worth knowing they
+exist. Each is gated by a flag in `Core/Inc/spi_diag_config.h`.
 
-| Simbolo | Flag | Cosa disegna |
+| Symbol | Flag | What it draws |
 |---|---|---|
-| `LCD_Demo_Run` | `LCD_BOOT_TESTS` | rettangolo 67x40 a (101,81), bordi non allineati |
-| `LCD_Stress_Run` | `LCD_BOOT_TESTS` | rettangoli ripetuti per la qualifica prolungata |
-| `LCD_TextDemo_Run` | `LCD_TEXT_DEMO` | testo con i font CPU |
-| `LCD_FPGATextDemo_Run` | `LCD_FPGA_TEXT_DEMO` | clear, rettangolo, cornici H/V e stella a otto raggi B9, testo FPGA |
+| `LCD_TextDemo_Run` | `LCD_TEXT_DEMO` | text with CPU-rendered fonts |
+| `LCD_FPGATextDemo_Run` | `LCD_FPGA_TEXT_DEMO` | double-buffered frames, then clear, fills, H/V lines, an eight-ray `B9` star, and FPGA text |
+| `LCD_StreamBench_Run` | `LCD_STREAM_BENCH` | full screen twice, once via `B7` and once via `BE`, for comparison |
+| `LCD_ScrollDemo_Run` | `LCD_SCROLL_DEMO` | terminal-style demo: `COPY` for the static frame, 32 rounds of `SCROLL` plus text for the moving log |
+| `LCD_Demo_Run` | `LCD_BOOT_TESTS` | rectangle 67x40 at (101,81), edges not 16-aligned |
+| `LCD_Stress_Run` | `LCD_BOOT_TESTS` | repeated rectangles for extended qualification |
 
-Ciascuno pubblica il proprio stato in una variabile globale letta via SWD dal
-runner di collaudo: 0 non richiesto, 1 in corso, 2 completato, 3 fallito.
-La demo FPGA espone anche `g_lcd_clear_ms16`: millisecondi complessivi di
-16 clear a schermo intero, misurati prima del campione grafico/testuale.
+Each publishes its state in a global variable read via SWD by the test
+runner: 0 not requested, 1 running, 2 complete, 3 failed. The FPGA text demo
+also exposes `g_lcd_clear_ms16`: total milliseconds for 16 full-screen
+clears, measured after the graphics/text sample. The stream benchmark
+exposes `g_lcd_bench_b7_ms`/`g_lcd_bench_bd_ms` and the matching
+`LcdProfile` structs; the scroll demo checks its own IRQ count against the
+33 `PRESENT` calls it issues.
 
-## Diagnostica: leggere l'errore
+## Diagnostics: reading the error
 
-Quando una primitiva restituisce 0, il motivo resta registrato in
-`g_lcd_error`, un `uint32_t[6]` letto via SWD dal runner di collaudo:
+When a primitive returns 0, the failure is recorded in `g_lcd_error`, a
+`uint32_t[6]` read via SWD by the test runner:
 
-| Indice | Contenuto |
+| Index | Contents |
 |---:|---|
-| 0 | fase; **0 significa nessun errore** |
-| 1 | indirizzo |
-| 2 | indice del byte nel pacchetto |
-| 3 | valore atteso |
-| 4 | valore ricevuto |
-| 5 | codice di errore HAL |
+| 0 | phase; **0 means no error** |
+| 1 | address |
+| 2 | index of the byte in the packet |
+| 3 | expected value |
+| 4 | value received |
+| 5 | HAL error code |
 
-Viene registrato **solo il primo guasto**: le chiamate successive non
-sovrascrivono il record, quindi la fase indica dove le cose sono andate storte
-la prima volta, non l'ultima.
+**Only the first fault is recorded**: later calls do not overwrite it, so
+the phase points to where things first went wrong, not where they last did.
 
-| Fase | Dove | Significato |
+| Phase | Where | Meaning |
 |---:|---|---|
-| 1 | `exchange` | il trasferimento SPI HAL è fallito |
-| 2, 3, 4 | attesa `B7` | primo byte non `A5`; stato non `C3`/`00`; timeout |
-| 5, 6 | `LCD_WriteRect` | primo byte non `A5`; secondo byte non `C3` |
-| 7, 8 | `LCD_WriteRect` | esito del commit non `AC`; eco non corrispondente |
-| 9, 10 | attesa `B8` | primo byte non `A5`; stato non `C3`/`00`/`E2` |
-| 11 | attesa `B8` | timeout: font non validi, o renderer bloccato |
-| 12, 13 | `LCD_DrawTextFPGA` | primo byte non `A5`; secondo byte non `C3` |
-| 14, 15 | `LCD_DrawTextFPGA` | eco non corrispondente; esito non `AC` |
-| 16, 17 | attesa `B9` | primo byte non `A5`; stato non `C3`/`00` |
-| 18 | attesa `B9` | timeout: renderer occupato oltre un secondo |
-| 19, 20 | `B9`, invio | primo byte non `A5`; secondo byte non `C3` |
-| 21 | `B9`, invio | eco non corrispondente: problema di trasporto |
-| 22 | `B9`, invio | esito `E1`: **la FPGA ha rifiutato la forma** |
-| 23–25 | `BB` | identità/versione, CRC o campi di stato errati |
-| 26 | controllo buffer | timeout in attesa di completamento |
-| 27–29 | `BC` | COPY/SCROLL front → back, con riempimento RGB565; [protocollo](BLITTER.md) |
-| `BA` | disponibilità, eco o commit errato |
-| 30–31 | ACK | risultato/IRQ pendente errato, oppure GPIO rimasto basso |
-| 32–33 | double buffering | stato incompatibile con enable o PRESENT |
-| 34–36 | PRESENT | esito/sequenza/front errati, GPIO IRQ non basso, timeout |
-| 37 | demo | conteggio fronti EXTI diverso dalle 16 presentazioni iniziali |
-| 58 | reset FPGA | `ACK_RESET` non ha spento `reset_seen`, oppure ha dato errore |
-| 59 | reset FPGA | nessuna risposta SPI dopo l'impulso su `FPGA_RST_N` |
-| 60 | reset FPGA | **`reset_seen` ancora spento dopo l'impulso: il reset non è arrivato** |
+| 1 | any exchange | SPI HAL transfer failed |
+| 2–4 | waiting on `B7` | first byte not `A5`; state not `C3`/`00`; timeout (4 is reused for the busy retry inside a `B7` send) |
+| 5, 6 | `LCD_WriteRect` send | first byte not `A5`; second byte not `C3`/`00` |
+| 7, 8 | `LCD_WriteRect` send | commit outcome not `AC`; echo mismatch |
+| 9–11 | waiting on `B8` | first byte not `A5`; state not `C3`/`00`/`E2`; timeout |
+| 12–15 | `LCD_DrawTextFPGA` | first byte not `A5`; second byte not `C3`; echo mismatch; commit not `AC` |
+| 16–18 | waiting on `B9` | first byte not `A5`; state not `C3`/`00`; timeout |
+| 19–22 | `B9` send | first byte not `A5`; second byte not `C3`; echo mismatch; outcome `E1` — **the FPGA rejected the shape** |
+| 23–25 | `BB` | wrong signature/version/buffer count; CRC mismatch; reserved bits set |
+| 26 | any command | timeout waiting for the buffer to go idle |
+| 27–29 | `BA` send | first/second byte wrong; echo mismatch; commit not `AC` |
+| 30, 31 | `ACK_PRESENT` | result or IRQ still set after the ack; IRQ line still low afterwards |
+| 32 | `LCD_EnableDoubleBuffer` | rejected, not enabled, or buffer selection unchanged |
+| 33, 34, 36 | `LCD_Present` | not enabled or IRQ already pending; completion status mismatch; timeout |
+| 37 | `LCD_FPGATextDemo_Run` | EXTI edge count different from the 16 presentations |
+| 38–43 | `BC` (`LCD_CopyRect`/`LCD_ScrollRect`) | bitstream too old for blit (version < 2); source/destination role mismatch; first/second byte wrong; echo mismatch; commit not `AC`; result nonzero after completion |
+| 44 | `LCD_ScrollDemo_Run` | EXTI edge count different from the 33 presentations |
+| 49 | `LCD_WriteRectStream` | retry timeout after 1 s |
+| 50 | `BE` transfer | DMA begin or wait failed |
+| 51–57 | `BF` (`fast_stream_status`) | prescaler change/restore failed; exchange failed; signature/version wrong; CRC mismatch; reported `y` mismatch; ready bit timeout; unexpected result byte |
+| 58 | `ACK_RESET` | result or `reset_seen` still set after the ack |
+| 59, 60 | FPGA reset pulse | no SPI response after the pulse; **`reset_seen` still off after the pulse: reset did not arrive** |
 
-La fase più informativa è la **22**. Significa che il pacchetto è arrivato
-integro ma il renderer non lo ha accettato, e le cause sono poche: CRC16
-sbagliato, coordinate fuori dai limiti sul filo, flag diversi da zero, oppure
-tipo forma `01` inviato a **un bitstream più vecchio che conosce solo il
-rettangolo**. Quest'ultimo caso è il più insidioso perché il firmware sembra
-corretto: se `LCD_DrawLine` fallisce solo sulle oblique, mentre orizzontali e
-verticali funzionano, è la FPGA a essere da riprogrammare, non il codice.
+The most informative phase is **22**. It means the packet arrived intact but
+the renderer did not accept it, and the causes are few: wrong CRC16,
+out-of-range coordinates on the wire, non-zero reserved flags, or a type-`01`
+shape sent to **an older bitstream that only knows rectangles**. That last
+case is the most misleading, because the firmware looks correct: if
+`LCD_DrawLine` only fails on diagonals while horizontals and verticals work,
+it is the FPGA that needs reprogramming, not the code.
 
-La fase **11** ha un valore analogo per il testo: è la firma di una User Flash
-cancellata o scritta male. Vedi [PROGRAMMING.md](PROGRAMMING.md).
+Phase **11** has the same significance for text: it is the signature of a
+User Flash image that is erased or malformed. See
+[PROGRAMMING.md](PROGRAMMING.md).
 
-Errori del blitter: 38 versione BB senza BC; 39 ruoli front/back incompatibili;
-40 header/disponibilità BC; 41 echo; 42 commit rifiutato; 43 risultato di
-esecuzione; 44 numero IRQ della demo scroll. Un timeout usa la fase 26.
+### When firmware and bitstream are not the same version
 
-### Quando firmware e bitstream non sono della stessa versione
+It is worth recognizing the symptom, because it once cost a wrong diagnosis.
+The demo always stopped at the same point — the first five texts drawn, then
+nothing from the sixth onward — with phase 9, i.e. the first byte reading
+`00` instead of `A5`. That byte is a constant preloaded into the shift
+register: reading it as zero means the SPI slave was not driving the line, a
+state it should never be in.
 
-Vale la pena riconoscerne il sintomo, perché il 10 settembre 2026 è costato
-una diagnosi sbagliata. La demo si fermava **sempre nello stesso punto** — i
-primi cinque testi disegnati, dal sesto in poi niente — con fase 9, cioè primo
-byte `00` invece di `A5`. Quel byte è una costante precaricata nello shift
-register: leggerlo a zero significa che lo slave SPI non stava pilotando la
-linea, uno stato in cui non dovrebbe trovarsi.
+The cause was not electrical: there was a stale bitstream on the board from
+before the last RTL change, so firmware and logic were speaking different
+contracts. Rebuilding and reprogramming fixed it without touching anything
+else.
 
-La causa non era elettrica: sulla scheda c'era un bitstream **anteriore
-all'ultima modifica dell'RTL**, quindi firmware e logica si parlavano con due
-contratti diversi. Ricostruire e riprogrammare ha risolto senza toccare altro.
+The quick way to rule this out is to compare dates: if `impl/pnr/LCD.fs` is
+older than a file under `src/`, the board is not running what you are
+reading in the sources. A fault that is **deterministic and always on the
+same command** points to a mismatch like this; faulty wiring instead
+produces errors that are scattered and irreproducible.
 
-Il modo rapido di escluderlo è confrontare le date: se `impl/pnr/LCD.fs` è più
-vecchio di un file sotto `src/`, la scheda non sta eseguendo quello che si sta
-leggendo nei sorgenti. Un guasto **deterministico e sempre allo stesso comando**
-punta a un disallineamento del genere; un cablaggio difettoso darebbe errori
-sparsi e irriproducibili.
+## What's missing, in short
 
-## Cosa manca, in breve
-
-COPY e SCROLL fra front/back sono descritti in [BLITTER.md](BLITTER.md).
-Non esistono ancora cerchi, poligoni come comando dedicato,
-rilettura dei pixel, triple buffering, modifica del parametro di sfondo iniziale
-a runtime, font proporzionali, rotazione o scalatura dei glifi.
-Il disegno diretto nel buffer visibile al reset resta soggetto a tearing;
-abilita double buffering e usa PRESENT per aggiornamenti al confine del frame.
-Il contenuto di sfondo visibile si può invece cambiare a runtime con `LCD_Clear`.
-
-Le idee per superare parte di questi limiti sono raccolte in
-[LVGL_IMPL.md](LVGL_IMPL.md), che è però uno studio speculativo. Lo studio storico
-[BLITTING_ROP_STUDY.md](BLITTING_ROP_STUDY.md) conserva le alternative per ROP
-e copie; il contratto implementato di COPY/SCROLL è in [BLITTER.md](BLITTER.md).
+COPY and SCROLL between front/back are described in
+[BLITTER.md](BLITTER.md). There is still no dedicated command for circles or
+polygons, no pixel readback, no triple buffering, no way to change the
+initial background parameter at runtime, and no proportional fonts, glyph
+rotation, or scaling. Direct drawing into the buffer visible on reset
+remains subject to tearing; enable double buffering and use `PRESENT` for
+frame-boundary updates.
