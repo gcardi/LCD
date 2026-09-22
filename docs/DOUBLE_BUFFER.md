@@ -1,224 +1,238 @@
-# Double buffering, PRESENT e IRQ
+# Double buffering, PRESENT and IRQ
 
-Implementazione del 15 settembre 2026. Blitter, scroll e triple buffering restano futuri.
+Double buffering shipped September 15, 2026; the `BC` COPY/SCROLL blitter
+extension described in [BLITTER.md](BLITTER.md) shipped the next day. Triple
+buffering remains future work.
 
-## Memoria e disegno
+## Memory and drawing
 
-Il controller usa due slot PSRAM disgiunti, indirizzati in pixel RGB565:
+The controller uses two disjoint PSRAM slots, addressed in RGB565 pixels:
 
-| Buffer | Base in pixel | Base in byte | Dimensione immagine |
+| Buffer | Base in pixels | Base in bytes | Image size |
 |---|---:|---:|---:|
-| 0 | `000000` | `000000` | 480 x 272, 261120 byte |
-| 1 | `020000` | `040000` | 480 x 272, 261120 byte |
+| 0 | `000000` | `000000` | 480 x 272, 261120 bytes |
+| 1 | `020000` | `040000` | 480 x 272, 261120 bytes |
 
-Le basi sono esadecimali. Ogni slot riserva 256 KiB: in totale 512 KiB,
-con 1024 byte di padding per slot. Il passo a potenza di due evita un sommatore
-nel percorso critico degli indirizzi. L'IP locale W955D8MBYA espone indirizzi
-pixel a 21 bit; gli slot usano soltanto i primi 18 bit. Non vengono esposti
-indirizzi fisici arbitrari al master.
+The bases are hexadecimal. Each slot reserves 256 KiB: 512 KiB in total,
+with 1024 bytes of padding per slot. The power-of-two step avoids an adder
+in the critical address path. The onboard W955D8MBYA PSRAM IP exposes 21-bit
+pixel addresses; the two slots only use the first 18 bits (1 bit selects the
+slot, 17 bits address within it). They are not exposed to the master as
+arbitrary physical addresses.
 
-Al reset: front 0, disegno 0, double buffering disabilitato, sequenza 0, IRQ alto,
-`reset_seen` acceso. Vale per qualunque reset: accensione, pulsante e linea
-`FPGA_RST_N` comandata dalla MCU (vedi sotto, *Reset comandato dalla MCU*).
-L'inizializzazione a nero del buffer 0 e la compatibilità B7/B8/B9 restano attive.
-`ENABLE_DOUBLE` aspetta le operazioni precedenti e seleziona come destinazione
-il buffer opposto al front. **Il back non viene inizializzato né copiato:**
-il chiamante deve cancellarlo o ricostruirlo completamente prima del primo PRESENT.
-Anche dopo ogni swap il back contiene una vecchia immagine; gli aggiornamenti
-parziali richiedono una gestione esplicita della coerenza.
+On reset, the front and drawing buffers are set to 0, double buffering is
+disabled, the sequence is set to 0, the IRQ line is left high (inactive),
+and `reset_seen` is set. This applies to any reset: power-on, button, or the
+`FPGA_RST_N` pulse commanded by the MCU (see *Reset commanded by the MCU*
+below). Buffer 0's initial fill with `BACKGROUND_COLOR` (black by default,
+see [GRAPHICS_COMMANDS.md](GRAPHICS_COMMANDS.md)) and B7/B8/B9 compatibility
+remain active regardless of double-buffering state. `ENABLE_DOUBLE` waits
+for the producers already in flight and then selects the buffer opposite the
+front as the drawing target. **The back buffer is not initialized or
+copied:** the caller must clear it or completely rebuild it before the first
+PRESENT. Even after a swap, the new back buffer still holds the previous
+front's old image; partial updates need explicit handling of that leftover
+content.
 
-B7 pixel, B8 testo e B9 forme usano tutti il back quando il modo è abilitato.
-Il target non può cambiare durante un comando: ENABLE/PRESENT chiudono
-l'ammissione di nuovi comandi grafici e aspettano entrambe le code e l'ultima
-scrittura PSRAM, incluso il suo intervallo di recupero.
+B7 pixels, B8 text and B9 shapes all target the back buffer once double
+buffering is enabled. The drawing target cannot change mid-command: ENABLE
+and PRESENT both wait for the write queues to drain and for the last PSRAM
+write, including its recovery interval, before being accepted.
 
-## PRESENT e confine del frame
+## PRESENT and frame boundary
 
-Una presentazione accettata viene armata dopo la barriera di scrittura.
-Lo scambio avviene al successivo `FrameRestart` fresco, all'inizio del blanking
-verticale (riga 277, colonna 0 del raster attuale). È la sincronizzazione di
-frame già usata dal display; **non coincide esattamente con il fronte del pin
-LCD_SYNC**, che nell'attuale raster sale una riga dopo.
+An accepted PRESENT is armed once the write barrier has drained. The swap
+itself happens at the next `FrameRestart`, at the start of vertical blanking
+(row 277, column 0 of the current raster). This is the same frame
+synchronization the display already uses; **it does not coincide exactly with
+the rising edge of the LCD_SYNC pin**, which occurs one line later in the
+same raster.
 
-Il cambio riguarda la base di lettura, non i pixel in memoria. La FIFO viene
-svuotata per 63 cicli PSRAM, lasciando drenare eventuali letture precedenti;
-il video viene poi precaricato dalla nuova base durante il blanking.
-Solo al termine del flush il controller completa il comando, aggiorna la
-sequenza e porta `FPGA_IRQ_N` basso. L'IRQ significa **swap effettuato e vecchio
-front riutilizzabile**, non "il pannello ha già mostrato tutti i nuovi pixel".
+The swap changes the read base, not the pixels already in memory. The FIFO
+is held in flush for 63 PSRAM cycles, long enough to drain any reads still
+in flight; the video path is then preloaded from the new base during
+blanking. Only once the flush ends does the controller complete the
+command, update the sequence, and drive `FPGA_IRQ_N` low. The IRQ means
+**the swap has completed and the old front buffer is now reusable**, not
+"the panel has already displayed the new pixels".
 
-IO28 è un'uscita LVCMOS33 collegata a STM32 PB0/EXTI0, fronte di discesa.
-L'IRQ resta basso fino a un ACK con la sequenza corretta. Non è un impulso.
+IO28 is an LVCMOS33 output connected to STM32 PB0/EXTI0, falling edge.
+The IRQ stays low until acknowledged with the correct sequence: it is a
+level, not a pulse.
 
-## Protocollo SPI
+## SPI protocol
 
-SPI mode 0, 12.5 MHz, CS protetto dagli intervalli già usati dal firmware.
-Tutti i pacchetti iniziano con risposta `A5`.
+SPI mode 0, 12.5 MHz, with the same CS setup/hold and recovery/removal
+margins the firmware already applies to the other opcodes. All packets
+start with response `A5`.
 
-### BA: controllo, 10 byte
+### BA: control, 10 bytes
 
-| Indice TX | Contenuto |
+| TX Index | Contents |
 |---:|---|
 | 0 | `BA` |
-| 1 | dummy `00`; RX indica disponibilità `C3` oppure occupato `00` |
-| 2 | operazione |
-| 3 | buffer richiesto, oppure zero riservato |
-| 4–5 | sequenza a 16 bit, byte alto prima |
-| 6–7 | CRC16-CCITT, polinomio `1021`, iniziale `FFFF`, sui byte 2–5 |
+| 1 | dummy `00`; RX indicates availability `C3` or busy `00` |
+| 2 | operation |
+| 3 | buffer required, or zero reserved |
+| 4–5 | 16-bit sequence, high byte first |
+| 6–7 | CRC16-CCITT, polynomial `1021`, initial `FFFF`, on bytes 2–5 |
 | 8 | commit `A6` |
-| 9 | dummy; RX `AC` accettato, `E1` rifiutato |
+| 9 | dummies; RX `AC` accepted, `E1` rejected |
 
-RX agli indici 2–8 ripete il byte TX precedente. Un pacchetto interrotto prima
-del commit non ha effetto. Dopo il commit CS non annulla la richiesta.
-CRC errato, operazione sconosciuta e campi riservati non validi non vengono accettati.
+RX at indices 2–8 repeats the previous TX byte. A packet dropped before the
+commit has no effect. After the commit, CS does not cancel the request. Bad
+CRCs, unknown operations, and invalid reserved fields are not accepted.
 
-| Operazione | Buffer | Sequenza | Effetto |
+| Operation | Buffers | Sequence | Effect |
 |---|---|---|---|
-| 1 ENABLE_DOUBLE | 0 | 0 | Attende i produttori, abilita disegno sul back; idempotente |
-| 2 PRESENT | 0 o 1 | ultima completata + 1, modulo 65536 | Presenta il back al confine del frame |
-| 3 ACK_PRESENT | 0 | ultima completata | Rilascia IRQ; ripetibile |
-| 6 ACK_RESET | 0 | 0 | Spegne `reset_seen`; servito dopo calibrazione PSRAM e riempimento iniziale |
+| 1 ENABLE_DOUBLE | 0 | 0 | Waits for producers, enables drawing on the back; idempotent |
+| 2 PRESENT | 0 or 1 | last completed + 1, modulo 65536 | Presents the back at the frame boundary |
+| 3 ACK_PRESENT | 0 | last completed | Release IRQ; repeatable |
+| 6 ACK_RESET | 0 | 0 | Turns off `reset_seen`; served after PSRAM calibration and initial filling |
 
-`AC` conferma **l'accettazione**, non il completamento né la validità semantica.
-La lettura BB distingue occupato, completato e risultato. Un PRESENT richiede
-modo double abilitato, destinazione diversa dal front, sequenza successiva e
-nessun IRQ precedente da confermare. In caso contrario termina con risultato `E1`.
+`AC` confirms **acceptance**, not completion or semantic validity.
+The BB reading distinguishes busy, completed and result. A PRESENT requires
+double mode enabled, a destination different from the front, the next sequence,
+and no previous IRQs awaiting confirmation. Otherwise, it ends with result `E1`.
 
-La ripetizione esatta dell'ultimo PRESENT completato (stessa sequenza e stesso
-front) termina con successo senza scambio e senza rigenerare IRQ, anche dopo ACK.
-Un ACK con sequenza errata termina con `E1` e lascia l'IRQ invariato.
-Il risultato BB riguarda l'ultimo **controllo** terminato; la sequenza riguarda
-sempre l'ultimo **PRESENT** completato. Non esiste una coda illimitata o una
-cronologia di deduplicazione: una vecchia richiesta non va riproposta dopo
-65536 presentazioni, né attraversando un reset FPGA.
+An exact repeat of the last completed PRESENT (same sequence, same front)
+completes successfully without a swap and without reasserting the IRQ, even
+after that PRESENT's IRQ was already ACKed. An incorrectly sequenced ACK
+ends with `E1` and leaves the IRQ unchanged. The BB result field concerns
+the last completed **check** (BA or BC); the sequence field always refers to
+the last completed **PRESENT**. There is no unlimited queue or deduplication
+history: an old request should not be resubmitted after 65536 presentations
+or after an FPGA reset.
 
-Mentre il controllo è pendente BA e B7/B8/B9 rispondono occupato; BB resta leggibile.
-Le richieste grafiche già accettate proseguono. A controllo completato si può
-ridisegnare il vecchio front anche prima dell'ACK; un altro PRESENT richiede l'ACK.
+While a BA control request is pending, B7/B8/B9 respond busy; BB stays
+readable. Graphics requests already accepted continue to execute. Once the
+check completes, the old front can be redrawn even before the ACK; a further
+PRESENT still requires an ACK first.
 
-### BB: stato e capacità, 11 byte
+### BB: status and capacity, 11 bytes
 
-TX: `BB` seguito da dieci dummy `00`.
+TX: `BB` followed by ten `00` dummies.
 
-| Indice RX | Contenuto |
+| RX Index | Contents |
 |---:|---|
 | 0 | `A5` |
-| 1 | firma `D2` |
-| 2 | versione protocollo `03` (`02` prima di `reset_seen`, `01` prima del blitter) |
-| 3 | numero di buffer `02` |
-| 4 | bit 0 double abilitato; bit 1 front; bit 2 IRQ pendente; bit 3 controllo occupato; bit 4 `reset_seen` (dalla versione 3) |
-| 5 | buffer di disegno, 0 o 1 |
-| 6–7 | ultima sequenza PRESENT completata, byte alto prima |
-| 8 | risultato ultimo controllo: `00` successo, `E1` errore |
-| 9–10 | CRC16 sui byte RX 1–8, byte alto prima |
+| 1 | signature `D2` |
+| 2 | protocol version `03` (`02` before `reset_seen`, `01` before blitter) |
+| 3 | number of buffers `02` |
+| 4 | bit 0 double enabled; bit 1 front; bit 2 IRQ pending; bit 3 control busy; bit 4 `reset_seen` (from version 3) |
+| 5 | drawing buffer, 0 or 1 |
+| 6–7 | last PRESENT sequence completed, high byte first |
+| 8 | last check result: `00` success, `E1` error |
+| 9–10 | CRC16 on RX bytes 1–8, high byte first |
 
-Lo stato è un'istantanea coerente mantenuta per tutto il pacchetto. Attraversa
-il dominio SPI come dati stabili associati al toggle di completamento: viene
-acquisito dopo la sincronizzazione del toggle, non sincronizzando separatamente
-i bit della sequenza. Durante busy descrive l'ultimo controllo completato.
-BB distingue anche un bitstream precedente, che risponderebbe con l'eco di BB.
+The state is a consistent snapshot maintained throughout the transaction. It
+crosses the SPI clock domain as stable data associated with the completion
+toggle and is captured after toggle synchronization, rather than synchronizing
+the sequence bits separately. During busy, it describes the last completed check.
+BB also distinguishes a previous bitstream, which would respond with BB's echo.
 
-## Reset comandato dalla MCU
+## Reset commanded by the MCU
 
-La MCU può resettare la logica della FPGA attraverso `FPGA_RST_N`: STM32 PB1,
-open drain, verso Tang Nano IO29, con pull-up esterna da 10 kΩ. Nell'RTL la
-linea e il pulsante di reset passano per `ResetRequestFilter`, che richiede il
-livello basso per almeno **1 ms** sul quarzo a 27 MHz prima di agire: un disturbo
-raccolto dal filo non resetta niente, e lo stesso filtro elimina i rimbalzi del
-pulsante. È un reset **logico**: ricalibra la PSRAM, ricontrolla i font e
-ripulisce code e parser, ma non ricarica il bitstream. `RECONFIG_N` non è
-raggiungibile dai connettori della Tang Nano 9K.
+The MCU can reset the FPGA logic through `FPGA_RST_N`: STM32 PB1,
+open drain, towards Tang Nano IO29, with a 10 kΩ external pull-up. In the
+RTL, the line and the reset button go through `ResetRequestFilter`, which
+requires the low level to remain asserted for at least **1 ms** of the 27
+MHz clock before taking action. A disturbance on the wire does not reset
+anything, and the same filter debounces the button. It is a **logical**
+reset: it recalibrates the PSRAM, rechecks the fonts, and clears queues and
+parsers, but does not reload the bitstream. `RECONFIG_N` is not reachable
+from the Tang Nano 9K connectors.
 
-Un impulso sul filo non dimostra niente da solo: con il filo staccato la MCU non
-se ne accorgerebbe. Per questo la FPGA espone **`reset_seen`**, bit 4 del byte 4
-di `BB`: si accende a ogni reset e si spegne soltanto con `BA ACK_RESET`.
-`FPGA_ResetCycle()` lo usa così, all'avvio e prima di qualunque altro uso:
+A pulse on the wire proves nothing by itself: with the wire disconnected, the MCU
+would not notice. For this reason, the FPGA exposes **`reset_seen`**, bit 4 of
+byte 4 of `BB`: it turns on at every reset and turns off only with `BA ACK_RESET`.
+`FPGA_ResetCycle()` uses it like this, at startup and before any other use:
 
-1. legge `BB` e manda `ACK_RESET`: `reset_seen` spento, prova **armata**;
-2. deseleziona la SPI, maschera EXTI0 e tiene PB1 basso per 10 ms;
-3. aspetta la risposta SPI (`SPI_Setup`) e rilegge `BB`: `reset_seen` deve
-   essere di nuovo **acceso**, altrimenti l'impulso non è arrivato (fase 60);
-4. manda di nuovo `ACK_RESET` e ne attende il completamento: siccome viene
-   servito dopo calibrazione e riempimento iniziale, questo è anche il segnale
-   che la FPGA è pronta per disegnare;
-5. ripulisce lo stato IRQ lato MCU e riabilita EXTI0.
+1. Read `BB` and send `ACK_RESET`: `reset_seen` is off, and the test is **armed**;
+2. Deselect SPI, mask EXTI0, and hold PB1 low for 10 ms;
+3. Wait for the SPI response (`SPI_Setup`) and reread `BB`: `reset_seen` must
+   be **on** again, otherwise the pulse did not arrive (step 60);
+4. Send `ACK_RESET` again and wait for its completion. Since it is
+   served after calibration and initial filling, this is also the signal
+   that the FPGA is ready to draw;
+5. Clear the IRQ state on the MCU side and re-enable EXTI0.
 
-| `g_fpga_reset_state` | Significato |
+| `g_fpga_reset_state` | Meaning |
 |---:|---|
-| 0 | ciclo non eseguito |
-| 1 | in corso |
-| 2 | **reset dimostrato** |
-| 3 | fallito dopo tre tentativi: la FPGA non va usata, le demo non partono |
-| 4 | impulso inviato ma non dimostrabile: bitstream precedente alla versione 3, oppure FPGA muta prima dell'impulso e viva dopo |
-| 5 | senza linea di reset: pronta, e la FPGA era **appena ripartita** (accensione o pulsante) |
-| 6 | senza linea di reset: pronta, e la FPGA **stava già girando** con il suo stato (è ripartita solo la MCU) |
+| 0 | loop not executed |
+| 1 | in progress |
+| 2 | **reset confirmed** |
+| 3 | failed after three attempts: the FPGA should not be used, the demos do not start |
+| 4 | pulse sent but not verifiable: bitstream prior to version 3, or the FPGA becomes unresponsive before the pulse and recovers afterward |
+| 5 | without reset line: ready, and the FPGA was **just restarted** (power or button) |
+| 6 | without reset line: ready, and the FPGA **was already running** with its state (only the MCU restarted) |
 
-### La linea di reset è facoltativa
+### The reset line is optional
 
-La FPGA non ne ha bisogno: IO29 ha la pull-up e senza filo resta a riposo. È il
-firmware a decidere, con `FPGA_RESET_LINE` in `spi_diag_config.h`, e `main()`
-chiama `FPGA_Start()`, che sceglie il percorso:
+The FPGA does not require it: IO29 has a pull-up and remains inactive without the
+wire. The firmware decides this using `FPGA_RESET_LINE` in `spi_diag_config.h`, and
+`main()` calls `FPGA_Start()`, which chooses the appropriate path:
 
-- **1, linea montata**: `FPGA_ResetCycle()`, reset con prova come sopra; senza
-  prova la FPGA non viene usata e le demo non partono;
-- **0, nessuna linea**: `FPGA_WaitReady()`. Non resetta e non dimostra niente, ma
-  manda comunque `ACK_RESET` e ne attende il completamento. Siccome viene servito
-  solo dopo calibrazione PSRAM e riempimento iniziale, la MCU aspetta che la FPGA
-  sia **davvero** pronta invece di fidarsi di un ritardo fisso. Letto prima
-  dell'ACK, `reset_seen` distingue una FPGA appena accesa (stato 5) da una che
-  stava già girando (stato 6), nel qual caso può conservare doppio buffer
-  abilitato o IRQ pendenti: `LCD_EnableDoubleBuffer` li gestisce già.
+- **1, line connected**: `FPGA_ResetCycle()`, resetting and testing as above; if
+   the reset cannot be verified, the FPGA is not used and the demos do not start.
+- **0, no line connected**: `FPGA_WaitReady()`. It does not reset or prove
+   anything, but sends `ACK_RESET` anyway and waits for completion. Because it is
+   served only after PSRAM calibration and initial filling, the MCU waits until
+   the FPGA is **really** ready instead of relying on a fixed delay. Reading the
+   ACK response, `reset_seen` distinguishes a newly powered FPGA (state 5) from one that
+  was already running (state 6), in which case it can maintain double buffering
+  enabled or pending IRQs: `LCD_EnableDoubleBuffer` already handles them.
 
-`g_fpga_ready_tick` riporta in entrambi i casi il tick HAL, cioè i millisecondi
-dall'avvio della MCU, in cui la FPGA è diventata utilizzabile. Su un'accensione
-comune delle due schede è il tempo che la MCU ha dovuto aspettare davvero, ed è
-il dato da usare se un sistema dovesse ripiegare su un ritardo fisso.
+`g_fpga_ready_tick` reports the HAL tick in both cases, that is, the number of
+milliseconds since MCU boot when the FPGA became usable. When both boards are
+powered on together, this is the time the MCU actually had to wait, and it is the
+value to use if a system falls back to a fixed delay.
 
-Riscontri senza linea, 17 settembre 2026. Con la sola MCU riavviata: stato 6,
-pronta a 12 ms dall'avvio della MCU. Con le due schede spente e riaccese insieme,
-ciascuna dalla propria USB: stato 5, pronta a **12 ms** al primo tentativo, con
-attesa sotto il millisecondo. La FPGA quindi aveva già finito quando la MCU ha
-potuto chiedere, perché la SPI è pronta solo a 12 ms: il dato è un limite
-superiore, contato dall'avvio della MCU e non dall'accensione, e il tempo reale
-della FPGA resta non misurato.
+Findings without the reset line, September 17, 2026. With only the MCU
+restarted: state 6, ready 12 ms after MCU startup. With both boards switched
+off and back on together, each from its own USB: state 5, ready at
+**12 ms** on the first try, with the wait itself under a millisecond. The
+FPGA had already finished initialization by the time the MCU could have
+queried it, because SPI becomes ready only after 12 ms. This value is an
+upper bound measured from MCU boot rather than from power-on; the FPGA's
+actual initialization time remains unmeasured.
 
-**Ritardo fisso per sistemi senza linea e senza attesa attiva: 200 ms**
-dall'accensione prima del primo comando. Il margine rispetto ai 12 ms osservati
-copre ciò che quella misura non vede: rampe di alimentazione più lente, schede
-accese in momenti diversi, caricamento del bitstream e aggancio dei PLL. Se la
-MCU può permetterselo, dopo il ritardo legga comunque lo stato `BB` e ripeta con
-una breve pausa finché non risponde: `FPGA_WaitReady()` resta la soluzione da
-preferire.
+**Fixed delay for systems without a line and without active waiting: 200 ms**
+from power-on before the first command. The margin over the 12 ms observed
+covers conditions the measurement does not capture: slower power ramps,
+boards turned on at different times, loading the bitstream, and locking the
+PLLs. If the MCU can afford it, still read `BB` status after the delay and
+repeat with a short pause until it responds; `FPGA_WaitReady()` remains the
+preferred solution. `g_fpga_reset_attempts` counts attempts, and
+`g_fpga_reset_ready_ms` measures the time from line release to a ready FPGA.
+On the bench, September 17, 2026: state 2 on the first try, **16 ms**.
 
-`g_fpga_reset_attempts` conta i tentativi, `g_fpga_reset_ready_ms` misura il tempo
-dal rilascio della linea alla FPGA pronta. Sul banco, il 17 settembre 2026:
-stato 2 al primo tentativo, **16 ms**.
-
-## API STM32 e demo
+## STM32 API and demo
 
 ```c
-LCD_EnableDoubleBuffer();  // recupera anche un IRQ rimasto dopo reset della MCU
+LCD_EnableDoubleBuffer();  // It also retrieves any IRQs remaining after an MCU reset
 LCD_Clear(0x0000);
-LCD_DrawTextFPGA(20, 20, 0, 0, LCD_FONT_12X24, 0, 0xFFFF, 0, "Pronto");
-LCD_Present(1000);         // barriera, swap, attesa IRQ e ACK
+LCD_DrawTextFPGA(20, 20, 0, 0, LCD_FONT_12X24, 0, 0xFFFF, 0, "Ready");
+LCD_Present(1000);         // Barrier, swap, IRQ wait, and ACK
 ```
 
-Controllare ogni valore di ritorno: 1 successo, 0 errore. Le API sono bloccanti
-e richiedono un solo chiamante. `LCD_GetBufferStatus` espone capacità e stato.
-L'ISR conta il fronte e alza un flag; non chiama SPI. `LCD_Present` usa flag
-EXTI e livello GPIO, con polling periodico di stato per diagnosticare errori;
-verifica il livello basso prima dell'ACK e alto dopo. Un timeout o errore di
-trasporto non provoca una ritrasmissione automatica: leggere BB per riconciliare
-lo stato. Un IRQ pendente va confermato prima di una nuova presentazione.
+Check each return value: 1 means success, 0 means error. The APIs are blocking
+and require only one caller. `LCD_GetBufferStatus` exposes capacity and status.
+The ISR counts the front and raises a flag, but does not call SPI. `LCD_Present`
+uses the EXTI flag and GPIO level, with periodic status polling to diagnose errors;
+it checks that the level is low before the ACK and high afterward. A timeout or
+transport error does not cause automatic retransmission: read BB to reconcile
+the state. A pending IRQ must be confirmed before resubmission.
 
-La demo FPGA ricostruisce e presenta 16 immagini con un rettangolo in movimento,
-poi presenta il campione testo/forme con la scritta `Double buffer + VSYNC + IRQ: OK`.
-Le prime 16 presentazioni verificano anche 16 fronti EXTI. Risultati leggibili SWD:
-`g_lcd_present_count`, `g_lcd_present_ms` (ultima attesa, risoluzione 1 ms),
-`g_lcd_front_buffer`, `g_lcd_present_sequence`, `g_fpga_irq_count`,
-`g_fpga_irq_pending`, `g_fpga_irq_level`, `g_lcd_error`.
+The FPGA demo reconstructs and presents 16 frames with a moving rectangle,
+then presents the sample text and shapes with the message
+`Double buffer + VSYNC + IRQ: OK` — 17 PRESENT calls in total. The first 16
+also verify 16 EXTI edges. SWD-readable results: `g_lcd_present_count`,
+`g_lcd_present_ms` (last wait, 1 ms resolution), `g_lcd_front_buffer`,
+`g_lcd_present_sequence`, `g_fpga_irq_count`, `g_fpga_irq_pending`,
+`g_fpga_irq_level`, `g_lcd_error`.
 
-## Verifiche riproducibili
+## Reproducible checks
 
 ```powershell
 .\sim\run_spi_sim.ps1
@@ -227,32 +241,38 @@ Le prime 16 presentazioni verificano anche 16 fronti EXTI. Risultati leggibili S
 .\sim\run_sim.ps1 -Mode current
 .\build.ps1
 .\stm32\WeAct_H743_SPI\test-double-buffer.ps1 -SerialNumber 35FF6C064D53373238602143
-# Solo lettura; verifica prima la corrispondenza della flash STM32 con l'ELF:
+# Read-only; first verify that the STM32 flash matches the ELF:
 .\stm32\WeAct_H743_SPI\test-double-buffer.ps1 -ReadOnly -SerialNumber 35FF6C064D53373238602143
 ```
 
-Il test hardware normale programma flash FPGA e font, poi MCU Release; richiede
-un bitstream già compilato e corrispondente al manifest di timing. Il runner
-con `LCD_SCROLL_DEMO=0` salva `build/Release/double-buffer-result.json` e pretende 17 presentazioni,
-17 fronti IRQ, demo completata, IRQ rilasciato e nessun errore SPI/LCD.
-Il default della build MCU generale resta Debug; quello di questo runner è Release.
+The normal hardware test flashes the FPGA bitstream and font, then programs
+the MCU Release build; it requires a bitstream already compiled and
+matching the timing manifest. The runner with `LCD_SCROLL_DEMO=0` saves
+`build/Release/double-buffer-result.json` and reports 17 presentations, 17
+IRQ edges, demo completed, IRQ released, and no SPI/LCD errors. The general
+MCU build default remains Debug; this runner's is Release.
 
-Il test di integrazione usa il TOP reale con modelli di PLL e PSRAM. Verifica
-CRC, aborti, barriera durante fill, blocco delle scritture nel front, duplicati,
-ACK errati, entrambi gli slot, padding e tre frame interi rispetto alla memoria.
-La variante `-RealFifo` usa anche la FIFO RTL del progetto. Il modello PSRAM
-non sostituisce la qualifica elettrica al banco; SWD non rilegge i pixel del pannello.
+The integration test uses the real TOP with PLL and PSRAM models. It checks
+CRC, aborts, the fill barrier, front-buffer write blocking, duplicate
+requests, bad ACKs, both slots, padding, and three full frames written to
+memory. The `-RealFifo` variant also uses the project's RTL FIFO. The PSRAM
+model does not replace electrical qualification on the bench; SWD does not
+reread panel pixels.
 
-## Estensione COPY/SCROLL (16 settembre)
+## COPY/SCROLL extension
 
-Con il default corrente `LCD_SCROLL_DEMO=1`, dopo il campione precedente viene
-eseguita la demo terminale: 50 PRESENT/IRQ complessivi, una COPY e 32 SCROLL.
-Il runner rileva il flag e salva `scroll-result.json`; `-RequireScroll` richiede
-esplicitamente anche la demo scroll. Protocollo BC, API e coerenza dei viewport
-sono descritti in [BLITTER.md](BLITTER.md). BB mantiene il layout e passa a
-versione 2; il risultato riguarda l'ultimo controllo BA o BC concluso.
+With the current default `LCD_SCROLL_DEMO=1`, the scroll/terminal demo runs
+after the previous sample completes: 50 PRESENT/IRQs in total, one COPY, and
+32 SCROLL. The runner detects the flag and saves `scroll-result.json`;
+`-RequireScroll` requires the demo's scroll step to be explicitly enabled.
+The BC protocol, API, and viewport consistency are described in
+[BLITTER.md](BLITTER.md). BB's layout is unchanged; the version field was
+bumped to `02` when the blitter shipped (it is `03` now that `reset_seen`
+has also shipped), and the result field reports the last completed BA or BC
+check.
 
-Dal 16 settembre il controller registra il segnale di confine del frame
-sincronizzato prima dell'arbitraggio: lo swap segue quel segnale di un ciclo
-PSRAM aggiuntivo (circa 12 ns), all'interno dello stesso blanking verticale.
-Il test controlla questa latenza con un proprio registro di riferimento.
+Since September 16, the controller has recorded the frame-boundary signal after
+synchronization and arbitration: the swap follows that signal by one cycle,
+adding approximately 12 ns of PSRAM time while remaining within the same
+vertical blanking interval.
+The test checks this latency with its own reference register.
