@@ -1,103 +1,110 @@
-# FreeRTOS sullo STM32H743
+# FreeRTOS on the STM32H743
 
-## Migrazione e DMA asincrono
+## Migration and asynchronous DMA
 
-FreeRTOS 10.6.2 e CMSIS-RTOS v2 provengono dallo stesso pacchetto
-`STM32Cube_FW_H7_V1.13.0` usato dal progetto. Le API LCD restano bloccanti per
-il chiamante, ma l'attesa interna del DMA non gira più in polling: la callback
-HAL sveglia direttamente `DisplayTask` con `vTaskNotifyGiveFromISR()` e la task
-attende con `ulTaskNotifyTake()`.
+FreeRTOS 10.6.2 and CMSIS-RTOS v2 come from the same
+`STM32Cube_FW_H7_V1.13.0` package the project already uses. The LCD APIs stay
+blocking for the caller, but the DMA wait no longer polls internally: the HAL
+callback wakes `DisplayTask` directly with `vTaskNotifyGiveFromISR()`, and the
+task waits with `ulTaskNotifyTake()`.
 
-`main()` inizializza periferiche e kernel, crea gli oggetti e chiama
-`osKernelStart()`. La `defaultTask` è intenzionalmente vuota: aggiorna solo la
-propria misura di stack e dorme. `DisplayTask` esegue la sequenza di boot già
-esistente (`SPI_Setup`, reset/prova FPGA, autotest e demo abilitate), poi resta
-bloccata su `displayQueue`.
+`main()` initializes devices and kernels, creates the objects, and calls
+`osKernelStart()`. `defaultTask` is intentionally empty: it just updates its
+own stack high-water mark and sleeps. `DisplayTask` runs the existing boot
+sequence (`SPI_Setup`, FPGA reset/test, self-test, and whichever demos are
+enabled), then blocks on `displayQueue`.
 
-La coda contiene `DisplayRequest`, cioè una funzione da eseguire e un puntatore
-al suo contesto. `DisplayTask_Post()` copia il descrittore nella coda; non copia
-il contesto, che deve quindi restare valido fino all'esecuzione. I wrapper
-`SPI_Exchange_DMA`, `SPI_Transmit_DMA` e `SPI_SetBaudRatePrescaler` rifiutano un
-chiamante diverso da `DisplayTask`: SPI2 e FPGA hanno un proprietario unico
-anche per errore, non soltanto per convenzione.
+The queue carries `DisplayRequest` entries: a function to execute plus a
+pointer to its context. `DisplayTask_Post()` copies the descriptor into the
+queue but not the context, which must stay valid until execution runs. The
+wrappers `SPI_Exchange_DMA`, `SPI_Transmit_DMA`, and `SPI_SetBaudRatePrescaler`
+reject any caller other than `DisplayTask`: SPI2 and the FPGA have a single
+owner, enforced in code, not just by convention.
 
-## Tick HAL e priorità
+## Tick HAL and priority
 
-SysTick appartiene a FreeRTOS. Il tick HAL a 1 ms è generato da TIM6 in
-`stm32h7xx_hal_timebase_tim.c`; `HAL_TIM_MODULE_ENABLED` è attivo. Le attese
-esplicite nel codice LCD/self-test usano `osDelay()`, quindi cedono la CPU.
+SysTick belongs to FreeRTOS. The 1 ms HAL tick comes from TIM6 in
+`stm32h7xx_hal_timebase_tim.c`, with `HAL_TIM_MODULE_ENABLED` active. Explicit
+waits in the LCD/self-test code use `osDelay()`, which yields the CPU.
 
-EXTI0, SPI2, DMA1 Stream 0 e DMA1 Stream 1 hanno priorità NVIC 5, uguale a
-`configLIBRARY_MAX_SYSCALL_INTERRUPT_PRIORITY`. Le callback SPI chiamano ora
-l'API FreeRTOS `...FromISR` e richiedono il cambio di contesto quando la task
-sbloccata ha priorità sufficiente. PendSV e SysTick sono a 15.
+EXTI0, SPI2, DMA1 Stream 0, and DMA1 Stream 1 all sit at NVIC priority 5,
+equal to `configLIBRARY_MAX_SYSCALL_INTERRUPT_PRIORITY`. SPI callbacks now
+call the FreeRTOS `...FromISR` API and request a context switch when the
+unblocked task has sufficient priority. PendSV and SysTick sit at 15.
 
-## Trasferimento e pipeline delle righe
+## Row transfer and pipeline
 
-`SPI_Exchange_DMA()` e `SPI_Transmit_DMA()` mantengono il contratto bloccante,
-ma dormono sulla notifica invece di interrogare `completed` in un ciclo vuoto.
-Per lo stream `BE`, `SPI_Transmit_DMA_Begin()` copia il pacchetto nella SRAM D2
-privata e avvia il DMA; `SPI_Transmit_DMA_Wait()` attende la notifica. Lo slot di
-notifica diretta di `DisplayTask` appartiene quindi al trasporto SPI.
+`SPI_Exchange_DMA()` and `SPI_Transmit_DMA()` keep the blocking contract, but
+now sleep on the notification instead of spin-polling a `completed` flag.
+For the `BE` stream, `SPI_Transmit_DMA_Begin()` copies the packet into the
+private D2 SRAM buffer and starts the DMA; `SPI_Transmit_DMA_Wait()` waits
+for the notification. The direct-to-task notification slot therefore belongs
+to the SPI transport layer.
 
-`LCD_WriteRectStream()` usa due `StreamPacket` in DTCM. Dopo il `Begin` della
-riga corrente costruisce la successiva nell'altro pacchetto, poi esegue `Wait`
-e legge il risultato `BF`. Un retry conserva sia il pacchetto corrente sia il
-successivo già pronto. Il DMA non vede mai questi buffer: trasmette soltanto la
-copia allineata nella sezione `.spi_dma`.
+`LCD_WriteRectStream()` uses two `StreamPacket` buffers in DTCM. After
+`Begin` on the current line, it builds the next line in the other buffer,
+then runs `Wait` and reads the `BF` result. A retry preserves both the
+current packet and the next one already built. The DMA never sees these
+buffers directly: it only transmits the aligned copy held in the `.spi_dma`
+section.
 
-## Memoria e DMA
+## Memory and DMA
 
-L'heap FreeRTOS da 32 KiB, gli stack delle task e gli oggetti dinamici restano
-in DTCM. È voluto: il core vi accede direttamente e il DMA non deve accedervi.
-I buffer DMA restano statici nella sezione `.spi_dma`, allineati a 32 byte e
-collocati in RAM D2; i wrapper copiano i dati e fanno la manutenzione cache.
+The 32 KiB FreeRTOS heap, task stacks, and dynamic objects stay in DTCM. This
+is intentional: the core accesses it directly, and DMA never needs to. DMA
+buffers stay static in the `.spi_dma` section, 32-byte aligned and placed in
+D2 RAM; the wrappers copy data in and out and handle cache maintenance.
 
-Invariante: **non passare mai a una HAL DMA il buffer locale di una task, né un
-puntatore proveniente dall'heap FreeRTOS**. Se in futuro l'heap viene spostato
-nella RAM AXI, i dati condivisi con DMA richiederanno allineamento a cache line
-e `SCB_CleanDCache_by_Addr` / `SCB_InvalidateDCache_by_Addr` nei punti corretti.
+Invariant: **never pass a task's local buffer to a HAL DMA, nor a pointer
+from the FreeRTOS heap**. If the heap is ever moved to AXI RAM, data shared
+with DMA will need cache-line alignment and `SCB_CleanDCache_by_Addr` /
+`SCB_InvalidateDCache_by_Addr` calls in the right places.
 
-## Misura degli stack
+## Stack measurement
 
-Gli stack iniziali sono 128 parole per `defaultTask` e 1024 parole (4096 byte)
-per `DisplayTask`. Non sono valori definitivi. A runtime vengono aggiornati:
+Initial stacks are 128 words for `defaultTask` and 1024 words (4096 bytes)
+for `DisplayTask`. These are allocation sizes, not final margins; at runtime
+the following are updated:
 
-- `g_display_stack_high_water_words` e `g_display_stack_high_water_bytes`;
-- `g_default_stack_high_water_words` e `g_default_stack_high_water_bytes`.
+- `g_display_stack_high_water_words` and `g_display_stack_high_water_bytes`;
+- `g_default_stack_high_water_words` and `g_default_stack_high_water_bytes`.
 
-`uxTaskGetStackHighWaterMark(NULL)` restituisce il minimo spazio rimasto dalla
-creazione della task, espresso in `StackType_t`, quindi in parole da 4 byte su
-questo Cortex-M7. La misura della `DisplayTask` viene presa dopo tutto il boot e
-dopo ogni richiesta. Va letta via SWD dopo il carico peggiore; lo stack si può
-poi ridurre lasciando un margine esplicito. `configCHECK_FOR_STACK_OVERFLOW=2`
-e il malloc-failed hook fermano il firmware e impostano `g_freertos_failure`
-(4 per overflow, 3 per heap esaurito).
+`uxTaskGetStackHighWaterMark(NULL)` returns the minimum free space seen since
+the task was created, expressed in `StackType_t` units, i.e. 4-byte words on
+this Cortex-M7. `DisplayTask`'s measurement is taken after boot completes and
+after each request. Read it via SWD after the worst-case load, then the
+stack allocation can be reduced while keeping an explicit margin.
+`configCHECK_FOR_STACK_OVERFLOW=2` and the malloc-failed hook halt the
+firmware and set `g_freertos_failure` (4 for overflow, 3 for heap
+exhaustion).
 
-## Qualifica hardware
+## Hardware qualification
 
-Qualifica hardware Release superata il 17 settembre 2026 sul prototipo STM32
-`35FF6C064D53373238602143`: 1200 trasferimenti, 1.049.760 byte verificati,
-zero mismatch, zero errori HAL/LCD, 512 rettangoli e 354.528 pixel nello stress
-grafico. La demo doppio buffer più scroll ha completato 50 `PRESENT` con 50
-fronti IRQ; COPY schermo intero 14 ms, SCROLL 442x176 8 ms e attesa PRESENT
-18 ms. Tre ulteriori reset consecutivi hanno ripetuto 50/50.
+Release hardware qualification passed on September 17, 2026 on STM32
+prototype `35FF6C064D53373238602143`: 1200 transfers, 1,049,760 bytes
+verified, zero mismatches, zero HAL/LCD errors, and 512 rectangles /
+354,528 pixels in the graphics stress test. The double-buffer plus scroll
+demo completed 50 `PRESENT` calls with 50 IRQ edges; full-screen COPY took
+14 ms, a 442x176 SCROLL took 8 ms, and the `PRESENT` wait took 18 ms. Three
+further consecutive resets repeated the same 50/50 result.
 
-Il minimo stack rimasto nella qualifica asincrona è 855 parole, cioè 3420 byte,
-per `DisplayTask`, e 91 parole, cioè 364 byte, per `defaultTask`.
-`g_freertos_failure` è rimasto a zero. Durante la qualifica è emersa una corsa
-nel percorso di conferma: il polling poteva vedere `FPGA_IRQ_N` basso e inviare
-l'ACK prima che la callback EXTI avesse contato il fronte. `LCD_Present()` ora
-pretende anche l'avanzamento di `g_fpga_irq_count` prima dell'ACK.
+The minimum stack margin seen during the asynchronous qualification is
+855 words (3420 bytes) for `DisplayTask` and 91 words (364 bytes) for
+`defaultTask`. `g_freertos_failure` stayed at zero throughout. During
+qualification a race surfaced in the confirmation path: polling could see
+`FPGA_IRQ_N` low and send the ACK before the EXTI callback had counted the
+edge. `LCD_Present()` now also requires `g_fpga_irq_count` to advance before
+sending the ACK.
 
-Qualifica finale del flush asincrono: 42.462 notifiche per 42.462 attese, zero timeout
-e 238 righe costruite fra `Begin` e `Wait`. Il benchmark a otto righe per strip
-misura 528 ms per `B7` e 172-174 ms per `BE/BF`; la precedente implementazione
-sincrona `BE/BF` misurava 225 ms. Stress, 50 PRESENT/50 IRQ e reset ripetuto
-restano PASS.
+Final qualification of the asynchronous flush: 42,462 notifications for
+42,462 waits, zero timeouts, and 238 lines built between `Begin` and `Wait`.
+The eight-lines-per-strip benchmark measures 528 ms for `B7` and 172-174 ms
+for `BE`/`BF`; the previous synchronous `BE`/`BF` implementation measured
+225 ms. Stress, the 50 PRESENT/50 IRQ check, and repeated reset all remain
+PASS.
 
-Il logo di boot aggiunto in seguito introduce uno sbarramento FPGA esplicito:
-`BB` resta busy e nessun comando grafico, incluso `BE`, viene accettato prima
-che l'ultimo burst del logo sia stato consegnato al controller PSRAM. Le API e
-la pipeline DMA non cambiano; il polling già usato da `FPGA_ResetCycle()`
-assorbe il breve tempo aggiuntivo prima di `ACK_RESET`.
+The boot logo added later introduces an explicit FPGA gate: `BB` reports
+busy, and no graphics command, including `BE`, is accepted until the last
+logo burst has reached the PSRAM controller. The APIs and the DMA pipeline
+are unchanged; the polling already used by `FPGA_ResetCycle()` absorbs the
+short extra wait before `ACK_RESET`.

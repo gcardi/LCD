@@ -1,66 +1,65 @@
-# Logo di avvio
+# Boot logo
 
-Al reset la FPGA disegna il logo nella User Flash prima di accettare comandi
-SPI. Non serve l'MCU: un logo visibile conferma che bitstream e immagine User
-Flash sono coerenti.
+On reset, the FPGA draws the logo stored in User Flash before accepting SPI
+commands. The MCU is not involved: a visible logo confirms that the
+bitstream and the User Flash image are in sync.
 
-![Il logo di avvio](../resources/BootLogo.png)
+![Boot logo](../resources/BootLogo.png)
 
-Il file sorgente versionato e' `resources/BootLogo.png`. Il generatore lo
-converte in RGB565, lo centra sul pannello 480x272 e lo aggiunge dopo le tre
-tabelle Terminus. I font non si spostano quando si cambia logo.
+The versioned source file is `resources/BootLogo.png`. The generator
+converts it to RGB565, centers it on the 480x272 panel, and appends it after
+the three Terminus font tables. Fonts don't move when the logo changes.
 
-## Logo attuale e spazio disponibile
+## Current logo and available space
 
-Il logo attuale e' **256x144**, centrato a **(112,64)**. Un bitmap RGB565
-grezzo richiederebbe 73.728 byte e, insieme ai font, supererebbe i 77.824 byte
-della User Flash. Per questo l'immagine versione 3 usa **RGB565-RLE**: ogni
-parola da 32 bit contiene `{ colore RGB565, lunghezza della sequenza }`.
-La codifica e' lossless e le sequenze possono attraversare una riga.
+The current logo is **256x144**, centered at **(112, 64)**. A raw RGB565
+bitmap would need 73,728 bytes and, together with the fonts, would exceed
+the User Flash's 77,824 bytes. This is why the version 3 image uses
+**RGB565-RLE**: every 32-bit word holds `{ RGB565 color, run length }`. The
+encoding is lossless, and runs can span a row.
 
-Con il PNG corrente, il payload del logo e' 5.444 byte (contro 73.728 non
-compressi); l'immagine completa `fonts/user_flash_fonts.bin` e' 30.612 byte e
-restano 47.212 byte. Uno sfondo uniforme nero si comprime molto bene. Un logo
-fotografico o con rumore puo' invece non entrare: il generatore lo rifiuta
-prima di produrre un'immagine programmabile.
+With the current PNG, the logo payload is 5,444 bytes (versus 73,728
+uncompressed); the complete `fonts/user_flash_fonts.bin` image is 30,612
+bytes, leaving 47,212 bytes free. A solid black background compresses very
+well; a photographic or noisy logo may not fit, and the generator rejects
+it before producing a programmable image.
 
-## Procedura per sostituire il logo
+## Procedure for replacing the logo
 
-Questa e' la procedura completa. Per un normale cambio del PNG, i passi 1--4 e
-6 sono sufficienti: il formato resta versione 3, quindi non occorre
-ricostruire la FPGA. Il passo 5 serve per una modifica del formato o dell'RTL.
+This is the complete procedure. For a normal PNG replacement, steps 1-4 and
+6 are enough: the format stays version 3, so rebuilding the FPGA isn't
+necessary. Step 5 applies only for a format or RTL change.
 
-### 1. Preparare il PNG
+### 1. Prepare the PNG
 
-Sostituire `resources/BootLogo.png` con il nuovo file. Deve avere:
+Replace `resources/BootLogo.png` with the new file. It must have:
 
-- larghezza pari;
-- dimensioni entro 480x272;
-- preferibilmente sfondo uniforme o aree piatte, per ottenere una buona
-  compressione RLE.
+- even width;
+- dimensions within 480x272;
+- preferably a uniform background or flat areas, for good RLE compression.
 
-La trasparenza e' ammessa: viene composta sul nero. Il logo e' opaco una volta
-sul pannello; non esiste una maschera alfa nel fabric.
+Transparency is allowed: it is composited onto black. The logo is opaque
+once on the panel — there is no alpha mask in the fabric.
 
-### 2. Verificare gli strumenti locali
+### 2. Check local tools
 
-Il solo requisito per rigenerare l'immagine e' Python 3 con Pillow. Il comando
-seguente deve terminare con `Pillow OK`:
+The only requirement to regenerate the image is Python 3 with Pillow. The
+following command must end with `Pillow OK`:
 
 ```powershell
 python -c "from PIL import Image; print('Pillow OK')"
 ```
 
-Il generatore usa inoltre le sorgenti BDF del submodule Terminus, gia' presenti
-in `third_party/terminus-font-4.49.1-master`. Se il clone e' nuovo:
+The generator also uses the Terminus submodule's BDF sources, already present
+in `third_party/terminus-font-4.49.1-master`. If the clone is new:
 
 ```powershell
 git submodule update --init --recursive
 ```
 
-### 3. Rigenerare la User Flash
+### 3. Rebuild the User Flash
 
-Dalla radice del repository eseguire esattamente:
+From the repository root, run exactly:
 
 ```powershell
 python .\tools\generate_user_flash_fonts.py `
@@ -68,105 +67,107 @@ python .\tools\generate_user_flash_fonts.py `
   --logo .\resources\BootLogo.png
 ```
 
-Lo script legge il PNG con Pillow e produce tre artefatti coerenti:
+The script reads the PNG with Pillow and produces three consistent artifacts:
 
-| File | Uso |
+| Files | Usage |
 |---|---|
-| `fonts/user_flash_fonts.bin` | immagine binaria da caricare con openFPGALoader |
-| `fonts/user_flash_fonts.mem` | copia a parole esadecimali usata dalle simulazioni Verilog |
-| `fonts/user_flash_fonts.json` | manifest leggibile: dimensioni, CRC, occupazione e dati RLE |
+| `fonts/user_flash_fonts.bin` | binary image to load with openFPGALoader |
+| `fonts/user_flash_fonts.mem` | hex-word copy used by Verilog simulations |
+| `fonts/user_flash_fonts.json` | readable manifest: size, CRC, occupancy and RLE data |
 
-Controllare il riepilogo stampato: deve riportare dimensione, byte `encoded`,
-byte `raw` e spazio libero. Il generatore fallisce esplicitamente se il PNG e'
-fuori pannello, ha larghezza dispari oppure l'immagine completa supera la User
-Flash. Controllo ulteriore facoltativo:
+Check the printed summary: it must report size, encoded bytes, raw bytes,
+and free space. The generator fails outright if the PNG is out of panel
+bounds, has an odd width, or the complete image exceeds the User Flash.
+Optional further check:
 
 ```powershell
 Get-Content .\fonts\user_flash_fonts.json | ConvertFrom-Json |
   Select-Object version, image_bytes, free_bytes, logo
 ```
 
-Devono comparire `version: 3`, il nuovo `width`/`height` e `format:
-RGB565-RLE`.
+`version: 3` and the new `width`/`height` must appear, with
+`format: RGB565-RLE`.
 
-> Non omettere `--logo`: senza di esso il generatore crea volutamente
-> un'immagine valida ma senza sezione logo.
+> Do not omit `--logo`: without it, the generator still produces a valid
+> image, just without a logo section.
 
-### 4. Verificare RTL e immagine insieme
+### 4. Test RTL and image together
 
 ```powershell
 .\sim\run_spi_sim.ps1
 ```
 
-La suite esegue anche `tb_boot_logo`: decodifica indipendentemente l'RLE del
-file `.mem` e verifica ogni pixel scritto, il rettangolo e lo sbarramento fino
-a `boot_complete`. Il risultato atteso include `PASS: boot_logo`.
+The suite also runs `tb_boot_logo`: it independently decodes the RLE from
+the `.mem` file, checks that every written pixel matches, that nothing
+outside the rectangle is touched, and that `boot_complete` rises only after
+drawing finishes. The expected output includes `PASS: boot_logo`.
 
-### 5. Quando ricostruire il bitstream FPGA
+### 5. When to rebuild the FPGA bitstream
 
-Un normale rimpiazzo del PNG **non** richiede sintesi: il renderer legge
-larghezza, altezza, posizione e formato dalla User Flash. Ricostruire la FPGA
-e' necessario se si modificano `src/FontStore.sv`, `src/TextRenderer.sv` o il
-formato dell'immagine. L'introduzione dell'RLE e della versione 3 e' proprio un
-caso del genere; il bitstream di questo commit va quindi costruito una volta:
+A normal PNG replacement **doesn't** require synthesis: the renderer reads
+width, height, position, and format from User Flash. Rebuilding the FPGA is
+necessary only if you modify `src/FontStore.sv`, `src/TextRenderer.sv`, or
+the image format. Introducing RLE and version 3 was exactly such a case; the
+bitstream for this commit had to be rebuilt once:
 
 ```powershell
 .\build.ps1
 ```
 
-Servono Gowin EDA (sintesi/place-and-route) e oss-cad-suite con Icarus Verilog
-e openFPGALoader. `build.ps1` termina solo dopo il gate di timing e produce
-`impl/pnr/LCD.fs`. I dettagli dell'ambiente sono in [README.md](../README.md)
-e [VERIFICATION.md](VERIFICATION.md).
+Gowin EDA (synthesis/place-and-route), oss-cad-suite with Icarus Verilog, and
+openFPGALoader are required. `build.ps1` finishes only after the timing gate
+passes and produces `impl/pnr/LCD.fs`. Environment details are in
+[README.md](../README.md) and [VERIFICATION.md](VERIFICATION.md).
 
-### 6. Programmare la scheda
+### 6. Program the card
 
-Per rendere effettivo il nuovo logo in avvio, programmare **insieme** il
-bitstream `impl/pnr/LCD.fs` e `fonts/user_flash_fonts.bin`:
+To make the new logo effective at startup, program **together** the
+bitstream `impl/pnr/LCD.fs` and `fonts/user_flash_fonts.bin`:
 
 ```powershell
 .\program_tang_nano_flash.ps1
 ```
 
-Non invocare openFPGALoader o Gowin Programmer manualmente per il solo
-bitstream: Embedded Flash e User Flash sono parti dello stesso array e una
-scrittura del bitstream senza la User Flash cancella il logo e i font. Lo script
-controlla l'header `LCDF` e passa entrambi gli artefatti. Attendere due barre di
-avanzamento (bitstream e User Flash), poi togliere/ridare alimentazione o
-resettare la scheda.
+Don't invoke openFPGALoader or Gowin Programmer manually for the bitstream
+alone: Embedded Flash and User Flash are parts of the same array, and
+writing the bitstream without the User Flash image erases the logo and
+fonts. The script checks the `LCDF` header and programs both artifacts.
+Wait for both progress bars (bitstream and User Flash), then power-cycle or
+reset the board.
 
-Su questa macchina il percorso standard e' openFPGALoader; non aggiungere
-`-UseGowinProgrammer` salvo una ragione precisa. Per cablaggio, driver e
-diagnostica vedere [PROGRAMMING.md](PROGRAMMING.md).
+On this machine the standard path is openFPGALoader; don't add
+`-UseGowinProgrammer` unless there's a specific reason. For wiring, drivers,
+and diagnostics see [PROGRAMMING.md](PROGRAMMING.md).
 
-## Formato a bordo
+## Format on board
 
-L'header `LCDF` e' ora versione **3**. La parola 6 (offset 24, little endian)
-contiene l'offset della sezione logo, oppure zero. La sezione e':
+The `LCDF` header is now version **3**. Word 6 (offset 24, little endian)
+holds the byte offset of the logo section, or zero if there is none. The
+section layout is:
 
-| Offset | Campo |
+| Offset | Field |
 |---:|---|
 | 0..3 | magic `LGO1` |
-| 4..5 | larghezza |
-| 6..7 | altezza |
-| 8..11 | formato: `2` = RGB565-RLE |
-| 12..13 | origine x |
-| 14..15 | origine y |
-| 16.. | parole little endian: run length a 16 bit, poi colore RGB565 a 16 bit |
+| 4..5 | width |
+| 6..7 | height |
+| 8..11 | format: `2` = RGB565-RLE |
+| 12..13 | origin x |
+| 14..15 | origin y |
+| 16.. | little-endian words: 16-bit run length, then 16-bit RGB565 color |
 
-`FontStore` verifica prima il CRC-32 dell'intera immagine, poi magic,
-geometria, formato e posizione del logo. Se il descrittore logo non e' valido,
-i font restano utilizzabili ma il logo viene saltato. Se versione dell'immagine
-e bitstream non coincidono, invece, l'immagine viene rifiutata interamente:
-questo impedisce di interpretare un layout incompatibile.
+`FontStore` first checks the CRC-32 of the whole image, then the magic,
+geometry, format, and position of the logo. If the logo descriptor is
+invalid, the fonts stay usable but the logo is skipped. If the image
+version doesn't match the bitstream's, the whole image is rejected instead:
+this prevents an incompatible layout from being misread.
 
-`TextRenderer` usa lo stesso percorso a burst del riempimento e decodifica un
-pixel per ogni colonna del rettangolo. Alza `boot_complete` solo dopo l'ultimo
-burst; fino ad allora il lato SPI resta `busy` e non puo' sovrapporre il primo
-flush dell'MCU al logo.
+`TextRenderer` uses the same burst path as the fill and decodes one pixel
+per selected column of the rectangle. `boot_complete` is raised only after
+the last burst; until then the SPI side stays `busy`, so the first MCU
+command can't overlap with drawing the logo.
 
-## Riferimenti
+## References
 
-- [PROGRAMMING.md](PROGRAMMING.md): programmazione persistente e differenza fra
-  Embedded Flash e User Flash.
-- [VERIFICATION.md](VERIFICATION.md): ambiente di simulazione e gate di timing.
+- [PROGRAMMING.md](PROGRAMMING.md): Persistent programming and the difference between
+  Embedded Flash and User Flash.
+- [VERIFICATION.md](VERIFICATION.md): Simulation environment and timing gate.
