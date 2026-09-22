@@ -1,210 +1,234 @@
-# Scrittura framebuffer via SPI
+# Write framebuffer via SPI
 
-> Aggiornamento: il percorso pixel corrente usa lo stream write-only `BE` a
-> 18,75 MHz e legge lo stato separatamente a 1,171875 MHz. Vedere
-> [SPI_STREAM.md](SPI_STREAM.md). Il collaudo a 12,5 MHz e i risultati a
-> 25 MHz qui sotto restano cronologia del precedente protocollo `B7`.
+> Update: the current pixel path uses the write-only stream `BE` at
+> 18.75 MHz and reads status separately at 1.171875 MHz. See
+> [SPI_STREAM.md](SPI_STREAM.md). The 12.5 MHz testing and the 25 MHz
+> results below are history from the previous `B7` protocol.
 
-Prima implementazione: `SpiFramebuffer.sv` trasferisce burst mascherati alla
-PSRAM tramite una coda asincrona di un elemento. `LCD_WriteRect` li compone
-per aggiornare rettangoli RGB565 arbitrari entro 480x272.
+First implementation: `SpiFramebuffer.sv` transfers masked bursts to
+PSRAM through a one-element asynchronous queue. `LCD_WriteRect` composes
+them to update arbitrary RGB565 rectangles within 480x272.
 
-## Avvio e primitive disponibili
+## Boot and primitives available
 
-La FPGA inizializza ogni pixel a nero (RGB565 0000), anche dopo il reset.
-`FramebufferController.BACKGROUND_COLOR` e' un parametro di sintesi: FFFF per
-bianco, F800 rosso, 07E0 verde, 001F blu. Il pattern selezionato e' PATTERN_SOLID;
-i precedenti pattern restano nel sorgente come strumenti diagnostici.
-Il colore iniziale non e' attualmente modificabile con un comando SPI.
+The FPGA initializes every pixel to black (RGB565 0000), even after
+reset. `FramebufferController.BACKGROUND_COLOR` is a synthesis parameter:
+FFFF for white, F800 for red, 07E0 for green, 001F for blue. The selected
+pattern is PATTERN_SOLID; earlier patterns remain in the source as
+diagnostic tools. The initial color cannot currently be edited through an
+SPI command.
 
-Lo STM32 usa `LCD_BOOT_TESTS=0`: demo e stress grafici non vengono eseguiti.
-La prova font corrente usa `LCD_FPGA_TEXT_DEMO=1`, con `LCD_TEXT_DEMO=0`, e modifica il
-framebuffer dopo che l'eco DMA di avvio e' terminata.
-Per provarli impostare LCD_BOOT_TESTS=1 in spi_diag_config.h e ricompilare/caricare;
-riportare a 0 per l'avvio uniforme. Il runner rifiuta -RequireGraphics/-RequireStress
-se i test grafici sono disabilitati nella configurazione locale.
+The STM32 build uses `LCD_BOOT_TESTS=0`: the demo and the graphics stress
+test do not run. The current font check uses `LCD_FPGA_TEXT_DEMO=1` with
+`LCD_TEXT_DEMO=0`, and it touches the framebuffer only after the startup
+DMA echo self-test has finished. To run the boot tests, set
+`LCD_BOOT_TESTS=1` in `spi_diag_config.h` and recompile/reflash; set it
+back to 0 for a clean startup. The test runner rejects
+`-RequireGraphics`/`-RequireStress` if graphics tests are disabled in the
+local configuration.
 
-L'elenco completo e aggiornato di tutto cio' che si puo' disegnare, opcode SPI
-e API STM32, sta in **[GRAPHICS_COMMANDS.md](GRAPHICS_COMMANDS.md)**: la tabella
-che stava qui e' stata spostata li' per non avere due elenchi da tenere
-allineati. Questo documento resta il riferimento del protocollo `B7` byte per
-byte, piu' il diario delle prove al banco.
+The complete, up-to-date list of everything that can be drawn, the SPI
+opcodes, and the STM32 API is in
+**[GRAPHICS_COMMANDS.md](GRAPHICS_COMMANDS.md)**: the table that used to
+live here has moved there, so there is only one list to keep in sync.
+This document remains the byte-by-byte protocol reference for `B7`, plus
+the bench-test log.
 
-Il comando di scrittura usa un indirizzo lineare allineato a 16 pixel. Coordinate,
-righe e bordi del rettangolo vengono gestiti dalla funzione STM32.
-Questo indirizzamento descrive solo B7. Il protocollo comprende anche B8
-(testo FPGA da User Flash) e B9 (riempimento hardware). `LCD_FillRect` e
-`LCD_Clear` inviano un pacchetto B9 di 18 byte più polling, senza buffer di
-pixel; `LCD_DrawHLine` e `LCD_DrawVLine` usano lo stesso comando con spessore 1.
-Le API sono sincrone, restituiscono 1 in caso di successo e 0 per errore.
-`LCD_DrawLine` aggiunge le linee oblique: B9 tipo 1 trasporta due estremi
-inclusi ed è eseguito con Bresenham nella FPGA. Richiede il bitstream aggiornato.
-FillRect e linee rifiutano dimensioni nulle o aree fuori schermo senza clipping.
-B8/B9 verificano il CRC prima del commit; B7 non ha CRC. Un errore rilevato
-dopo un commit non annulla il disegno. Copie e lettura pixel non sono implementate.
+The write command uses a linear address aligned to 16 pixels; the STM32
+function handles coordinates, rows, and rectangle edges. This addressing
+describes `B7` only. The protocol also includes `B8` (FPGA text from User
+Flash) and `B9` (hardware fill). `LCD_FillRect` and `LCD_Clear` send an
+18-byte `B9` packet plus polling, without touching buffer pixels;
+`LCD_DrawHLine` and `LCD_DrawVLine` use the same command with thickness 1.
+The APIs are synchronous, returning 1 on success and 0 on error.
+`LCD_DrawLine` adds diagonal lines: `B9` type 1 carries two inclusive
+endpoints and is drawn with Bresenham in the FPGA; it requires an updated
+bitstream. `FillRect` and the line functions reject zero dimensions or
+off-screen areas without clipping. `B8`/`B9` check the CRC before commit;
+`B7` has no CRC. An error detected after a commit does not undo the
+drawing already issued. Copy and pixel readback are not implemented.
 
 ```c
-if (!LCD_Clear(0x0000)) { /* errore: pulizia a nero */ }
-if (!LCD_FillRect(20, 30, 100, 60, 0xF800)) { /* errore: rettangolo rosso */ }
+if (!LCD_Clear(0x0000)) { /* error: clear to black */ }
+if (!LCD_FillRect(20, 30, 100, 60, 0xF800)) { /* error: red rectangle */ }
 ```
 
-Con `LCD_FPGA_TEXT_DEMO=1`, la prova corrente chiama clear, fill e testo FPGA.
-Per non disegnare all'avvio occorre tenere a 0 sia `LCD_TEXT_DEMO` sia
-`LCD_FPGA_TEXT_DEMO`, oltre a `LCD_BOOT_TESTS`.
-LCD_Demo_Run e LCD_Stress_Run restano programmi di collaudo separati.
+With `LCD_FPGA_TEXT_DEMO=1`, the current test calls clear, fill, and FPGA
+text in sequence. To avoid drawing anything at startup, keep
+`LCD_TEXT_DEMO`, `LCD_FPGA_TEXT_DEMO`, and `LCD_BOOT_TESTS` all disabled.
+`LCD_Demo_Run` and `LCD_Stress_Run` remain separate test programs.
 
-Nota di cronologia: il paragrafo che segue descrive il prototipo testo lato
-CPU, scritto prima che il rendering passasse alla FPGA. Resta valido per
-`lcd_text.h`, ma la via da usare oggi e' `LCD_DrawTextFPGA` con l'opcode `B8`.
+History note: the following paragraph describes the CPU-side text
+prototype, written before rendering moved to the FPGA. It remains valid
+for `lcd_text.h`, but the way to draw text today is `LCD_DrawTextFPGA`
+with the `B8` opcode.
 
-Il prototipo testo usa una tabella 12x24 nella flash interna STM32: 196 glifi,
-9408 byte bitmap, ASCII stampabile, Latin-1, euro e frecce. `LCD_DrawText`
-decodifica UTF-8, usa celle monospaziate opache e sostituisce con `?` i glifi
-mancanti. Gestisce `\n`, ignora `\r`, non esegue wrap automatico o clipping
-e verifica l'intero ingombro prima di
-disegnare. La tabella e' riproducibile dal BDF e dalla licenza conservati in
-`third_party/terminus-font-4.49.1-master`; non usa ancora la User Flash FPGA.
+The text prototype uses a 12x24 table in STM32 internal flash: 196
+glyphs, a 9408-byte bitmap, covering printable ASCII, Latin-1, the euro
+sign, and the arrows. `LCD_DrawText` decodes UTF-8, uses opaque monospaced
+cells, and substitutes missing glyphs with `?`. It handles `\n`, ignores
+`\r`, performs no automatic wrapping or clipping, and checks the whole
+footprint before drawing. The table can be regenerated from the BDF
+sources and license stored in `third_party/terminus-font-4.49.1-master`;
+it does not yet use the FPGA's User Flash.
 
-## Protocollo
+## Protocol
 
-SPI mode 0, MSB first, 12.5 MHz, GPIO STM32 MEDIUM. Un pacchetto per CS.
-I due impulsi iniziali a CS alto restano necessari come nel collaudo precedente.
+SPI mode 0, MSB first, 12.5 MHz, STM32 GPIO MEDIUM. One packet per CS
+pulse. The two initial CS-high pulses remain necessary, as in the earlier
+test.
 
-| Offset byte | MOSI | MISO |
+| Byte Offset | MOSI | MISO |
 |---|---|---|
 | 0 | B7 | A5 |
-| 1 | 00 | C3 se coda libera, 00 se occupata |
-| 2..4 | indirizzo pixel, big endian a 24 bit | eco del byte precedente |
-| 5..6 | maschera a 16 bit, big endian | eco |
-| 7..38 | 16 pixel RGB565, byte basso prima del byte alto | eco |
-| 39 | 5A, commit | eco |
-| 40 | 00 | AC accettato, E1 rifiutato |
+| 1 | 00 | C3 if the queue is free, 00 if busy |
+| 2..4 | pixel address, 24-bit big endian | echo of the previous byte |
+| 5..6 | 16-bit mask, big endian | echo |
+| 7..38 | 16 RGB565 pixels, low byte before high byte | echo |
+| 39 | 5A, commit | echo |
+| 40 | 00 | AC accepted, E1 rejected |
 
-Indirizzo multiplo di 16 e minore di 130560. Il bit i della maschera abilita
-il pixel i. Pixel 0 nella meta' bassa del primo word PSRAM. Si puo' interrogare
-la disponibilita' inviando solo B7 00, poi alzando CS. Se occupata, riprovare
-in una nuova transazione. La disponibilita' e' campionata alla fine dell'opcode.
+Address must be a multiple of 16 and less than 130560. Bit i of the mask
+enables pixel i. Pixel 0 sits in the lower half of the first PSRAM word.
+Availability can be queried by sending just `B7 00` and then raising CS;
+if busy, retry in a new transaction. Availability is sampled at the end
+of the opcode byte.
 
-Il commit avviene alla ricezione completa di 5A, prima di alzare CS. Un aborto
-precedente non produce scritture; un aborto dopo il commit non le annulla.
-Byte successivi al byte 40 sono ignorati dal parser B7. Gli opcode diversi da
-B7, B8 e B9 mantengono l'eco diagnostica A5, byte precedente. Non usare dati
-arbitrari che iniziano con uno di questi tre opcode come prova eco quando
-l'endpoint grafico e' attivo.
+The commit happens on full reception of byte 39 (5A), before CS rises. An
+earlier abort produces no writes; an abort after the commit does not undo
+them. Bytes after offset 40 are ignored by the `B7` parser. Opcodes other
+than `B7`, `B8`, and `B9` keep the diagnostic echo behavior (respond A5,
+then echo the previous byte). Do not send arbitrary data starting with
+one of these three opcodes as an echo test while the graphics endpoint is
+active.
 
-## Arbitraggio e CDC
+## Arbitration and CDC
 
-Il payload pubblicato resta stabile fino alla conferma del controller. Request
-ed acknowledgement usano toggle sincronizzati a due stadi; il payload attraversa
-come bus mantenuto stabile. CS azzera solo il parser, non la coda. Entrambi i
-domini devono condividere l'assert del reset globale; non resettarli separatamente.
+The published payload stays stable until the controller confirms it.
+Request and acknowledge use two-stage synchronized toggles; the payload
+crosses as a bus held stable throughout. CS only clears the parser, not
+the queue. Both domains must share the same global reset assertion; do
+not reset them separately.
 
-Il controller completa l'inizializzazione del pattern, poi privilegia le letture
-video. Accetta una scrittura quando la FIFO video e' almost-full, usando uno stato
-separato per il comando. Copia il burst in registri locali prima di liberare la
-coda. La maschera abilita entrambi i byte di ciascun pixel selezionato.
-Un frame restart durante la scrittura viene conservato e applicato dopo il burst
-e il tempo di recupero PSRAM. Non si interrompe una scrittura a meta'.
+The controller finishes the pattern initialization, then prioritizes
+video reads. It accepts a write only when the video FIFO is almost full,
+using a separate state for the command. It copies the burst into local
+registers before releasing the queue's tail. The mask enables both bytes
+of each selected pixel. A frame restart that occurs during a write is
+latched and applied only after the burst and the PSRAM recovery time
+complete; a write is never stopped halfway.
 
-## Firmware e prova
+## Firmware and testing
 
-`Core/Inc/lcd_spi.h` espone `LCD_WriteRect(x,y,w,h,pixels)`. Il buffer contiene
-w*h uint16_t in ordine di riga. Ritorna 1 per invio riuscito, 0 per parametri,
-timeout o risposta errata. Il trasporto usa DMA con attesa sincrona e guardie CS di 1 us.
-Il test DMA precedente resta eseguito prima della demo.
+`Core/Inc/lcd_spi.h` exposes `LCD_WriteRect(x,y,w,h,pixels)`. The buffer
+holds `w*h` uint16_t values in row order. It returns 1 on successful
+submission, 0 for bad parameters, timeout, or an unexpected response. The
+transport uses DMA with a synchronous wait and 1 us CS guard intervals.
+The earlier DMA self-test still runs before the demo.
 
-La demo disegna a (101,81) un rettangolo 67x40, bordo bianco e interno rosso,
-verde e blu. I bordi non allineati esercitano le maschere. `g_lcd_demo_state`:
-0 endpoint diagnostico, 1 in corso, 2 inviato, 3 errore. Il valore 2 verifica
-trasporto, eco e accettazione; non e' una rilettura dei pixel dalla PSRAM e non
-conferma da solo l'immagine sul pannello.
+The demo draws a 67x40 rectangle at (101,81): white border, red interior,
+and additional green and blue regions. Misaligned edges exercise the
+masks. `g_lcd_demo_state`: 0 not requested, 1 in progress, 2 sent, 3
+error. State 2 confirms transport, echo, and acceptance; it is not a
+read-back of the pixels from PSRAM and does not by itself confirm the
+image on the panel.
 
 ```powershell
 ./stm32/WeAct_H743_SPI/test-hardware.ps1 -RequireGraphics -SerialNumber 35FF6C064D53373238602143
 ```
 
-Prima abilitare `LCD_BOOT_TESTS=1` e `SPI_GPIO_PROBE=1`; il runner verifica
-entrambi. Per usare l'ELF Release aggiungere `-Preset Release`. Ripristinare
-i flag di avvio dopo la prova e ricompilare/caricare.
+First enable `LCD_BOOT_TESTS=1` and `SPI_GPIO_PROBE=1`; the runner checks
+both. To use the Release ELF, add `-Preset Release`. Restore the startup
+flags after testing and recompile/reflash.
 
-Richiede `localparam SPI_FRAMEBUFFER = 1` in TOP e `SPI_DIAG_MATRIX 0`.
-Il runner salva anche `graphics_state` nel risultato JSON e fallisce se diverso
-da 2. `diagnose-hardware.ps1` seleziona invece SPI_FRAMEBUFFER=0; anche
--RestoreSelfTest ripristina l'eco pura a 12.5 MHz (prescaler 16, SDC 80 ns). Per tornare alla grafica impostare il
-parametro a 1 e ripetere il comando sopra.
+Requires `localparam SPI_FRAMEBUFFER = 1` in TOP and `SPI_DIAG_MATRIX 0`.
+The runner also saves `graphics_state` in the JSON result and fails if it
+differs from 2. `diagnose-hardware.ps1` instead selects
+`SPI_FRAMEBUFFER=0`; its `-RestoreSelfTest` also restores pure echo at
+12.5 MHz (prescaler 16, SDC 80 ns). To return to graphics, set the
+parameter back to 1 and repeat the command above.
 
-## Verifiche e limiti
+## Checks and limits
 
-`sim/run_spi_sim.ps1` include il banco integrato SPI/controller con memoria
-che acquisisce i burst e le maschere. Copre payload e ordine dei beat, pixel
-non selezionati, coda occupata, indirizzi invalidi, aborto di byte/pacchetto,
-riuso della coda e frame restart durante una scrittura.
+`sim/run_spi_sim.ps1` includes an integrated SPI/controller bank with a
+memory model that captures bursts and masks. It covers payload and beat
+order, unselected pixels, a busy queue, invalid addresses, byte/packet
+abort, queue reuse, and a frame restart during a write.
 
-Per B7 non c'e' CRC prima del commit. Non ci sono rollback, readback o doppio framebuffer.
-Un errore di trasmissione puo' essere segnalato dall'eco dopo che una scrittura
-e' stata accettata. Un rettangolo puo' apparire progressivamente (tearing).
-Questa e' la base funzionale per LVGL, non ancora la sua integrazione o una
-misura della massima velocita' grafica.
+For `B7` there is no CRC before commit, and there is no rollback,
+readback, or double framebuffer. A transmission error can only be
+signaled by the echo after a write has already been accepted. A
+rectangle may appear progressively (tearing). This is the functional
+basis for LVGL, not yet its integration, nor a measurement of maximum
+graphics throughput.
 
-## Esito al banco, 9 settembre 2026
+## Result on the bench, 9 September 2026
 
-FPGA caricata in SRAM e firmware STM32 programmato con verifica flash.
-Test SPI: 40 trasferimenti, 34992 byte, zero mismatch e zero errori HAL;
-tre probe GPIO corrette. Demo: graphics_state=2. L'utente ha confermato
-visivamente il rettangolo sul pannello, poi ha resettato la FPGA per provarne
-la scomparsa. Il reset reinizializza il pattern; per ridisegnare resettare STM32.
+FPGA loaded to SRAM and STM32 firmware programmed with flash
+verification. SPI test: 40 transfers, 34992 bytes, zero mismatches, zero
+HAL errors, three correct GPIO probes. Demo: graphics_state=2. The user
+visually confirmed the rectangle on the panel, then reset the FPGA to
+check that it disappeared. Resetting the FPGA reinitializes the pattern;
+to redraw, reset the STM32.
 
-Timing finale: quattro endpoint di calibrazione PSRAM ammessi, worst -1.303 ns,
-nessuna violazione hold/recovery/removal. Bitstream SHA256:
+Final timing: four PSRAM calibration endpoints allowed, worst case
+-1.303 ns, no hold/recovery/removal violations. Bitstream SHA256:
 `971555FD7E3BCB5AB009EBD3FF3CB9C6054ADE0E4A5C7AF1E549584AB7014ACF`.
 ELF SHA256: `A9D1BE892C4693BC320C268F41D57DF9CDC6BF2E925D53C5031CCBA951C5FA96`.
-Risultati SWD in `stm32/WeAct_H743_SPI/build/Debug/hardware-result.json`;
-la lettura ReadOnly e' stata eseguita subito dopo caricamento e verifica flash.
+SWD results in `stm32/WeAct_H743_SPI/build/Debug/hardware-result.json`;
+the read was performed immediately after flash loading and verification.
 
-Simulazioni completate: suite SPI con banco framebuffer PASS; regressione
-video con FIFO reale PASS (341.2 s, prima della separazione dello stato comando),
-modello video sull'RTL finale PASS (83.4 s). Entrambe recuperano dal frame
-successivo all'underrun, zero frame danneggiati sui quattro successivi.
-Il banco SPI/controller e' stato ripetuto dopo la modifica finale all'arbitraggio.
+Completed simulations: SPI suite with the framebuffer bank PASS; video
+regression with a real FIFO PASS (341.2 s, before the command/state
+separation), and video model regression on the final RTL PASS (83.4 s).
+Both recover starting from the frame after the underrun, with zero
+damaged frames over the following four. The SPI/controller bank was
+rerun after the final arbitration change.
 
-## Tentativo a 25 MHz, 9 settembre 2026
+## 25 MHz attempt, September 9, 2026
 
-Provati prescaler STM32 8 e vincolo SCK 40 ns (semiperiodo 20 ns), mantenendo
-GPIO MEDIUM e budget I/O di 10 ns. La build FPGA termina, ma il gate timing
-rifiuta il percorso `graphics.spi_framebuffer/slave/tx_started_s0/Q` ->
-`SPI_MISO_s3/O`: slack -3.782 ns. Percorso dal fronte di discesa al successivo
-fronte di salita, skew 5.289 ns e data delay 8.493 ns. Il percorso MOSI piu'
-critico ha solo +0.043 ns. Le quattro violazioni di calibrazione PSRAM restano
-entro baseline, worst -1.303 ns.
+Tested STM32 prescaler 8 with a 40 ns SCK constraint (20 ns half-cycle),
+keeping GPIO MEDIUM and a 10 ns I/O budget. The FPGA build finishes, but
+gate-level timing rejects the path
+`graphics.spi_framebuffer/slave/tx_started_s0/Q` ->
+`SPI_MISO_s3/O`: slack -3.782 ns. The path runs from the falling edge to
+the next rising edge, with 5.289 ns skew and 8.493 ns data delay. The
+most critical MOSI route has only +0.043 ns margin. The four PSRAM
+calibration violations stay within baseline, worst -1.303 ns.
 
-Nessun caricamento a 25 MHz, nessuna prova hardware a questa frequenza.
-Ripristinati sorgenti STM32, CubeMX e vincolo SDC a 12.5 MHz. Per procedere
-occorre ottimizzare il percorso MISO e ricontrollare anche il margine MOSI;
-non basta ridurre il prescaler. Il report del tentativo e' archiviato in
+No bitstream was loaded at 25 MHz, and no hardware testing was done at
+this frequency. STM32, CubeMX sources, and the SDC constraint were
+restored to 12.5 MHz. Proceeding requires optimizing the MISO path and
+rechecking the MOSI margin; reducing the prescaler alone is not enough.
+The attempt report is archived at
 `stm32/WeAct_H743_SPI/build/Debug/trial-25mhz/timing-25mhz.tr`.
 
-## Ottimizzazione MISO e primo PASS a 25 MHz
+## MISO optimization and first PASS at 25 MHz
 
-Il 9 settembre SpiSlave ha acquisito l'opzione FIXED_FIRST_BYTE. SpiFramebuffer
-la abilita con FIRST_BYTE=A5: il registro TX inizializzato contiene gia' il primo
-MSB, quindi il pin riceve direttamente tx_shift[7]. Eliminati in sintesi il
-selettore tx_started e la maschera sul dato; resta il controllo tri-state con CS.
-Il contratto generico resta il default per SpiDiagnostic e sorgenti FIFO variabili.
+On September 9, SpiSlave gained the `FIXED_FIRST_BYTE` option.
+SpiFramebuffer enables it with `FIRST_BYTE=A5`: the TX register
+initializes with the first MSB already loaded, so the pin is driven
+directly from `tx_shift[7]`. In short, this eliminates the `tx_started`
+selector and the mux on the data; tri-state control still belongs to CS.
+The generic contract remains the default for SpiDiagnostic and for
+variable-first-byte FIFO sources.
 
-SDC 40 ns, budget I/O ancora 10 ns, prescaler 8, GPIO MEDIUM, cablaggio invariato.
-Suite SPI PASS, incluso il banco framebuffer portato a 25 MHz. Gate timing PASS:
-sei endpoint di calibrazione PSRAM ammessi, worst -1.308 ns; nessuna violazione
-hold/recovery/removal e nessuna nuova eccezione. Il margine minimo nel dominio
-PSRAM e' stretto (+0.017 ns); ricontrollare il gate a ogni successiva build.
+SDC 40 ns, I/O budget still 10 ns, prescaler 8, GPIO MEDIUM, wiring
+unchanged. SPI suite PASS, including the framebuffer bank bumped to
+25 MHz. Gate timing PASS: six PSRAM calibration endpoints allowed, worst
+-1.308 ns; no hold/recovery/removal violations and no new exceptions. The
+minimum margin in the PSRAM domain is narrow (+0.017 ns); recheck the
+gate-level timing on every subsequent build.
 
-FPGA programmata in SRAM e flash STM32 verificata. Collaudo normale:
-25000000 Hz effettivi, 40 trasferimenti, 34992 byte, zero mismatch, HAL OK,
-tre probe GPIO corrette e graphics_state=2. E' un primo collaudo a 25 MHz,
-non la prova lunga da oltre un milione di byte eseguita in precedenza a 12.5 MHz.
-Conferma visiva della nuova esecuzione a 25 MHz ancora in attesa.
+FPGA programmed to SRAM and STM32 flash verified. Normal test:
+25,000,000 Hz actual, 40 transfers, 34992 bytes, zero mismatches, HAL OK,
+three correct GPIO probes, graphics_state=2. This is a first test at
+25 MHz, not the million-byte-plus long test previously run at 12.5 MHz.
+Visual confirmation of the new 25 MHz run is still pending.
 
 Bitstream SHA256: `1FA0EDDC47B68BAD53D4295CA0AA5BE1BEBD319E0382890CA04466BDA35E1A87`.
 ELF SHA256: `312C94BF2E8296B4B8D5239D23E1606199BC5464BB53340E5B6C2F4077CA06C7`.
-Configurazione lasciata a 25 MHz per la grafica. RestoreSelfTest torna invece
-alla configurazione diagnostica qualificata a 12.5 MHz; per riattivare i 25 MHz
-riallineare SPI_FRAMEBUFFER=1, prescaler 8 nel C e CubeMX, e SDC 40 ns.
+Configuration left at 25 MHz for graphics. RestoreSelfTest instead
+returns to the qualified diagnostic configuration at 12.5 MHz; to
+reactivate 25 MHz, realign `SPI_FRAMEBUFFER=1`, prescaler 8 in both C and
+CubeMX, and SDC 40 ns.

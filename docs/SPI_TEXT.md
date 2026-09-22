@@ -1,70 +1,73 @@
-# Comando testo SPI B8
+# SPI B8 text command
 
-Riferimento dell'opcode testo. B8 condivide coda e renderer con il riempimento
-B9; durante l'esecuzione di uno dei due l'altro deve attendere. B9 resta
-disponibile anche senza font validi. Per tutti gli opcode e le API, incluse
-le linee orizzontali/verticali via B9, vedere
+Text opcode reference. `B8` shares the queue and renderer with `B9`
+(fill/lines); while either is executing, the other must wait. `B9`
+remains available even without valid fonts. For all opcodes and APIs,
+including the horizontal/vertical lines drawn via `B9`, see
 [GRAPHICS_COMMANDS.md](GRAPHICS_COMMANDS.md).
 
-Il renderer FPGA usa tre font Terminus a cella fissa memorizzati nella User
-Flash del GW1NR-9C. L'immagine occupa 25.152 dei 77.824 byte disponibili e
-contiene 196 glifi per ciascuna dimensione:
+The FPGA renderer uses three fixed-cell Terminus fonts stored in the
+GW1NR-9C's User Flash. The image occupies 25,152 of the 77,824 available
+bytes and contains 196 glyphs per size:
 
-| font_id | Cella | Byte/glifo |
-|---:|---:|---:|
+| font_id | Cell | Byte/glyph |
+|---:|---|---:|
 | 0 | 8x16 | 16 |
 | 1 | 12x24 | 48 |
 | 2 | 16x32 | 64 |
 
-Il 10 settembre 2026 questi tre font sono stati tolti e rimessi nel giro di
-poche ore, e la storia vale la pena di essere raccontata perché il primo
-verdetto era sbagliato. Una bisezione sembrava mostrare che bitstream e User
-Flash, condividendo l'array fisico, non ci stessero insieme oltre i 18.432 byte
-di font. In realtà quella bisezione passava a openFPGALoader dei file `.fi`, che
-è testo ASCII e occupa circa quattro volte il payload: la soglia misurata cade
-esattamente dove il testo del `.fi` supera i 77.824 byte della User Flash
-(18.432 → 76.173 byte, 19.456 → 80.461). Non era un conflitto di capacità, era
-il formato di file sbagliato — lo stesso problema che faceva fallire il CRC dei
-font. Passando l'immagine binaria grezza, i 25.152 byte si programmano e la
-FPGA si avvia da flash senza obiezioni. Vedi `PROGRAMMING.md`.
+On September 10, 2026, these three fonts were removed and put back
+within a few hours, and the story is worth telling because the first
+diagnosis was wrong. A bisection search seemed to show that the
+bitstream and the User Flash, sharing the same physical array, could not
+both fit once fonts exceeded 18,432 bytes. In reality, that bisection was
+feeding openFPGALoader `.fi` files, which are ASCII text and take up
+roughly four times the payload size: the measured threshold falls
+exactly where the `.fi` text exceeds the User Flash's 77,824 bytes
+(18,432 → 76,173 bytes, 19,456 → 80,461 bytes). It was never a capacity
+conflict — it was the wrong file format, the same mistake that made the
+font CRC check fail. Passing the raw binary image instead lets the full
+25,152 bytes be programmed, and the FPGA boots from flash without
+complaint. See [PROGRAMMING.md](PROGRAMMING.md).
 
-Il subset comprende ASCII stampabile, Latin-1, euro e le quattro frecce. Un
-codepoint non presente viene sostituito da `?`. Le sorgenti BDF Terminus sono
-distribuite secondo SIL Open Font License 1.1, inclusa in `third_party`.
+The subset includes printable ASCII, Latin-1, the euro sign, and the
+four arrows. A codepoint that is not present is replaced by `?`. The BDF
+Terminus sources are distributed under the SIL Open Font License 1.1,
+included under `third_party`.
 
-## Pacchetto
+## Package
 
-Tutti i campi multibyte sono big endian. La lunghezza indica byte UTF-8, da 0
-a 64; il terminatore zero della stringa C non viene trasmesso.
+All multibyte fields are big endian. The length field counts UTF-8
+bytes, from 0 to 64; the C string's zero terminator is not transmitted.
 
-| Offset | Campo |
+| Offset | Field |
 |---:|---|
 | 0 | opcode `B8` |
 | 1 | dummy/status |
 | 2 | font_id |
-| 3 | flags: bit 0 trasparente, bit 1 wrap |
+| 3 | flags: bit 0 transparent, bit 1 wrap |
 | 4..5 | x |
 | 6..7 | y |
-| 8..9 | larghezza box; zero = fino al bordo destro |
-| 10..11 | altezza box; zero = fino al bordo inferiore |
+| 8..9 | box width; zero = up to the right edge |
+| 10..11 | box height; zero = up to the bottom edge |
 | 12..13 | foreground RGB565 |
 | 14..15 | background RGB565 |
-| 16 | lunghezza UTF-8 |
-| 17.. | testo |
-| 17+N..18+N | CRC16-CCITT, init `FFFF`, polinomio `1021` |
+| 16 | UTF-8 length |
+| 17.. | text |
+| 17+N..18+N | CRC16-CCITT, init `FFFF`, polynomial `1021` |
 | 19+N | commit `A6` |
-| 20+N | dummy per leggere l'esito |
+| 20+N | dummy to read the outcome |
 
-Il secondo byte ricevuto vale `C3` quando la coda è libera, `00` durante il
-rendering ed `E2` finché l’immagine font non è disponibile o non supera il
-CRC32. Il byte ricevuto dopo il commit vale `AC` se il comando è accettato,
-`E1` in caso contrario.
+The second byte received reads `C3` when the queue is free, `00` while
+text is rendering, and `E2` until the font image is validated or if it
+fails the CRC-32 check. The byte received after the commit reads `AC` if
+the command was accepted, `E1` otherwise.
 
-Il clipping al box e allo schermo è sempre attivo. Il ritorno a capo avviene
-solo su `\n`, oppure automaticamente quando è impostato il flag wrap. Senza
-wrap, la parte a destra del box viene scartata.
+Clipping to the box and to the screen is always active. A new line starts
+only on `\n`, or automatically when the wrap flag is set. Without wrap,
+the part of the string to the right of the box is discarded.
 
-## Generazione e programmazione
+## Generation and programming
 
 ```powershell
 python tools\generate_user_flash_fonts.py third_party\terminus-font-4.49.1-master fonts
@@ -72,24 +75,25 @@ python tools\generate_user_flash_fonts.py third_party\terminus-font-4.49.1-maste
 .\program_tang_nano_flash.ps1
 ```
 
-L’ultima operazione programma sia la configurazione FPGA nella Embedded Flash
-sia i font nella User Flash. Non li verifica: la User Flash non viene riletta
-da nessuno, e l’unica prova che i font siano buoni è il CRC-32 che `FontStore`
-calcola a runtime. Vedi [PROGRAMMING.md](PROGRAMMING.md). Per i normali aggiornamenti
-volatili del solo bitstream resta disponibile `program_tang_nano_sram.ps1`.
+The last step programs the FPGA configuration into Embedded Flash and
+the fonts into User Flash. It does not verify them: nothing rereads the
+User Flash afterward, and the only proof the fonts are good is the
+CRC-32 that FontStore computes at runtime. See
+[PROGRAMMING.md](PROGRAMMING.md). For ordinary, volatile bitstream-only
+updates, `program_tang_nano_sram.ps1` remains available.
 
-Il test hardware completo, incluso lo stato finale del renderer FPGA, è:
+The complete hardware test, including the final state of the FPGA
+renderer, is:
 
-Prima abilitare `SPI_GPIO_PROBE=1` e `LCD_FPGA_TEXT_DEMO=1` nella
-configurazione MCU; il runner rifiuta il collaudo con GPIO probe disabilitato.
-Per Release aggiungere `-Preset Release`. Ripristinare poi la configurazione
-di avvio desiderata e ricompilare/caricare.
+First enable `SPI_GPIO_PROBE=1` and `LCD_FPGA_TEXT_DEMO=1` in the MCU
+configuration; the runner refuses to test with the GPIO probe disabled.
+For a Release build, add `-Preset Release`. Then restore the desired
+boot configuration and recompile/reflash.
 
 ```powershell
 .\stm32\WeAct_H743_SPI\test-hardware.ps1 `
   -SerialNumber <seriale-ST-LINK> -RequireFPGAText
 ```
 
-Sul firmware STM32, `LCD_DrawTextFPGA()` costruisce il pacchetto, calcola il
-CRC, attende l’accettazione e ritorna soltanto dopo il completamento del
-rendering.
+On the STM32, `LCD_DrawTextFPGA()` builds the packet, computes the CRC,
+waits for acceptance, and returns only after rendering completes.
