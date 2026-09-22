@@ -502,8 +502,8 @@ int LCD_DrawTextFPGA(uint16_t x,uint16_t y,uint16_t box_width,
     return text_ready();
 }
 
-// Tempo di sedici clear a schermo intero, in millisecondi. Sedici perche'
-// HAL_GetTick ha risoluzione di 1 ms e un singolo clear e' dello stesso ordine.
+// Time for sixteen full-screen clears, in milliseconds. Sixteen are used because
+// HAL_GetTick has 1 ms resolution and a single clear is of the same order.
 volatile uint32_t g_lcd_clear_ms16;
 
 void LCD_FPGATextDemo_Run(void)

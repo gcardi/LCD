@@ -95,8 +95,8 @@ module TextRenderer (
  wire build_bit_on = build_inside && build_column<16 &&
                      glyph_bits[15-build_column[3:0]];
  wire build_selected = build_inside && (!flags[0] || build_bit_on);
- // Il riempimento non ha glifo: la selezione e' il solo rettangolo, e i
- // limiti sono gia' quelli calcolati per il box del testo.
+ // A fill has no glyph: selection is the rectangle itself, using the limits
+ // already calculated for the text box.
  wire fill_selected = row_visible && build_x>={1'b0,pen_x} &&
                       build_x<clip_right;
 
@@ -133,8 +133,8 @@ module TextRenderer (
      logo_pair<=0;logo_run_left<=0;logo_color<=0;logo_ptr<=0;
      boot_complete<=0;
    end else case(state)
-     // Un riempimento non tocca la User Flash, quindi resta disponibile
-     // anche quando i font mancano o non superano il CRC.
+     // A fill does not access User Flash, so it remains available even when
+     // fonts are missing or fail the CRC check.
      // The logo goes first and only once per reset. Its bursts sit in the
      // handshake until FramebufferController has finished clearing the frame,
      // which is the only ordering this needs: updates are not served until

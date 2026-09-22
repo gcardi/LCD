@@ -4,18 +4,16 @@
 #define SPI_DIAG_MATRIX 0
 #define SPI_DIAG_MODE 0
 #define SPI_DIAG_ROUNDS 8
-// Eco di verifica dopo SPI_Setup(). Ogni round sono 5 trasferimenti e 4374 byte,
-// circa 44 ms a 9,375 MHz, e la demo del testo non parte finche' non e' finito.
-// Un round basta a dimostrare che il collegamento eco funziona davvero prima di
-// disegnare; test-hardware.ps1 rilegge questa costante e adatta le attese da
-// solo. Per -RequireStress servono pero' oltre 1.000.000 di byte controllati,
-// cioe' almeno 229 round: portarlo a 240 prima di quella qualifica.
+// Verification echo after SPI_Setup(). Each round is 5 transfers and 4,374 bytes,
+// about 44 ms at 9.375 MHz; the text demo starts only after it finishes.
+// One round proves that the echo link works before drawing; test-hardware.ps1
+// reads this constant and adjusts its timeouts. -RequireStress needs more than
+// 1,000,000 checked bytes, or at least 229 rounds: set it to 240 first.
 #define SPI_SELFTEST_ROUNDS 240
-// Prova GPIO lenta su MISO, tre configurazioni di pull. E' lo strumento che
-// distingue una linea flottante da una tenuta alta da una FPGA non configurata,
-// ma costa circa 800 ms perche' procede un bit alla volta con HAL_Delay(1).
-// Tenerla spenta all'avvio normale e accenderla per diagnosticare o per
-// test-hardware.ps1, che ne pretende l'esito.
+// Slow MISO GPIO test with three pull configurations. It distinguishes a
+// floating line, a line held high, and an unconfigured FPGA, but takes about
+// 800 ms because it advances one bit at a time with HAL_Delay(1). Keep it off
+// during normal boot; enable it for diagnosis or test-hardware.ps1.
 #define SPI_GPIO_PROBE 1
 // Opt in to destructive on-screen demo/stress drawing at boot.
 #define LCD_BOOT_TESTS 0
@@ -27,12 +25,12 @@
 // paints the whole screen twice and takes roughly half a second, so it is
 // opt-in. Read g_lcd_bench_* over SWD afterwards.
 #define LCD_STREAM_BENCH 0
-// Linea di reset FPGA_RST_N (PB1 -> IO29) montata su questa scheda?
-// 1: all'avvio la MCU resetta la FPGA e pretende la prova che il reset sia
-//    arrivato; senza prova la FPGA non viene usata.
-// 0: nessuna linea. Non si resetta niente e non si dimostra niente, ma si
-//    aspetta comunque che la FPGA sia davvero pronta (calibrazione PSRAM e
-//    riempimento iniziale) invece di fidarsi di un ritardo fisso.
-// La FPGA non ha bisogno della linea: IO29 ha la pull-up e senza filo sta a riposo.
+// Is the FPGA_RST_N reset line (PB1 -> IO29) fitted on this board?
+// 1: at boot, the MCU resets the FPGA and requires proof that reset arrived;
+//    without that proof, it does not use the FPGA.
+// 0: no reset line. Nothing is reset or proved, but the firmware still waits for
+//    the FPGA to be ready (PSRAM calibration and initial fill), rather than using
+//    a fixed delay. The FPGA does not require this line: IO29 has a pull-up and
+//    remains idle when left unconnected.
 #define FPGA_RESET_LINE 1
 #endif

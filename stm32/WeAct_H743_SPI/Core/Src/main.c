@@ -46,12 +46,12 @@
 /* Private variables ---------------------------------------------------------*/
 
 /* USER CODE BEGIN PV */
-// Linea FPGA_IRQ_N su PB0, attiva bassa, EXTI sul fronte di discesa.
-// La convenzione e': alto = nessun evento, basso = evento da confermare via
-// SPI con la sequenza PRESENT completata. La callback non usa la SPI.
-volatile uint32_t g_fpga_irq_count;   // fronti di discesa osservati
-volatile uint32_t g_fpga_irq_pending; // 1 = evento non ancora consumato
-volatile uint32_t g_fpga_irq_level;   // livello letto a regime: 1 atteso
+// Active-low FPGA_IRQ_N on PB0; EXTI triggers on the falling edge.
+// High means no event; low means an event that must be acknowledged over SPI
+// after PRESENT completes. The callback does not use SPI.
+volatile uint32_t g_fpga_irq_count;   // observed falling edges
+volatile uint32_t g_fpga_irq_pending; // 1 = event not yet consumed
+volatile uint32_t g_fpga_irq_level;   // steady-state sampled level: expected 1
 volatile uint32_t g_fpga_irq_unobserved_count;
 /* USER CODE END PV */
 
@@ -65,8 +65,8 @@ void MX_FREERTOS_Init(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-// La callback conta il fronte e alza un flag. LCD_Present legge lo stato e
-// conferma l'evento via SPI nel contesto chiamante, fuori dall'interrupt.
+// The callback counts the edge and sets a flag. LCD_Present reads the state and
+// acknowledges the event over SPI in the caller context, outside the interrupt.
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 {
     if(GPIO_Pin==FPGA_IRQ_N_Pin) {

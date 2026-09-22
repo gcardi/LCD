@@ -15,7 +15,7 @@ module SpiFramebuffer (
  // pixels from racing the logo for the framebuffer.
  input wire graphics_enabled,
  output wire text_valid, input wire text_take,
- // 0 = comando testo B8, 1 = forma B9. Le due condividono coda e registri.
+ // 0 = B8 text command, 1 = B9 shape command. They share queue and registers.
  output reg text_kind,
  output reg [1:0] text_font_id,
  output reg [7:0] text_flags,
@@ -197,7 +197,7 @@ module SpiFramebuffer (
    end
  end
  wire text_commit_index = selected_text && index==(7'd19+text_length);
- // Il pacchetto forma e' a lunghezza fissa: 18 byte, commit all'indice 16.
+ // The shape packet has a fixed length: 18 bytes, with commit at index 16.
  wire shape_commit_index = selected_shape && index==7'd16;
  wire shape_fields_valid = !text_invalid && text_x<480 && text_y<272 &&
                            (text_font_id==0 ||
@@ -284,7 +284,7 @@ module SpiFramebuffer (
      text_box_width<=0;text_box_height<=0;text_foreground<=0;
      text_background<=0;text_length<=0;text_kind<=0;
    end else if(push) begin
-    // Il tipo si fissa sull'opcode, prima di qualunque campo.
+    // The opcode fixes the type before any field is received.
     if(index==0 && text_available && graphics_available) begin
       if(rx==8'hB8 && text_enabled2) text_kind<=0;
       if(rx==8'hB9) begin text_kind<=1;text_length<=0;end
@@ -361,7 +361,7 @@ module SpiFramebuffer (
        echo_byte<=(available && graphics_available)?8'hC3:8'h00;
      if(index==0 && rx==8'hB8)
        echo_byte<=!text_enabled2?8'hE2:((text_available && graphics_available)?8'hC3:8'h00);
-     // Un riempimento non usa i font, quindi non dipende da text_enabled.
+     // A fill does not use fonts, so it does not depend on text_enabled.
      if(index==0 && rx==8'hB9)
        echo_byte<=(text_available && graphics_available)?8'hC3:8'h00;
      if(index==0 && rx==8'hBD)
