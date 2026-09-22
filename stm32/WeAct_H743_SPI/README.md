@@ -1,236 +1,239 @@
-# Firmware WeAct H743 / Tang Nano 9K
+# WeAct H743 / Tang Nano 9K firmware
 
-Origine del progetto (STM32CubeMX con generazione CMake), ambiente VS Code,
-file generati e regole di rigenerazione: [TOOLCHAIN.md](TOOLCHAIN.md).
+Project source (STM32CubeMX with CMake generation), VS Code environment,
+generated files and regeneration rules: [TOOLCHAIN.md](TOOLCHAIN.md).
 
-Stato corrente: SPI 12.5 MHz, B7 pixel, B8 testo FPGA, B9 fill/clear e linee
-orizzontali/verticali. `LCD_DrawLine` usa B9 tipo 1 per linee oblique con
-estremi inclusi e richiede anche il nuovo bitstream FPGA. API e protocollo:
-[GRAPHICS_COMMANDS.md](../../docs/GRAPHICS_COMMANDS.md).
-Release collaudata: [confronto dimensioni e tempi](../../docs/MCU_RELEASE_COMPARISON.md).
-Le sezioni datate sotto conservano la cronologia dei collaudi.
+Current state: SPI 9.375 MHz, B7 pixels, B8 FPGA text, B9 fill/clear and
+horizontal/vertical lines. `LCD_DrawLine` uses B9 type 1 for diagonal lines
+with inclusive endpoints and also requires the newer FPGA bitstream. API and
+protocol: [GRAPHICS_COMMANDS.md](../../docs/GRAPHICS_COMMANDS.md).
+The dated sections below preserve the testing history.
 
 ## LVGL 9
 
-Il submodule `../../third_party/lvgl` fornisce LVGL v9.6.0. `GuiTask` esegue
-la UI e posta ogni flush a `DisplayTask`, che resta il proprietario esclusivo
-di SPI2. Il demo usa RGB565 partial con due buffer da 20 righe in RAM D2. Al
-termine di ogni frame LVGL, `DisplayTask` esegue `PRESENT` e una `COPY`
-front-to-draw per preservare la base dei successivi aggiornamenti parziali
-senza tearing. Dettagli, stati SWD e limiti: [LVGL_DEMO.md](../../docs/LVGL_DEMO.md).
+Submodule `../../third_party/lvgl` provides LVGL v9.6.0. `GuiTask` runs the UI
+and queues each flush to `DisplayTask`, which remains the exclusive owner of
+SPI2. The demo uses RGB565 partial buffers: two 20-row buffers in D2 RAM. At
+the end of each LVGL frame, `DisplayTask` runs `PRESENT` and a front-to-draw
+`COPY` to preserve the base for subsequent partial updates without tearing.
 
-## Double buffering e PRESENT
+## Double buffering and PRESENT
 
-Implementati BA/BB e `LCD_EnableDoubleBuffer`, `LCD_GetBufferStatus`, `LCD_Present`.
-La demo presenta 16 frame animati e il campione finale, con verifica degli IRQ.
-Protocollo e limiti: [DOUBLE_BUFFER.md](../../docs/DOUBLE_BUFFER.md).
-Collaudo da questa cartella:
+BA/BB and `LCD_EnableDoubleBuffer`, `LCD_GetBufferStatus`, `LCD_Present` are
+implemented. The demo features 16 animated frames plus a final one, with IRQ
+verification. Protocol and limits: [DOUBLE_BUFFER.md](../../docs/DOUBLE_BUFFER.md).
+Testing from this folder:
 
 ```powershell
 .\test-double-buffer.ps1 -SerialNumber 35FF6C064D53373238602143
 .\test-double-buffer.ps1 -ReadOnly -SerialNumber 35FF6C064D53373238602143
 ```
 
-Default Release. Il primo comando richiede un bitstream già compilato e
-verificato, programma FPGA/font e MCU; il secondo verifica la corrispondenza
-della flash STM32 con l’ELF e legge i risultati senza reset.
+Default preset is Release. The first command requires an already-verified
+bitstream: it programs the FPGA/fonts and the MCU. The second checks that the
+STM32 flash matches the ELF and reads the results without resetting.
 
-## COPY, scroll e terminale
+## COPY, scroll and terminal
 
-`LCD_CopyRect` e `LCD_ScrollRect` usano BC (BB versione 2). Lo scroll include
-il colore RGB565 con cui riempire l'area scoperta; PRESENT resta separato per
-consentire di aggiungere testo prima dello swap.
-`LCD_SCROLL_DEMO=1` aggiunge 32 righe scorrevoli in un viewport, conservando
-cornice e sfondo. Totale: 50 PRESENT/IRQ, una COPY e 32 SCROLL.
+`LCD_CopyRect` and `LCD_ScrollRect` use `BC` (requires BB version 2). Scroll
+takes an RGB565 fill color for the area it uncovers; `PRESENT` stays separate
+so text can still be added before the swap.
+`LCD_SCROLL_DEMO=1` adds 32 scrolling rows in a viewport, preserving the frame
+and background. Total: 50 PRESENT/IRQ, one COPY and 32 SCROLL.
 
 ```powershell
 .\test-double-buffer.ps1 -RequireScroll -SerialNumber 35FF6C064D53373238602143
 ```
 
-Il runner rileva automaticamente il flag della demo; `-RequireScroll` lo
-richiede esplicitamente. Dettagli: [BLITTER.md](../../docs/BLITTER.md).
+The runner auto-detects the demo flag; `-RequireScroll` requires it
+explicitly. Details: [BLITTER.md](../../docs/BLITTER.md).
 
-## Build e upload
+## Build and upload
 
-Aprire questa cartella in VS Code. Servono CMake, Ninja, arm-none-eabi-gcc
-nel PATH e STM32CubeProgrammer CLI (gia' incluso nel CubeCLT installato).
+Open this folder in VS Code. You need CMake, Ninja, and arm-none-eabi-gcc on
+`PATH`, plus the STM32CubeProgrammer CLI (already included with CubeCLT).
 
 ```powershell
-.\build.ps1                  # configura e compila Debug
-.\build.ps1 -ListProbes      # elenca le sonde, senza collegarsi al target
-.\build.ps1 -Program -SerialNumber <seriale>
+.\build.ps1                  # configure and build Debug
+.\build.ps1 -ListProbes      # list probes, without connecting to the target
+.\build.ps1 -Program -SerialNumber <serial>
 ```
 
-Il comando -Program compila, scrive l'ELF agli indirizzi in esso contenuti,
-verifica la flash e resetta il micro. Si ferma se un comando fallisce; nessuna
-cancellazione globale o modifica degli option byte. Richiede il seriale per
-selezionare esplicitamente il target quando sono presenti piu' sonde.
-La programmazione sostituisce il firmware nelle aree interessate.
+`-Program` builds, writes the ELF to the addresses it contains, verifies the
+flash, and resets the MCU. It stops if any step fails; there is no mass erase
+or option-byte modification. The serial number is required to explicitly
+select the target when multiple probes are connected. Programming overwrites
+firmware only in the affected flash regions.
 
-Opzioni: `-Preset Release`, `-SwdFrequencyKHz 1000`,
-`-ProgrammerPath <percorso>`, `-UnderReset` (richiede NRST collegato).
-Chiudere una sessione debug che occupa la sonda prima dell'upload.
-Log e artefatti in `build/<preset>/`, esclusi da Git.
+Options: `-Preset Release`, `-SwdFrequencyKHz 1000`, `-ProgrammerPath <path>`,
+`-UnderReset` (requires NRST connected). Close any debug session holding the
+probe before uploading. Logs and artifacts go to `build/<preset>/`, excluded
+from Git.
 
-In VS Code: Terminal > Run Task > STM32: Build and upload Debug.
-La task chiede il seriale. Ctrl+Shift+B esegue soltanto la build.
+In VS Code: Terminal > Run Task > STM32: Build and upload Debug. The task
+prompts for the serial number. Ctrl+Shift+B only runs the build.
 
-## Cablaggio implementato
+## Wiring implemented
 
-Questi numeri TangNano sono IO FPGA, non posizioni contate sul connettore.
-Il cablaggio e' implementato nel TOP e nei vincoli del progetto LCD.
+These Tang Nano numbers are FPGA IOs, not connector pin positions. The wiring
+is implemented in `TOP` and constrained in the LCD project.
 
-| WeAct | TangNano IO | Segnale |
+| WeAct | Tang Nano IO | Signal |
 |---|---:|---|
-| GND | GND | Massa comune |
+| GND | GND | Common ground |
 | PB13 | 36 | SCK |
 | PB15 | 25 | MOSI |
 | PB14 | 26 | MISO |
-| PB12 / FPGA_CS | 27 | CS attivo basso |
-| PB0 / FPGA_IRQ_N | 28 | notifica PRESENT, attiva bassa fino ad ACK |
-| PB1 / FPGA_RST_N | 29 | reset logico della FPGA, open drain, attivo basso; pull-up 10 kΩ verso il 3V3 della Tang Nano |
+| PB12 / FPGA_CS | 27 | CS, active low |
+| PB0 / FPGA_IRQ_N | 28 | PRESENT notification, active low until ACK |
+| PB1 / FPGA_RST_N | 29 | FPGA logic reset, open drain, active low; 10 kΩ pull-up to the Tang Nano's 3V3 |
 
-La pull-up di `FPGA_RST_N` va montata sulla Tang Nano, fra IO29 e il pin 3V3
-(mai 5V: IO29 è nel banco a 3,3 V), non a metà del filo né dal lato STM32. Se il
-collegamento con la MCU si stacca, IO29 deve restare alto con decisione: con la
-sola pull-up interna un disturbo lungo più di 1 ms resetterebbe la logica.
+The `FPGA_RST_N` pull-up must be mounted on the Tang Nano, between IO29 and
+the 3V3 pin (never 5V: IO29 is in the 3.3V bank), not in the middle of the
+wire or on the STM32 side. If the MCU connection is disconnected, IO29 must
+stay firmly high: with only the internal pull-up, a disturbance longer than
+1 ms would reset the logic.
 
-Collegamento IRQ IO28 -> PB0 confermato dall'utente. Lato MCU sono predisposti
-EXTI0 sul fronte di discesa, pull-up e priorità NVIC 5 (subpriorità 0).
-IO28 e' ora pilotato dalla FPGA: un fronte segnala lo swap completato.
-L'ISR alza un flag; `LCD_Present` legge BB e conferma l'evento via BA.
+The IRQ IO28 -> PB0 connection is confirmed working. The MCU side configures
+EXTI0 on the falling edge, with a pull-up and NVIC priority 5 (subpriority 0).
+IO28 is now driven by the FPGA: an edge signals a completed swap. The ISR
+raises a flag; `LCD_Present` reads `BB` and confirms the event via `BA`.
 
-Nessun D/C. READY non e' ancora implementato e non serve al primo test breve.
-Slot microSD TangNano vuoto (SCK IO36 condiviso). Alimentazione dalle rispettive USB,
-solo masse e segnali fra schede, senza unire 5 V o 3.3 V. Logica 3.3 V,
-cavi corti, pull-up 10 kohm su CS verso 3.3 V TangNano.
-Non pilotare i pulsanti/reset a 1.8 V della TangNano con il micro.
+No D/C line. READY is not yet implemented and is not needed for this short
+test. The Tang Nano's microSD slot must stay empty (SCK IO36 is shared). Each
+board is powered from its own USB; only grounds and signals are shared
+between boards, without joining their 5 V or 3.3 V rails. Logic is 3.3 V, use
+short cables, and a 10 kΩ pull-up on CS to the Tang Nano's 3.3 V. Do not drive
+the Tang Nano's 1.8 V buttons/reset with the MCU.
 
-ST-LINK: SWDIO -> PA13, SWCLK -> PA14, GND -> GND, NRST -> NRST consigliato.
-Su sonde con ingresso VTref collegarlo al 3.3 V target. Non confondere VTref
-con l'uscita di alimentazione 3.3 V di alcune sonde/cloni; WeAct alimentata USB.
+ST-LINK: SWDIO -> PA13, SWCLK -> PA14, GND -> GND, NRST -> NRST recommended.
+On probes with a VTref input, connect it to the 3.3 V target. Don't confuse
+VTref with the 3.3 V power output some probes/clones provide; the WeAct board
+is USB powered.
 
-## Test hardware automatico
+## Automatic hardware test
 
-Dalla radice del repository:
+From the repository root:
 
-Il firmware normale ha `SPI_GPIO_PROBE=0`: per questo runner abilitare
-`SPI_GPIO_PROBE=1` in `Core/Inc/spi_diag_config.h`. Per lo stress servono anche
-`SPI_SELFTEST_ROUNDS=240` e `LCD_BOOT_TESTS=1`; ripristinare le impostazioni
-di avvio dopo la qualifica. I flag `-Require*` verificano questi prerequisiti.
+Normal firmware has `SPI_GPIO_PROBE=0`; for this runner, enable
+`SPI_GPIO_PROBE=1` in `Core/Inc/spi_diag_config.h`. Stress testing also needs
+`SPI_SELFTEST_ROUNDS=240` and `LCD_BOOT_TESTS=1`; restore these settings after
+qualification. The `-Require*` flags verify these prerequisites.
 
 ```powershell
 .\stm32\WeAct_H743_SPI\test-hardware.ps1 -SerialNumber 35FF6C064D53373238602143
 ```
 
-Esegue simulazioni SPI, build e caricamento SRAM FPGA, build e upload STM32,
-quindi legge il risultato via ST-LINK. Disponibile anche come task VS Code
-`STM32 + FPGA: Build, upload and test SPI`. Il bitstream SRAM si perde allo
-spegnimento della Tang: ripetere il comando dopo un ciclo di alimentazione.
+Runs the SPI simulation, builds and uploads the FPGA bitstream to SRAM, builds
+and uploads the STM32 firmware, then reads the result over ST-LINK. Also
+available as the VS Code task `STM32 + FPGA: Build, upload and test SPI`. The
+SRAM bitstream is lost when the Tang Nano powers off: repeat the command after
+a power cycle.
 
-`-ReadOnly` legge soltanto i risultati usando i simboli dell'ELF locale: usarlo
-solo se quell'ELF e' quello caricato. L'hash registrato identifica il file locale,
-non costituisce una verifica della flash in questa modalita'.
-`-Preset Release` seleziona anche nel runner ELF e risultati Release;
-il default resta Debug.
+`-ReadOnly` only reads results, using local ELF symbols; use it only when
+that ELF is the one actually loaded. The recorded hash identifies the local
+file but is not a flash check in this mode. `-Preset Release` also selects
+the Release ELF and results for the runner; the default remains Debug.
 
-`SpiDiagnostic` restituisce A5 al primo byte dopo CS basso, poi il precedente
-byte MOSI. Non modifica il framebuffer. Prima del DMA, una prova GPIO lenta
-invia otto byte con tre configurazioni MISO (nessun pull, up, down). Le risposte
-attese sono `A5 3C 4D 5E 6F 80 91 A2` in tutti e tre i casi.
+`SpiDiagnostic` returns `A5` for the first byte after CS goes low, then echoes
+the previous MOSI bytes. It does not touch the framebuffer. Before DMA, a
+slow GPIO test sends eight bytes under three MISO pull configurations (no
+pull, pull-up, pull-down). The expected response is `A5 3C 4D 5E 6F 80 91 A2`
+in all three cases.
 
-Il firmware normale esegue un round: 5 trasferimenti DMA a 9.375 Mbit/s,
-GPIO MEDIUM (lunghezze 1, 2, 17, 257, 4097), verificando 4374 byte.
-La qualifica a 240 round esegue 1200 trasferimenti e verifica 1049760 byte.
-I buffer sono
-in SRAM D2, allineati a 32 byte, con gestione cache se abilitata. CS viene
-rialzato dopo il completamento SPI. Il risultato e' in `g_spi_test`; il runner
-salva `build/<preset>/hardware-result.json` e fallisce su timeout o mismatch.
-La sezione RAM aggiuntiva e il sorgente del test sono collegati dal CMake
-utente, senza modificare il linker generato da CubeMX.
+The normal firmware runs one round: 5 DMA transfers at 9.375 Mbit/s, GPIO
+drive MEDIUM (lengths 1, 2, 17, 257, 4097), testing 4374 bytes. The
+240-round qualification performs 1200 transfers and checks 1,049,760 bytes.
+Buffers live in SRAM D2, aligned to 32 bytes, with cache management when the
+cache is enabled. CS is raised after the SPI transfer completes. The result
+is stored in `g_spi_test`; the runner saves `build/<preset>/hardware-result.json`
+and fails on timeout or mismatch. The extra RAM section and the test source
+are wired in by the CMake user file, without modifying the CubeMX-generated
+linker script.
 
-## Esito del primo collaudo (2026-09-08)
+## Result of the first test (2026-09-08)
 
-Simulazioni superate (525 byte RX / 515 TX generici, 32777 byte diagnostici),
-build FPGA con gate timing superato, upload FPGA e STM32 verificati.
-ST-LINK V2 rileva STM32 rev. V, alimentazione 3.27 V.
+Simulations passed (525 generic RX / 515 TX bytes, 32777 diagnostic bytes),
+FPGA build with gate timing passed, FPGA and STM32 uploads verified.
+ST-LINK V2 detects STM32 rev. V, power supply 3.27 V.
 
-**Test hardware non superato:** 40 trasferimenti completati, nessun errore HAL,
-34853 mismatch su 34992 byte. La prova GPIO legge FF con pull-up e 00 con
-pull-down: MISO appare non pilotato lato STM32 anche con CS comandato basso.
-Verificare la corrispondenza dei quattro segnali e la selezione dello slave;
-questo risultato non qualifica ancora il collegamento ne' la velocita' massima.
+**Hardware test failed:** 40 transfers completed, no HAL errors,
+34853 mismatches on 34992 bytes. The GPIO test reads FF with pull-up and 00
+with pull-down: MISO appears undriven on the STM32 side even with CS driven
+low. Check the four signal connections and the slave-select wiring; this
+result does not yet qualify the connection or the maximum speed.
 
-Aggiornamento 2026-09-09: corretto un connettore invertito, il DMA passa a
-0.78125, 1.5625, 3.125 e 6.25 MHz. A 12.5 MHz compaiono 32 mismatch su
-34992 byte nonostante il PASS timing. Configurazione corrente: 6.25 MHz,
-prescaler 32, vincolo SPI 160 ns; CubeMX allineato. Non salire ulteriormente
-prima di diagnosticare gli errori. Resta un'anomalia nei primi due byte del
-primo scambio GPIO senza pull; gli scambi con pull-up/down sono corretti.
-Il runner determina il PASS dal DMA e riporta separatamente i byte GPIO.
-Risultati e limiti: ../../docs/SPI_PERFORMANCE.md.
+Update 2026-09-09: after fixing a reversed connector, the DMA test passes at
+0.78125, 1.5625, 3.125, and 6.25 MHz. At 12.5 MHz, 32 mismatches appear across
+34992 bytes despite timing PASS. Current configuration: 6.25 MHz, prescaler
+32, SPI constraint 160 ns; CubeMX aligned. Do not raise the frequency further
+before diagnosing the errors. An anomaly remains in the first two bytes of
+the first no-pull GPIO test; pull-up/pull-down results are correct. The
+runner determines PASS from the DMA test and reports the GPIO bytes
+separately. Results and limitations: [SPI_PERFORMANCE.md](../../docs/SPI_PERFORMANCE.md).
 
-Diagnosi successiva: a 12.5 MHz i fronti MEDIUM eliminano gli errori nelle
-prove eseguite (eco lungo: 1049760 byte, sequenza autonoma: 104976 byte,
-MOSI: 24 blocchi da 4096 byte con CRC corretto). Configurazione corrente
-prescaler 16, GPIO MEDIUM, SDC 80 ns; CubeMX allineato. Il test normale e'
-stato ricaricato e supera il confronto DMA. L'anomalia della prima prova
-GPIO dopo caricamento FPGA non ricompare riavviando il solo STM32.
+Subsequent diagnosis: at 12.5 MHz, MEDIUM edge drive eliminates the errors
+across the tests performed (long echo: 1049760 bytes, autonomous sequence:
+104976 bytes, MOSI: 24 blocks of 4096 bytes with correct CRC). Current
+configuration: prescaler 16, GPIO MEDIUM, SDC 80 ns; CubeMX aligned. The
+normal test has been reloaded and passes the DMA comparison. The first-test
+GPIO anomaly does not reappear when only the STM32 is restarted after the
+FPGA has been loaded.
 
-Il nuovo `diagnose-hardware.ps1 -SerialNumber <seriale> -Mode echo|miso|mosi`
-esegue tre ripetizioni a 4.6875/9.375 MHz e fronti VERY_HIGH/HIGH/MEDIUM;
-`-Rounds 80` estende la prova. Salva fino a 16 eventi per caso con byte
-vicini, contatori totali e artefatti identificati da hash. I mismatch sono
-evidenze diagnostiche e non fanno fallire questo runner; controllare i
-risultati. `-RestoreSelfTest` disabilita la matrice e ricarica il test normale.
-Procedura e risultati: ../../docs/SPI_DIAGNOSTIC_RESULTS.md.
+The new `diagnose-hardware.ps1 -SerialNumber <serial> -Mode echo|miso|mosi`
+runs three repetitions at 4.6875/9.375 MHz and VERY_HIGH/HIGH/MEDIUM edge
+drive; `-Rounds 80` extends the test. It saves up to 16 events per case, with
+neighboring bytes, total counters, and hash-identified artifacts. Mismatches
+are diagnostic evidence and do not fail the runner on their own; check the
+results. `-RestoreSelfTest` disables the matrix and reloads the normal test.
+Procedure and results: [SPI_DIAGNOSTIC_RESULTS.md](../../docs/SPI_DIAGNOSTIC_RESULTS.md).
 
-Il firmware inizializza ora lo slave con due impulsi SCK a CS alto prima
- della prima transazione. Dopo nuovo caricamento FPGA le tre prove GPIO
-passano; il runner normale le verifica oltre al DMA. La sola commutazione
-CS senza clock non era sufficiente. Vedere il report diagnostico per i
-limiti di questa sequenza di inizializzazione e le prove successive.
+The firmware now initializes the slave with two SCK pulses while CS is high,
+before the first transaction. After reloading the FPGA, all three GPIO tests
+pass; the normal runner now checks them in addition to the DMA test.
+Toggling CS alone, without clocking, was not enough. See the diagnostic
+report for the limits of this initialization sequence and later tests.
 
+## Historical graphics update at 25 MHz
 
-## Aggiornamento grafica storico a 25 MHz
+That test's configuration was prescaler 8, GPIO MEDIUM, SDC 40 ns, and
+`SPI_FRAMEBUFFER=1`. The new serializer with a fixed first byte `A5` passed
+timing and the initial hardware test (34992 bytes with no errors, demo
+accepted). See [SPI_FRAMEBUFFER.md](../../docs/SPI_FRAMEBUFFER.md). Later
+results superseded this operating point.
 
-La configurazione di quella prova era prescaler 8, GPIO MEDIUM, SDC 40 ns e
-SPI_FRAMEBUFFER=1. Il nuovo serializer con primo byte fisso A5 supera timing
-e primo collaudo hardware (34992 byte senza errori e demo accettata).
-Vedere [SPI_FRAMEBUFFER.md](../../docs/SPI_FRAMEBUFFER.md).
-I risultati successivi hanno sostituito questo punto operativo.
+## Status after prolonged testing
 
+The initial PASS at 25 MHz is not confirmed by the extended graphics test.
+Qualification configuration: prescaler 16, 12.5 MHz MEDIUM, 240 echo rounds
+and 512 rectangles via DMA. Since September 10, 2026 the default round count
+is 1, to avoid delaying startup; it must be set back to 240 to re-run this
+qualification. Three full test runs pass after upload/reset/reload. SDC was
+40 ns during this qualification; the current value is 80 ns. Details and the
+`-RequireStress` command are in [SPI_STRESS.md](../../docs/SPI_STRESS.md). The
+earlier sections mentioning 25 MHz describe the state before the extended
+test.
 
-## Stato dopo collaudo prolungato
+## Smooth startup
 
-Il primo PASS a 25 MHz non e' confermato dalla prova grafica prolungata.
-Configurazione della qualifica: prescaler 16, 12.5 MHz MEDIUM, 240 round eco e
-512 rettangoli via DMA. Dal 10 settembre 2026 il valore predefinito dei round e'
-1, per non ritardare l'avvio: va riportato a 240 per rieseguire questa qualifica.
-Tre prove complete passano dopo upload/reset/reload.
-SDC era a 40 ns durante questa qualifica; quello corrente è 80 ns. Dettagli e comando -RequireStress
-in [SPI_STRESS.md](../../docs/SPI_STRESS.md). Le sezioni precedenti che indicano
-25 MHz descrivono lo stato prima del test prolungato.
+`LCD_BOOT_TESTS=0` leaves the graphics demo and stress test disabled. The
+current font test enables `LCD_FPGA_TEXT_DEMO=1` separately
+(`LCD_TEXT_DEMO=0`) and therefore replaces the black background with the text
+sample after the SPI echo. The demo and stress test require
+`LCD_BOOT_TESTS=1` in `Core/Inc/spi_diag_config.h` and a re-upload. The
+`-RequireGraphics` and `-RequireStress` flags check this setting. See
+[SPI_FRAMEBUFFER.md](../../docs/SPI_FRAMEBUFFER.md) for the distinction
+between the FPGA burst command and the STM32 rectangle API.
 
+## 12x24 text prototype
 
-## Avvio uniforme
+`lcd_text.c` adds `LCD_DrawCodepoint()` and `LCD_DrawText()`: fixed 12x24
+cells, opaque RGB565 rendering, and UTF-8 input. The glyph subset covers
+printable ASCII, Latin-1, the euro sign, and the four arrows: 196 glyphs and
+9408 bytes of bitmap in STM32 flash. Unavailable characters become `?`;
+newlines and carriage returns are handled, without wrapping or clipping.
 
-LCD_BOOT_TESTS=0 lascia disabilitate demo e stress grafici. La prova font
-corrente abilita separatamente LCD_FPGA_TEXT_DEMO=1 (LCD_TEXT_DEMO=0) e quindi sostituisce il fondo
-nero con il campione testuale dopo l'eco SPI. Demo e stress richiedono LCD_BOOT_TESTS=1
-in Core/Inc/spi_diag_config.h e nuovo caricamento. I comandi -RequireGraphics
-e -RequireStress controllano questa impostazione. Vedere SPI_FRAMEBUFFER.md
-per la distinzione fra comando burst FPGA e API rettangolo STM32.
-
-## Prototipo testo 12x24
-
-`lcd_text.c` aggiunge `LCD_DrawCodepoint()` e `LCD_DrawText()`: celle fisse
-12x24, rendering opaco RGB565 e input UTF-8. Il subset contiene ASCII
-stampabile, Latin-1, euro e le quattro frecce, per 196 glifi e 9408 byte di
-bitmap nella flash STM32. I caratteri non disponibili diventano `?`; newline
-e carriage return sono gestiti, senza wrapping o clipping.
-
-I dati vengono generati dal BDF 12x24 normal con:
+The data is generated from the normal-weight 12x24 BDF font with:
 
 ```powershell
 python ../../tools/generate_lcd_font.py `
@@ -238,12 +241,12 @@ python ../../tools/generate_lcd_font.py `
   Core/Inc/lcd_font_12x24.h Core/Src/lcd_font_12x24.c
 ```
 
-La sorgente e' distribuita sotto SIL OFL 1.1; attribuzione, checksum e testo
-della licenza sono in `../../third_party/terminus-font-4.49.1-master`.
-`LCD_TEXT_DEMO=1` mostra il campione del prototipo CPU dopo il self-test SPI;
-`-RequireText` controlla via SWD che il rendering sia stato inviato. Riportare
-il flag a 0 per conservare lo schermo nero dopo l'avvio.
+The source is distributed under SIL OFL 1.1; attribution, checksum, and
+license text are in `../../third_party/terminus-font-4.49.1-master`.
+`LCD_TEXT_DEMO=1` shows the CPU-rendered prototype sample after the SPI
+self-test; `-RequireText` checks via SWD that the rendering was sent. Set the
+flag back to 0 to keep the screen black after startup.
 
-Collaudo del 2026-09-09: PASS a 12.5 MHz, 1049760 byte SPI senza mismatch e
-`text_state=2`. Conferma visiva ricevuta per ASCII, grado, accenti e frecce;
-nessuna corruzione o traslazione apparente dei glifi.
+Testing 2026-09-09: PASS at 12.5 MHz, 1,049,760 SPI bytes with no mismatches,
+`text_state=2`. Visual confirmation for ASCII, degree sign, accented
+characters, and arrows; no apparent glyph corruption or mistranslation.
