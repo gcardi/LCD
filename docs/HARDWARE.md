@@ -1,28 +1,28 @@
-# Cablaggio del prototipo
+# Prototype wiring
 
-Questo schema descrive il cablaggio effettivamente usato dal firmware e dai
-vincoli FPGA. Non è uno schema PCB: i numeri `IO` della Tang Nano sono quelli
-del chip, non le posizioni del connettore.
+This diagram describes the wiring actually used by the firmware and FPGA
+constraints. It is not a PCB schematic: Tang Nano `IO` numbers refer to chip
+pins, not connector positions.
 
 ```mermaid
 flowchart LR
     MCU["WeAct STM32H743<br/>SPI2 + I²C1"]
     FPGA["Tang Nano 9K<br/>GW1NR-9C + PSRAM"]
-    LCD["Pannello RGB<br/>480 × 272"]
-    TOUCH["Touch capacitivo<br/>GT911"]
-    GND(("GND comune"))
-    V33(("3,3 V"))
-    R10K["10 kΩ<br/>pull-up esterna"]
+    LCD["RGB panel<br/>480 × 272"]
+    TOUCH["Capacitive touch<br/>GT911"]
+    GND(("Shared ground"))
+    V33(("3.3 V"))
+    R10K["10 kΩ<br/>external pull-up"]
 
     MCU -->|"PB13 / SPI2 SCK"| FPGA
     MCU -->|"PB15 / SPI2 MOSI"| FPGA
     FPGA -->|"SPI2 MISO / PB14"| MCU
-    MCU -->|"PB12 / CS attivo basso"| FPGA
+    MCU -->|"PB12 / active-low CS"| FPGA
     FPGA -->|"IRQ_N / IO28 → PB0, EXTI0"| MCU
     MCU -->|"PB1, open-drain → RST_N / IO29"| FPGA
     V33 --- R10K --- FPGA
 
-    FPGA -->|"RGB, pixel clock e timing<br/>(connessione locale sulla Tang Nano)"| LCD
+    FPGA -->|"RGB, pixel clock, and timing<br/>(local Tang Nano connection)"| LCD
 
     MCU -->|"PB8 / I²C1 SCL, 400 kHz"| TOUCH
     MCU <-->|"PB9 / I²C1 SDA, 400 kHz"| TOUCH
@@ -32,59 +32,59 @@ flowchart LR
     GND --- TOUCH
 ```
 
-## Prototipo filato
+## Wired prototype
 
-La vista annotata rende espliciti i quattro sottosistemi del banco di prova:
-display RGB e touch sono collegati localmente alla Tang Nano, mentre la WeAct
-comunica con FPGA e touch rispettivamente via SPI e I²C.
+The annotated view identifies the four subsystems in the test setup. The RGB
+display and touch panel connect locally to the Tang Nano, while the WeAct
+talks to the FPGA and touch controller over SPI and I²C respectively.
 
-![Vista annotata del prototipo: display, Tang Nano, WeAct e flat del touch](assets/images/Prototype_02.jpg)
+![Annotated prototype view: display, Tang Nano, WeAct, and touch flex cable](assets/images/Prototype_02.jpg)
 
-Il display usa il proprio flat RGB a 40 contatti. La foto dal basso chiarisce
-che non esiste un cablaggio RGB aggiuntivo fra STM32 e pannello.
+The display uses its own 40-pin RGB flex cable. The underside view makes clear
+that there is no additional RGB wiring between the STM32 and the panel.
 
-![Dettaglio del collegamento locale fra Tang Nano e pannello RGB](assets/images/Prototype_03.jpg)
+![Detail of the local Tang Nano to RGB-panel connection](assets/images/Prototype_03.jpg)
 
-## Tabella collegamenti
+## Wiring table
 
-| Funzione | STM32H743 | Tang Nano 9K | Nota |
+| Function | STM32H743 | Tang Nano 9K | Notes |
 |---|---|---|---|
-| SPI clock | PB13, SPI2 SCK | IO36 | IO36 è condiviso con il clock microSD: lasciare lo slot vuoto. |
+| SPI clock | PB13, SPI2 SCK | IO36 | IO36 shares the microSD clock; leave the slot empty. |
 | SPI MOSI | PB15, SPI2 MOSI | IO25 | MCU → FPGA. |
-| SPI MISO | PB14, SPI2 MISO | IO26 | FPGA → MCU; il driver FPGA è tri-state a CS alto. |
-| SPI CS | PB12, GPIO | IO27 | Attivo basso, gestito dal firmware. |
-| PRESENT IRQ | PB0, EXTI0 | IO28 | Attivo basso; resta basso fino all'ACK SPI. |
-| Reset logico FPGA | PB1, open-drain | IO29 | Pull-up esterna 10 kΩ verso 3,3 V sul lato Tang Nano. |
-| Touch I²C clock | PB8, I²C1 SCL | CTP-SCL | Bus a 400 kHz. |
-| Touch I²C dati | PB9, I²C1 SDA | CTP-SDA | GT911 a indirizzo 7-bit `0x5D`. |
-| Touch alimentazione | — | CTP-VCC | 3,3 V. |
-| Massa | GND | GND / CTP-GND | Obbligatoria fra tutte le schede. |
+| SPI MISO | PB14, SPI2 MISO | IO26 | FPGA → MCU; FPGA output is tri-stated when CS is high. |
+| SPI CS | PB12, GPIO | IO27 | Active low, driven by firmware. |
+| PRESENT IRQ | PB0, EXTI0 | IO28 | Active low; remains low until the SPI ACK. |
+| FPGA logic reset | PB1, open-drain | IO29 | External 10 kΩ pull-up to 3.3 V on the Tang Nano side. |
+| Touch I²C clock | PB8, I²C1 SCL | CTP-SCL | 400 kHz buses. |
+| Touch I²C data | PB9, I²C1 SDA | CTP-SDA | GT911 at 7-bit address `0x5D`. |
+| Touch power | — | CTP-VCC | 3.3 V. |
+| Ground | GND | GND / CTP-GND | Required between all boards. |
 
-## Touch: linee deliberate non collegate
+## Touch: intentionally unconnected lines
 
-`CTP-INT` non è collegato: il driver GT911 usa polling ogni 10 ms. `CTP-RST`
-è tenuto alto a 3,3 V nel prototipo e **non** va collegato a `FPGA_RST_N`; se
-in futuro servirà il reset o l'interrupt del touch, assegnare GPIO STM32
-dedicati e aggiornare qui lo schema.
+`CTP-INT` is not connected: the GT911 driver polls every 10 ms. In this
+prototype `CTP-RST` is held high at 3.3 V and **must not** connect to
+`FPGA_RST_N`. If touch reset or interrupt support is needed later, assign
+dedicated STM32 GPIOs and update this diagram.
 
-## Cablaggio a filo
+## Point-to-point wiring
 
-Il prototipo è montato su basetta millefori; i cavetti riguardano soltanto le
-linee elencate nella tabella e la massa comune. La foto laterale mostra anche
-il passaggio del flat del touch; quella dal basso documenta la realizzazione
-manuale, non introduce collegamenti ulteriori.
+The prototype is built on perfboard; point-to-point wires only implement the
+signals listed in the table and the shared ground. The side view also shows the
+touch flex-cable routing; the underneath documents the hand-built assembly and
+does not introduce any additional connections.
 
-![Vista laterale del prototipo e del flat touch](assets/images/Prototype_04.jpg)
+![Side view of the prototype and touch flex cable](assets/images/Prototype_04.jpg)
 
-![Vista dal basso del cablaggio a filo sulla basetta millefori](assets/images/Prototype_06.jpg)
+![Underside view of the point-to-point perfboard wiring](assets/images/Prototype_06.jpg)
 
-## Alimentazione e limiti
+## Power and limits
 
-STM32 e Tang Nano possono essere alimentate da USB separate; non unire le loro
-rail 5 V o 3,3 V. La massa comune è invece necessaria. Il display è connesso
-localmente alla Tang Nano e non richiede fili RGB verso la STM32: quest'ultima
-invia soltanto comandi e pixel attraverso SPI.
+The STM32 and Tang Nano can use separate USB power supplies; do not join their
+5V or 3.3V rails. A shared ground is required. The display connects locally
+to the Tang Nano and needs no RGB wires to the STM32, which sends only
+commands and pixel data over SPI.
 
-Il pulsante di reset della Tang Nano usa IO4 nel banco a 1,8 V. Per questo il
-reset comandato dalla MCU usa IO29, che è in un banco a 3,3 V, e resta un reset
-logico della FPGA/PSRAM, non una riconfigurazione del bitstream.
+The Tang Nano reset button uses IO4 in the 1.8 V bank. MCU-controlled reset
+therefore uses IO29, which belongs to a 3.3 V bank; it is a logical reset of
+the FPGA/PSRAM, not a bitstream reconfiguration.

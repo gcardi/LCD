@@ -1,286 +1,318 @@
-# Programmazione della Tang Nano 9K
+# Programming the Tang Nano 9K
 
-La configurazione verificata per questo progetto è:
+The verified configuration for this project is:
 
-- dispositivo: `GW1NR-9C` (part number `GW1NR-LV9QN88PC6/I5`);
-- ID JTAG rilevato: `0x1100481B`;
-- cavo per `programmer_cli`: `--cable-index 5` (WINUSB) sotto il driver Zadig,
-  `1` (FT2CH) sotto il driver FTDI;
-- operazione `2`: programmazione SRAM volatile;
+- device: `GW1NR-9C` (part number `GW1NR-LV9QN88PC6/I5`);
+- JTAG ID detected: `0x1100481B`;
+- cable for `programmer_cli`: `--cable-index 5` (WINUSB) under Zadig driver,
+  `1` (FT2CH) under FTDI driver;
+- `2` operation: volatile SRAM programming;
 - bitstream: `impl/pnr/LCD.fs`;
-- driver dell'interfaccia 0: **WinUSB**, messo con Zadig.
+- interface driver 0: **WinUSB**, put with Zadig.
 
-Dal 10 settembre 2026 i due script di programmazione usano **openFPGALoader**,
-ed è l'unico percorso che qui produce una scheda funzionante: `programmer_cli`
-resta raggiungibile con `-UseGowinProgrammer`, ma su questa macchina lascia in
-User Flash font che non superano il CRC. La sezione "Perché su questa macchina
-resta solo openFPGALoader" riporta le prove; quella su Zadig, come si cambia
-driver.
+Since September 10, 2026 the two programming scripts use **openFPGALoader**,
+the only path that produces a working board here: `programmer_cli` remains
+reachable with `-UseGowinProgrammer`, but on this machine it leaves User
+Flash fonts that fail the CRC. The section "Why only openFPGALoader remains
+on this machine" below reports the tests; the section on Zadig covers how to
+change drivers.
 
-Da PowerShell, nella directory del progetto:
+From PowerShell, in the project directory:
 
 ```powershell
 .\program_tang_nano_sram.ps1
 ```
 
-Per usare un altro file `.fs`:
+To use another `.fs` file:
 
 ```powershell
-.\program_tang_nano_sram.ps1 -Bitstream "percorso\altro_file.fs"
+.\program_tang_nano_sram.ps1 -Bitstream "path\other_file.fs"
 ```
 
-Il bitstream non viene prodotto da questo script: va generato prima con
-`.\build.ps1`, oppure con sintesi e place-and-route dalla GUI di Gowin EDA.
-`.\build.ps1 -Program` esegue le due cose in sequenza e programma soltanto dopo
-che il gate di timing è stato superato; vedi [VERIFICATION.md](VERIFICATION.md).
+The bitstream is not produced by this script: it must be generated first with
+`.\build.ps1`, or with synthesis and place-and-route from the Gowin EDA GUI.
+`.\build.ps1 -Program` runs both steps in sequence and only programs
+afterward if the timing gate has passed; see [VERIFICATION.md](VERIFICATION.md).
 
-Lo script termina con un'eccezione se il bitstream indicato non esiste o se
-`programmer_cli` restituisce un codice diverso da zero.
+The script raises an exception if the indicated bitstream does not exist, or
+if `programmer_cli` returns a non-zero code.
 
-A differenza di `build.ps1`, che cerca l'installazione di Gowin sotto
-`C:\Program Files\Gowin`, qui il percorso di `programmer_cli.exe` è fisso e
-punta a `Gowin_V1.9.12.01_x64`. Con un'altra versione installata si passa
-`-ProgrammerPath`, oppure si aggiorna il percorso predefinito in
-`tools/Invoke-GowinProgrammer.ps1`, che ora è l'unico punto in cui compare.
+Unlike `build.ps1`, which looks for the Gowin installation under
+`C:\Program Files\Gowin`, here the path of `programmer_cli.exe` is fixed and
+points to `Gowin_V1.9.12.01_x64`. With another version installed, pass
+`-ProgrammerPath`, or update the default path in
+`tools/Invoke-GowinProgrammer.ps1`, which is now the only place it appears.
 
-## Due trappole di programmer_cli
+## Two traps of programmer_cli
 
-Entrambi gli script passano da `tools/Invoke-GowinProgrammer.ps1`, che esiste
-per gestire due comportamenti scoperti il 10 settembre 2026:
+Both scripts go through `tools/Invoke-GowinProgrammer.ps1`, which exists
+to work around two behaviors discovered on September 10, 2026:
 
-- **`programmer_cli` non parte se l'ambiente definisce `PYTHONIOENCODING`.** È
-  un eseguibile Python congelato e il suo interprete rifiuta la forma
-  `utf-8:surrogateescape`: muore con `0xC0000409` e `Fatal Python error:
-  Py_Initialize` prima ancora di aprire il cavo. Da una PowerShell interattiva
-  non si vede quasi mai, ma colpisce qualunque automazione che esporti quella
-  variabile. L'helper la azzera per la durata della chiamata e la ripristina.
-- **`programmer_cli` esce con codice 0 anche quando stampa `Error: Verify
-  Failed`.** Il solo controllo di `$LASTEXITCODE` dichiarerebbe quindi
-  "programmata e verificata" una scheda mai verificata. L'helper ispeziona anche
-  l'output e solleva un'eccezione se vi trova un errore.
+- **`programmer_cli` does not start if the environment defines
+  `PYTHONIOENCODING`.** It is a frozen Python executable, and its interpreter
+  rejects the form `utf-8:surrogateescape`: it dies with `0xC0000409` and
+  `Fatal Python error: Py_Initialize` before even opening the cable. This is
+  almost never seen from an interactive PowerShell, but it affects any
+  automation that exports that variable. The helper unsets it for the
+  duration of the call and restores it afterward.
+- **`programmer_cli` exits with code 0 even when printing `Error: Verify
+  Failed`.** Checking `$LASTEXITCODE` alone would therefore report a board
+  "programmed and verified" when it never was. The helper also inspects the
+  output and raises an exception if it finds an error.
 
-La programmazione SRAM viene persa quando la scheda viene spenta.
+SRAM programming is lost when the board is powered off.
 
-Per rendere persistenti sia il bitstream sia i tre font della User Flash:
+To make both the bitstream and the three User Flash fonts persistent:
 
 ```powershell
 .\program_tang_nano_flash.ps1
 ```
 
-Questo passa `impl/pnr/LCD.fs` e i font insieme, e con `-UseGowinProgrammer`
-usa l'operazione Gowin 6 (`embFlash Erase,Program,Verify`) invece di
-openFPGALoader. In entrambi i casi il file dei font e' `user_flash_fonts.bin`:
-lo script controlla che cominci per `LCDF` prima di scrivere, e per il percorso
-Gowin ne trascrive un `.fi` temporaneo, perche' `programmer_cli` legge solo
-quello.
-Il build imposta `-bit_security 0`, necessario per consentire la verifica della
-Embedded Flash durante lo sviluppo. La compressione del bitstream si disattiva
-con `.\build.ps1 -NoCompress`, ma non serve a superare la verifica: provata il
-10 settembre 2026, fallisce esattamente come quella compressa. Tenerla attiva.
+This passes `impl/pnr/LCD.fs` and the fonts together, and with
+`-UseGowinProgrammer` uses Gowin operation 6 (`embFlash Erase,Program,Verify`)
+instead of openFPGALoader. In both cases the font file is
+`user_flash_fonts.bin`: the script checks that it starts with `LCDF` before
+writing, and for the Gowin path transcribes it to a temporary `.fi`, because
+`programmer_cli` only reads that format.
 
-## `Verify Failed`: non dice nulla, va accertato
+The build sets `-bit_security 0`, which is required to allow Embedded Flash
+verification during development. Bitstream compression turns off with
+`.\build.ps1 -NoCompress`, but disabling it is not needed to pass the test:
+tested on September 10, 2026, the uncompressed bitstream fails exactly like
+the compressed one. Keep compression active.
 
-`programmer_cli` fallisce **sempre** la verifica della Embedded Flash su questo
-progetto, e con essa stampa `Error: Program failed`, spesso uscendo con codice 1.
+## `Verify Failed` doesn't mean anything on its own
 
-Il 10 settembre 2026 avevo concluso che fosse un falso allarme innocuo. **Era
-sbagliato.** Dopo una di quelle programmazioni la scheda non si è più avviata:
-FPGA non configurata, `User Code 0x00000000`, e la MCU ha registrato
-`ready_attempts = 167` in due secondi senza mai ricevere risposta. Altre volte,
-con lo stesso messaggio, la flash si è avviata benissimo. Il messaggio quindi
-**non correla** con l'esito: va accertato ogni volta.
+`programmer_cli` **always** fails Embedded Flash verification on this
+project, printing `Error: Program failed` and often exiting with code 1.
 
-Le due metà si accertano in modi diversi.
+By September 10, 2026, I had concluded this was a harmless false alarm.
+**That was wrong.** After one of those programming runs the board no longer
+started: FPGA not configured, `User Code 0x00000000`, and the MCU logged
+`ready_attempts = 167` in two seconds without ever receiving a reply. Other
+times, with the same message, the flash started fine. The message **does
+not correlate** with the outcome: it must be verified each time.
 
-**User Flash, cioè i font — subito, senza togliere corrente.** Basta configurare
-la logica e guardare lo schermo:
+The two halves are checked in different ways.
+
+**User Flash, i.e. the fonts — immediately, without power-cycling.** Just
+configure the logic and look at the screen:
 
 ```powershell
 .\program_tang_nano_sram.ps1
-# poi resetta la MCU
+# then MCU reset
 ```
 
-Se il testo compare, i font sono corretti byte per byte: `FontStore` ne verifica
-il CRC-32 sui 25.152 byte prima di accettare qualunque comando. Se invece
-`g_lcd_error.phase` vale 11, l'immagine font non è valida.
+If the text appears, the fonts are correct byte by byte: `FontStore` checks
+the CRC-32 over the 25,152 bytes before accepting any command. If instead
+`g_lcd_error.phase` is 11, the font image is invalid.
 
-**Bitstream — solo con un ciclo di alimentazione.** Subito dopo la
-programmazione il dispositivo resta non configurato, quindi `Read Device Codes`
-riporta `User Code 0x00000000` e il bit di CRC error, che sembra una flash vuota
-ma non prova niente. Stacca e riattacca l'alimentazione, poi rileggi: se il
-User Code non è più `0x00000000`, la flash è buona. Il pulsante di reset non
-serve, perché qui è un reset logico e non provoca riconfigurazione.
+**Bitstream — only with a power cycle.** Immediately after programming, the
+device remains unconfigured, so `Read Device Codes` reports
+`User Code 0x00000000` and the CRC error bit, which looks like an empty
+flash but proves nothing. Unplug and replug the power, then read again: if
+the User Code is no longer `0x00000000`, the flash is good. The reset button
+is not enough here, because it triggers a logical reset and does not cause
+reconfiguration.
 
-## Programmare senza `--fiFile` cancella i font
+## Programming without `--fiFile` deletes the fonts
 
-Vale la pena ripeterlo perché è successo davvero: una programmazione del solo
-bitstream, fatta per isolare un problema, ha cancellato la User Flash. Il
-sintomo è preciso — `g_lcd_error.phase = 11`, byte di stato `E2` invece di `C3` —
-e si ripara riprogrammando con `program_tang_nano_flash.ps1`, che passa sempre
-entrambi i file.
+It's worth repeating because it really happened: a bitstream-only
+programming run, made to isolate a problem, deleted User Flash. The symptom
+is consistent — `g_lcd_error.phase = 11`, status byte `E2` instead of `C3` —
+and it is fixed by reprogramming with `program_tang_nano_flash.ps1`, which
+always passes both files.
 
-Per rimettere in funzione la scheda subito, senza aspettare,
-`program_tang_nano_sram.ps1` la configura in pochi secondi in modo volatile.
+To put the board back into operation immediately, without waiting,
+`program_tang_nano_sram.ps1` configures it volatile-only in a few seconds.
 
-Il generatore emette `user_flash_fonts.bin`, il `.mem` per le simulazioni e un
-manifest JSON. Il `.fi` non c'e' piu' fra i file versionati: e' una
-trascrizione dell'immagine, non un sorgente, e lo script se lo produce quando
-serve con `--fi-from`. Gli indirizzi al suo interno sono esadecimali senza
-prefisso.
+The generator outputs `user_flash_fonts.bin`, a `.mem` for simulations, and
+a JSON manifest. The `.fi` is no longer among the versioned files: it is a
+transcription of the image, not a source, and the script produces it on
+demand with `--fi-from`. The addresses inside it are hexadecimal without a
+prefix.
 
-## Embedded Flash e User Flash sono lo stesso array
+## Embedded Flash and User Flash are the same array
 
-Sul GW1NR-9C bitstream e User Flash non sono due memorie distinte: occupano la
-stessa flash interna. Lo si vede negli artefatti che il programmer lascia in
-`impl/pnr/`: `LCD.bin` misura 444.426 byte, mentre l'immagine fusa
-`merged_withUserFlash.bin` ne misura 524.288. La differenza, circa 78 KB, è
-esattamente la User Flash accodata in testa al bitstream.
+On the GW1NR-9C, the bitstream and User Flash are not two distinct
+memories: they occupy the same internal flash. This is visible in the
+artifacts the programmer leaves in `impl/pnr/`: `LCD.bin` measures 444,426
+bytes, while the merged image `merged_withUserFlash.bin` measures 524,288.
+The difference, about 78 KB, is exactly the User Flash appended after the
+bitstream.
 
-Da qui discende l'unica regola operativa da rispettare:
+From here comes the only operational rule that must be respected:
 
-- **ogni** programmazione della Embedded Flash *senza* `--fiFile` cancella i
-  font. Non è un guasto e non dà errore: `FontStore` non trova più
-  l'intestazione `LCDF`, alza `fonts_error`, e da quel momento il byte di stato
-  del comando testo `B8` resta `E2`. Lato STM32 la demo fallisce con
-  `g_lcd_fpga_text_demo_state = 3`. Per questo va usato sempre
-  `program_tang_nano_flash.ps1`, mai `programmer_cli` a mano;
-- `program_tang_nano_sram.ps1` (operazione 2) è invece sicuro: tocca solo la
-  SRAM di configurazione e lascia intatti i font già programmati in flash. È il
-  modo giusto di iterare sull'RTL senza riscrivere ogni volta i font.
+- **every** programming of the Embedded Flash *without* `--fiFile` deletes
+  the fonts. It is not a fault and gives no error: `FontStore` can no longer
+  find the `LCDF` header, raises `fonts_error`, and from that point the
+  status byte of the text command `B8` stays `E2`. On the STM32 side, the
+  demo fails with `g_lcd_fpga_text_demo_state = 3`. This is why
+  `program_tang_nano_flash.ps1` should always be used, never
+  `programmer_cli` by hand;
+- `program_tang_nano_sram.ps1` (operation 2) is safe instead: it only
+  touches the configuration SRAM and leaves the fonts already programmed in
+  flash intact. It's the right way to iterate on the RTL without
+  rewriting the fonts every time.
 
-Dopo una programmazione andata a buon fine, il rendering del testo diventa
-disponibile qualche millisecondo dopo il reset: `FontStore` verifica in CRC-32
-i 25.152 byte dell'immagine prima di accettare comandi. Il firmware STM32
-attende già questa finestra, fino a un secondo, in `text_ready()`.
+After successful programming, text rendering becomes available a few
+milliseconds after reset: `FontStore` checks the CRC-32 over the 25,152
+bytes of the image before accepting commands. The STM32 firmware already
+waits for this window, up to one second, in `text_ready()`.
 
-## Programmare con openFPGALoader: serve il `.bin`, non il `.fi`
+## Programming with openFPGALoader: you need the `.bin`, not the `.fi`
 
-openFPGALoader è il percorso predefinito dei due script, ed è quello che il
-10 settembre 2026 ha prodotto il primo avvio da flash riuscito con i font a
-bordo. I comandi che gli script eseguono sono questi:
+openFPGALoader is the default choice of the two scripts, and it's what
+produced the first successful flash boot with fonts on September 10, 2026.
+The commands the scripts execute are these:
 
 ```powershell
 # flash: bitstream + font
 openFPGALoader -b tangnano9k --write-flash impl\pnr\LCD.fs --user-flash fonts\user_flash_fonts.bin
-# SRAM: senza --write-flash
+# SRAM: w/o --write-flash
 openFPGALoader -b tangnano9k impl\pnr\LCD.fs
 ```
 
-Il file dei font da passare è **`user_flash_fonts.bin`**, l'immagine binaria
-grezza — ed è l'unico artefatto dei font versionato, proprio perché non ci sia
-un secondo file da sbagliare. Passare un `.fi` stampa pure `CRC check:
-Success`, ma non funziona: openFPGALoader non ha un parser per il formato `.fi`
-di Gowin — nel binario esistono solo `FsParser` e `RawParser` — e scrive il file
-byte per byte così com'è. Il `.fi` è testo ASCII che comincia con dieci righe
-`//Copyright...`, quindi in User Flash finisce quel commento al posto
-dell'intestazione `LCDF` e `FontStore` rifiuta l'immagine. Il sintomo è lo
-stesso della programmazione senza `--fiFile`: `g_lcd_error.phase = 11`.
+The font file to pass is **`user_flash_fonts.bin`**, the raw binary
+image — and it is the only versioned font artifact, precisely so there is no
+second file that could be the wrong one. Passing the `.fi` instead also
+prints `CRC check: Success`, but it does not work: openFPGALoader has no
+parser for Gowin's `.fi` format — only `FsParser` and `RawParser` exist in
+the binary — and writes the file byte for byte as-is. The `.fi` is ASCII
+text starting with ten lines of `//Copyright...`, so User Flash ends up with
+that comment instead of the `LCDF` header, and `FontStore` rejects the
+image. The symptom is the same as programming without `--fiFile`:
+`g_lcd_error.phase = 11`.
 
-Il `CRC check: Success` finale non smentisce niente di tutto questo, perché
-copre **solo il bitstream**: `--verify` di openFPGALoader vale per le SPI flash
-esterne, e la User Flash interna non viene riletta da nessuno. L'unico modo di
-verificarla resta il CRC-32 che `FontStore` calcola a runtime.
+The final `CRC check: Success` doesn't contradict any of this, because it
+covers **only the bitstream**: openFPGALoader's `--verify` applies to
+external SPI flash, and the internal User Flash is never read back by
+anyone. The only way to verify it remains the CRC-32 that `FontStore`
+calculates at runtime.
 
-Vale la pena notare che con lo stesso comando il programmer stampa due barre di
-avanzamento distinte, una per il bitstream e una molto più breve per la User
-Flash: se la seconda manca, i font non sono stati scritti.
+It's worth noting that with the same command the programmer prints two
+distinct progress bars, one for the bitstream and a much shorter one for
+User Flash: if the second one is missing, the fonts were not written.
 
-## Un solo file dei font, e perché
+## Only one font file, and why
 
-I due programmatori vogliono formati diversi e nessuno dei due si accorge di
-ricevere quello sbagliato: scrivono e basta, e il guasto si manifesta soltanto
-come font non validi a bordo. Per non lasciare la scelta a chi programma, nel
-repository c'è **un solo artefatto dei font**, `fonts/user_flash_fonts.bin`, e
-il `.fi` per Gowin viene trascritto al volo in un file temporaneo:
+The two programmers expect different formats and neither notices when it
+receives the wrong one: they just write, and the fault only shows up as
+invalid fonts on the board. To avoid leaving that choice to whoever
+programs the board, the repository has **only one font artifact**,
+`fonts/user_flash_fonts.bin`, and the `.fi` for Gowin is transcribed on the
+fly into a temporary file:
 
 ```powershell
 python .\tools\generate_user_flash_fonts.py --fi-from .\fonts\user_flash_fonts.bin --fi-out out.fi
 ```
 
-La trascrizione è deterministica e verificata byte per byte contro il `.fi` che
-era versionato prima. In più, `program_tang_nano_flash.ps1` controlla che
-l'immagine cominci per `LCDF` prima di scrivere: è lo stesso controllo che
-`FontStore` fa a bordo, ma prima del danno anziché dopo.
+The transcription is deterministic and checked byte by byte against the
+`.fi` that was released previously. Additionally, `program_tang_nano_flash.ps1`
+checks that the image begins with `LCDF` before writing: the same check
+that `FontStore` does on board, but before the damage instead of after.
 
-Che `programmer_cli` non possa mangiare il binario è accertato dentro
-`JTAGLoading.exe`, il modulo che fa il lavoro: espone una classe
-`UserFlashFile` con un attributo `comments`, un parser a righe (`readlines`,
-`startswith`) e il riconoscimento della riga `//File Format`. È un parser
-ASCII. La riga `//File Format: Hex` ha come alternativa `Bin`, che però non è
-binario grezzo: sono i 32 bit scritti come 32 caratteri `0` e `1`.
+The fact that `programmer_cli` cannot ingest the binary is established
+inside `JTAGLoading.exe`, the module that does the work: it exposes a class
+`UserFlashFile` with a `comments` attribute, a line parser (`readlines`,
+`startswith`), and recognition of the `//File Format` line. It's an ASCII
+parser. The `//File Format: Hex` line has `Bin` as an alternative, which is
+nonetheless not raw binary: the 32 bits are written as 32 characters `0`
+and `1`.
 
-## Perché su questa macchina resta solo openFPGALoader
+## Because only openFPGALoader remains on this machine
 
-Il 10 settembre 2026 i due percorsi sono stati messi alla prova uno contro
-l'altro, cambiando driver apposta. L'esito è che `-UseGowinProgrammer` **non
-produce una scheda funzionante qui**. Resta nello script per altre macchine,
-ma su questa non va usato. I fatti, nell'ordine in cui sono emersi.
+On September 10, 2026, the two paths were tested against each other,
+changing drivers on purpose. The outcome is that `-UseGowinProgrammer`
+**does not produce a working board here**. It stays in the script for other
+machines, but it should not be used on this one. The facts, in the order
+they emerged:
 
-**Tornare al driver FTDI peggiora le cose.** Disinstallando il WinUSB con
-"elimina il software del driver", Windows Update installa il driver FTDI
-*corrente*, non quello che c'era prima: qui è arrivato il 2.12.36.20 di ottobre
-2024. Gowin però si porta dietro una `ftd2xx.dll` versione 2.12.24 dell'ottobre
-2016, e le due non vanno d'accordo: `programmer_cli` con i cavi basati su FTDI
-non dà errore, **gira a vuoto per sempre** senza stampare una riga, bruciando
-CPU dentro `ftd2xx.dll`. Non è un indice di cavo sbagliato: gli indici che non
-usano FTDI rispondono in 0,15 s con un onesto `Cable failed to open`.
+**Going back to the FTDI driver makes things worse.** Uninstalling WinUSB
+with "delete the driver software," Windows Update installs the *current*
+FTDI driver, not the one that was there before: version 2.12.36.20 from
+October 2024 arrived here. Gowin, however, ships with a `ftd2xx.dll` version
+2.12.24 from October 2016, and the two don't mix: `programmer_cli` with
+FTDI-based cables gives no error, it **runs forever in circles** without
+printing a line, burning CPU inside `ftd2xx.dll`. It's not a bad cable
+index: the indexes that don't use FTDI respond in 0.15 s with an honest
+`Cable failed to open`.
 
-**Il cavo WINUSB invece funziona, e apre la strada a un solo driver.** L'elenco
-dei tipi di cavo di `programmer_cli` è: 0 GWU2X, 1/3/4 basati su FTDI, 2 porta
-parallela, **5 WINUSB**. Con il WinUSB di Zadig installato e `--cable-index 5`,
-`programmer_cli` legge i codici in 0,26 s. Per questo gli script accettano
-`-CableIndex`: sotto Zadig serve 5, non 1.
+**The WINUSB cable works, though, and opens the way to a single driver.**
+`programmer_cli`'s list of cable types is: 0 GWU2X, 1/3/4 FTDI based, 2
+parallel port, **5 WINUSB**. With Zadig's WinUSB installed and
+`--cable-index 5`, `programmer_cli` reads the codes in 0.26 s. This is why
+the scripts accept `-CableIndex`: 5 is needed under Zadig, not 1.
 
-**Ma la scrittura in flash e' sbagliata, in entrambe le meta'.** Con quel
-percorso la programmazione gira fino in fondo, poi fallisce la verifica come
-sempre. I font che lascia in User Flash non superano il CRC-32
-(`g_lcd_error.phase = 11`), e il bitstream non e' migliore: dopo un ciclo di
-alimentazione il dispositivo resta **non configurato**, `User Code 0x00000000`
-e status `0x00031421` col bit di CRC error. E' la prova che mancava, fatta il
-10 settembre 2026, e chiude la questione: non e' che si perdano solo i font.
+**But the flash write is wrong, in both halves.** With that path,
+programming runs to completion, then fails verification as always. The
+fonts it leaves in User Flash fail CRC-32 (`g_lcd_error.phase = 11`), and
+the bitstream is no better: after a power cycle the device remains **not
+configured**, `User Code 0x00000000`, and status `0x00031421` with the CRC
+error bit set. This is the proof, once obtained on September 10, 2026, that
+settles the question: it's not just the fonts that are lost.
 
-La controprova e' pulita, perche' cambia una sola variabile: sulla stessa
-scheda, con lo stesso driver WinUSB e la stessa immagine
-`user_flash_fonts.bin`, openFPGALoader lascia `phase = 0` e il testo disegnato.
-Non e' la scheda, non e' il driver e non e' l'immagine: e' `programmer_cli`.
+The counterproof is clean, because only one variable changes: on the same
+board, with the same WinUSB driver and the same `user_flash_fonts.bin`
+image, openFPGALoader leaves `phase = 0` and the text drawn. It's not the
+board, it's not the driver, and it's not the image: it's `programmer_cli`.
 
-**Quello che invece funziona benissimo e' la programmazione SRAM.** Sempre via
-WinUSB e `--cable-index 5`, `program_tang_nano_sram.ps1 -UseGowinProgrammer`
-carica il bitstream in 4,5 secondi e la logica parte: la MCU trova la FPGA
-pronta al primo tentativo, zero mismatch. Quindi per un progetto che non scriva
-in flash il Gowin Programmer resta perfettamente utilizzabile su questa
-macchina; e' l'operazione 6 sulla Embedded Flash a non essere affidabile.
+**What works fine, though, is SRAM programming.** Still with WinUSB and
+`--cable-index 5`, `program_tang_nano_sram.ps1 -UseGowinProgrammer` loads
+the bitstream in 4.5 seconds and the logic starts: the MCU finds the FPGA
+ready on the first try, zero mismatches. So for a project that doesn't
+write to flash, Gowin Programmer remains perfectly usable on this machine;
+it's operation 6 on Embedded Flash that is unreliable.
 
-Il comando per riprodurre la prova, se un domani si volesse ritentare:
+The command to reproduce the test, if you want to try again tomorrow:
 
 ```powershell
 .\program_tang_nano_flash.ps1 -UseGowinProgrammer -CableIndex 5
 .\program_tang_nano_sram.ps1  -UseGowinProgrammer -CableIndex 5
-# poi rileggere g_lcd_error.phase via SWD
+# then read g_lcd_error.phase again via SWD
 ```
 
-## Nota su utilizzo di Zadig
+## Note on using Zadig
 
-### Per passare da GowinProgrammer (programmer_cli) a openFPGALoader
+### To switch from GowinProgrammer (programmer_cli) to openFPGALoader
 
-Il dispositivo da modificare è JTAG Debugger (Interface 0) — è l'interfaccia 0 (MI_00), quella JTAG. Se legata al driver FTDIBUS non va bene.
+The device to modify is JTAG Debugger (Interface 0) — USB interface 0
+(MI_00), the JTAG one. If it is bound to the FTDIBUS driver, that's the
+problem.
 
-- Chiudere eventuali strumenti Gowin aperti.
-- Avviare Zadig come amministratore.
-- Menu Options → List All Devices (mettere la spunta, altrimenti le due interfacce non compaiono).
-- Nel menu a tendina scegliere JTAG Debugger (Interface 0). Verificare sotto che il USB ID sia 0403 6010 e che l'interfaccia sia (Interface 0).
-- Come driver di destinazione selezionare WinUSB con le frecce.
-- Premere Replace Driver e confermare.
+- Close any open Gowin tools.
+- Start Zadig as administrator.
+- Menu Options → List All Devices (check this, otherwise the two interfaces
+  will not appear).
+- In the drop-down menu choose JTAG Debugger (Interface 0). Check below that
+  the USB ID is 0403 6010 and that the interface is (Interface 0).
+- As target driver select WinUSB with the arrows.
+- Press Replace Driver and confirm.
 
-⚠️ Non si deve toccare JTAG Debugger (Interface 1). È l'interfaccia 1, quella che fornisce la porta seriale COM3: se sostituisci quel driver si perde la seriale.
+⚠️ Do not touch JTAG Debugger (Interface 1). That is interface 1, the one
+that provides the COM3 serial port: if you replace that driver, the serial
+port is lost.
 
-Due effetti attesi, entrambi normali:
+Two expected effects, both normal:
 
-- programmer_cli smetterà di vedere il cavo: da quel momento si programma solo con openFPGALoader.
-- Lo schermo potrebbe annerirsi durante la sostituzione, perché il dispositivo si ri-enumera.
+- `programmer_cli` will stop seeing the cable: from that moment you program
+  only with openFPGALoader.
+- The screen may go black during replacement, because the device
+  re-enumerates itself.
 
-### Per tornare indietro (per usare di nuovo programmer_cli / Gowin Programmer)
+### To go back (to use programmer_cli / Gowin Programmer again)
 
-Zadig non sa reinstallare il driver FTDI, quindi si passa da Gestione dispositivi: trova il dispositivo WinUSB, Disinstalla dispositivo spuntando Elimina il software del driver, poi stacca e riattacca l'USB. Windows rimette un driver FTDI da solo.
+Zadig doesn't know how to reinstall the FTDI driver, so this goes through
+Device Manager instead: find the WinUSB device, uninstall it while ticking
+"Delete the driver software", then unplug and reconnect the USB. Windows
+puts an FTDI driver back on its own.
 
-⚠️ Attenzione, provato il 10 settembre 2026: **il driver che Windows rimette non e' quello che c'era prima**, e' quello corrente scaricato da Windows Update. Qui e' arrivato il 2.12.36.20 di ottobre 2024, che la `ftd2xx.dll` del 2016 inclusa in Gowin non regge: `programmer_cli` con i cavi FTDI resta a girare a vuoto. Tornare indietro quindi non ripristina lo stato di partenza, e per farlo davvero servirebbe installare a mano un driver FTDI d'epoca. Prima di intraprendere questa strada, leggere la sezione sul confronto fra i due programmatori: non porta da nessuna parte.
+⚠️ Attention, tested on September 10, 2026: **the driver that Windows puts
+back is not the one that was there before** — it is the current one
+downloaded from Windows Update. Here, version 2.12.36.20 from October 2024
+came back, and the 2016 `ftd2xx.dll` that ships with Gowin does not hold up
+against it: `programmer_cli` with the FTDI cables just spins idle. Going
+back therefore does not restore the original state; to actually do so you
+would need to manually install a vintage FTDI driver. Before going down
+this path, read the section comparing the two programmers above — it leads
+nowhere.

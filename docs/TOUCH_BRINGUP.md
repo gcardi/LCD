@@ -1,42 +1,42 @@
-# Bring-up touch capacitivo
+# Bring-up capacitive touch
 
-Il connettore touch a sei contatti usa logica a 3,3 V:
+The six-contact touch connector uses 3.3V logic:
 
-| Flat | STM32 / prototipo |
+| Signal | STM32 / prototype |
 | --- | --- |
-| `CTP-RST` | pull-up a 3,3 V durante il primo bring-up; un GPIO dedicato in seguito |
-| `CTP-VCC` | 3,3 V |
+| `CTP-RST` | pull-up to 3.3V during first bring-up; a dedicated GPIO later |
+| `CTP-VCC` | 3.3V |
 | `CTP-GND` | GND |
-| `CTP-INT` | non collegato nel primo test; futuro GPIO EXTI dedicato |
+| `CTP-INT` | not connected in the first test; future dedicated GPIO EXTI |
 | `CTP-SDA` | `PB9`, I2C1 SDA |
 | `CTP-SCL` | `PB8`, I2C1 SCL |
 
-![Dettaglio del flat touch e dell'adattatore a sei pin del prototipo](assets/images/Prototype_05.jpg)
+![Close-up of the prototype touch flex cable and six-pin adapter](assets/images/Prototype_05.jpg)
 
-`I2C1` e' inizializzato a 400 kHz. Il task di servizio esegue una sola
-scansione degli indirizzi I2C 7-bit da `0x08` a `0x77`, senza inviare comandi
-specifici del controller. I risultati SWD sono:
+`I2C1` is initialized at 400 kHz. The service task runs a single scan of
+7-bit I2C addresses from `0x08` to `0x77`, without sending any
+controller-specific commands. The SWD results are:
 
-- `g_touch_probe_state`: `2` quando la scansione e' conclusa;
-- `g_touch_probe_found`: numero di indirizzi che hanno ACK;
-- `g_touch_probe_addresses[4]`: bitmap degli indirizzi che hanno ACK;
-- `g_touch_probe_bus_error`: ultimo errore di timeout/bus, `0` se assente.
-- `g_touch_probe_product_id`: quattro byte ASCII letti dal registro Goodix
-  read-only `0x8140` quando risponde l'indirizzo tipico `0x5D`.
+- `g_touch_probe_state`: `2` when the scan is finished;
+- `g_touch_probe_found`: number of addresses that ACK;
+- `g_touch_probe_addresses[4]`: bitmap of the addresses that ACK;
+- `g_touch_probe_bus_error`: last timeout/bus error, `0` if absent;
+- `g_touch_probe_product_id`: four ASCII bytes read from the read-only
+  Goodix register `0x8140` when the typical address `0x5D` responds.
 
-Il primo indirizzo trovato identifica la famiglia di controller da cui
-derivera' il driver LVGL. Non collegare `CTP-RST` alla linea di reset FPGA:
-il touch deve poter essere resettato in modo indipendente.
+The first address found identifies the controller family from which the
+LVGL driver is derived. Do not connect `CTP-RST` to the FPGA reset line:
+the touch must be resettable independently.
 
-## Driver LVGL GT911
+## LVGL GT911 driver
 
-Il Product ID rilevato e' `911`, all'indirizzo `0x5D`: il firmware registra un
-input device LVGL di tipo pointer in polling ogni 10 ms. Legge lo status da
-`0x814E`, il primo punto da `0x8150` e conferma ogni frame al GT911 scrivendo
-zero nello status. Le coordinate native vengono scalate automaticamente alla
-risoluzione del display 480 x 272; i dati SWD `g_gt911_sensor_width` e
-`g_gt911_sensor_height` permettono di verificare o correggere in seguito
-l'orientamento fisico. Ogni record punto inizia al registro `0x814F` e usa
-coordinate little-endian; il driver scala la risoluzione nativa rilevata
-(480 x 272 sul modulo provato) al display. Il demo rende cliccabile la barra
-di avanzamento per confermare visivamente la consegna dell'evento a LVGL.
+With the Product ID detected as `911` at address `0x5D`, the firmware
+registers a Pointer-type LVGL input device polled every 10 ms. It reads
+status from `0x814E`, the first point from `0x814F`, and acknowledges each
+frame to the GT911 by writing zero to status. Each point record is 8 bytes
+starting at `0x814F` and uses little-endian coordinates. The driver scales
+the detected native sensor resolution (480 x 272 on the tested module) to
+the display resolution automatically; SWD data `g_gt911_sensor_width` and
+`g_gt911_sensor_height` let you check or correct physical orientation
+later. The demo drives a clickable progress bar to visually confirm
+delivery of the event to LVGL.
