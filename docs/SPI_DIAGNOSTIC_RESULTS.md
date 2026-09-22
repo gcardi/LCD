@@ -1,133 +1,138 @@
-# Diagnosi SPI a 12.5 MHz — 9 settembre 2026
+# SPI diagnosis at 12.5 MHz
+## Result
 
-## Risultato
+The link moves to 12.5 MHz with STM32 GPIO set to `MEDIUM`. The wiring was
+not modified. `HIGH` and `VERY_HIGH` edge settings produce repeatable
+errors. The echo passes at 6.25 MHz, but a subsequent CRC test found a block
+with an incorrect status even at 6.25 MHz `VERY_HIGH`: use `MEDIUM`.
 
-Il collegamento passa a 12.5 MHz con GPIO STM32 `MEDIUM`. Non e' stato
-modificato il cablaggio. I fronti `HIGH` e `VERY_HIGH` producono errori
-ripetibili. L'eco a 6.25 MHz passa, ma una successiva prova CRC ha trovato
-un blocco con stato errato anche a 6.25 MHz VERY_HIGH: usare MEDIUM.
+The long echo test uses three repetitions of 400 transactions by default,
+with lengths 1, 2, 17, 257, 4097 and a variable deterministic pattern.
 
-La prova eco lunga usa tre ripetizioni di 400 transazioni per impostazione,
-con lunghezze 1, 2, 17, 257, 4097 e pattern deterministico variabile.
-
-| GPIO STM32 | Errori eco a 6.25 MHz / 1049760 byte | Errori eco a 12.5 MHz / 1049760 byte |
+| GPIO STM32 | Echo errors at 6.25 MHz / 1049760 bytes | Echo errors at 12.5 MHz / 1049760 bytes |
 |---|---:|---:|
 | VERY_HIGH | 0 | 33664 |
 | HIGH | 0 | 21970 |
 | MEDIUM | 0 | 0 |
 
-Prove separate a 12.5 MHz, tre ripetizioni per impostazione:
+Separate tests at 12.5 MHz, three repetitions per setting:
 
-| Prova | VERY_HIGH | HIGH | MEDIUM |
+| Try | VERY_HIGH | HIGH | MEDIUM |
 |---|---|---|---|
-| Eco MOSI -> MISO, 104976 byte | errori | errori | 0 errori |
-| Sequenza FPGA autonoma, 104976 byte | errori/ripartenze | errori/ripartenze | 0 errori |
-| MOSI, 24 blocchi da 4096 byte con CRC riletto lento | controllo errato | controllo errato | tutti i 24 CRC corretti |
+| Echo MOSI -> MISO, 104976 bytes | errors | errors | 0 errors |
+| Standalone FPGA sequence, 104976 bytes | errors/restarts | errors/restarts | 0 errors |
+| MOSI, 24 blocks of 4096 bytes with CRC slow reread | bad check | bad check | all 24 CRCs corrected |
 
-Tutti i casi completati senza errori HAL. Il totale di byte della prova CRC
-si riferisce a 98304 byte di payload; sul ritorno si confrontano 96 byte di
-stato, non l'intero payload. Ogni variante FPGA supera il gate timing prima
-del caricamento. La prima versione CRC a byte e' stata respinta dal gate per
-una calibrazione PSRAM a -2.596 ns e non caricata; la versione bit-seriale
-supera il gate senza cambiarne le soglie.
+All cases completed without HAL errors. The CRC test's total byte count
+refers to 98304 bytes of payload; on the return path, only 96 bytes of
+status appear, not the entire payload. Each FPGA variant passes gate timing
+before being loaded. An earlier byte-parallel CRC implementation was
+rejected by the timing gate over a PSRAM calibration path at -2.596 ns and
+was never loaded; the bit-serial version passes the gate without any
+threshold changes.
 
-## Interpretazione e limiti
+## Interpretation and limits
 
-`GPIO_SPEED_FREQ_*` regola i fronti, non la frequenza SPI. Cambiare solamente
-questa impostazione durante la matrice cambia drasticamente l'esito.
-Il risultato sostiene l'ipotesi di un problema di integrita' dei segnali;
-non dimostra quale filo o quale circuito generi il disturbo.
+`GPIO_SPEED_FREQ_*` adjusts edge slew rate, not SPI frequency. Changing just
+this setting during the matrix test drastically changes the outcome. The
+result supports the hypothesis of a signal-integrity problem; it does not
+demonstrate which wire or circuit is generating the noise.
 
-Nei primi errori eco archiviati, il byte ricevuto e' A5 mentre i vicini sono
-corretti. La sequenza autonoma riparte da A5, EA, 75...: questo e' compatibile
-con una reinizializzazione dello stato dello slave. Occorre una misura di
-SCK/CS/reset per distinguere disturbi elettrici e comportamento interno RTL.
-La sequenza autonoma esclude la dipendenza dai dati MOSI, ma usa ancora SCK,
-CS e il reset comuni: non e' una misura isolata del solo filo MISO.
+In the first archived echo errors, the received byte is A5 while its
+neighbors are correct. The autonomous (MISO) sequence restarts from A5, EA,
+75...: this is consistent with a reinitialization of the slave state. A
+dedicated SCK/CS/reset measurement is needed to distinguish electrical noise
+from internal RTL behavior. The autonomous sequence removes the dependency
+on MOSI data, but it still uses SCK, CS and the shared reset: it is not an
+isolated measurement of the MISO wire alone.
 
-Il CRC e' CRC-16/CCITT-FALSE (polinomio 1021, iniziale FFFF, MSB first, niente
-riflessione/XOR finale). La FPGA riceve 4096 byte e poi risponde C3, CRC alto,
-CRC basso, 5A. Il master mantiene CS basso e passa a 781250 Hz per lo stato.
-Una risposta di stato errata puo' indicare anche perdita di allineamento,
-non soltanto un bit MOSI errato. Simulazioni coprono i due flussi, il cambio
-di frequenza a CS basso e l'aborto di una transazione parziale.
+The CRC is CRC-16/CCITT-FALSE (polynomial 1021, initial FFFF, MSB first, no
+final reflection/XOR). The FPGA receives 4096 bytes and then responds C3,
+CRC high byte, CRC low byte, 5A. The master keeps CS low and switches to
+781250 Hz for the status read. An incorrect status response can also
+indicate a loss of alignment, not just a bad MOSI bit. Simulations cover
+both flows: the frequency switch while CS is low, and the abort of a
+partial transaction.
 
-Le modalita' richiedono bitstream distinti: i conteggi di errori fra modalita'
-non misurano direttamente la stessa implementazione fisica. I confronti
-fra fronti e frequenze all'interno di ciascuna matrice usano lo stesso
-bitstream e firmware.
+Modes require distinct bitstreams: error counts across modes do not
+directly compare the same physical implementation. The comparisons between
+edge settings and frequencies within a single matrix run use the same
+bitstream and firmware.
 
-La prima transazione dopo un caricamento FPGA presenta un'anomalia separata:
-prima prova GPIO D2 BC invece di A5 3C; senza prova GPIO preliminare, anche
-la prima lettura della sequenza autonoma a 6.25 MHz ha ricevuto D2 invece di
-A5. Il primo blocco CRC a 6.25 MHz ha anch'esso stato errato; i successivi
-passano. Le prove a regime non qualificano ancora questa condizione iniziale.
-Non sono state fatte misure analogiche, variazioni di temperatura o prove
-oltre 12.5 MHz. Non e' una qualifica della futura scrittura framebuffer.
+The first transaction after an FPGA load has a separate anomaly: the first
+GPIO test reads `D2 BC` instead of `A5 3C`; without a preliminary GPIO test,
+the first reading of the autonomous sequence at 6.25 MHz also received `D2`
+instead of `A5`. The first CRC block at 6.25 MHz also failed; the following
+ones pass. The fully operational tests do not yet qualify this initial
+condition. No analog measurements, temperature variation or tests above
+12.5 MHz were made. This is not a qualification of future framebuffer
+writes.
 
-## Riproduzione e artefatti
+## Reproduction and artifacts
 
-Dalla radice del progetto:
+From the project root:
 
 ```powershell
 .\stm32\WeAct_H743_SPI\diagnose-hardware.ps1 -SerialNumber 35FF6C064D53373238602143 -Mode echo
 .\stm32\WeAct_H743_SPI\diagnose-hardware.ps1 -SerialNumber 35FF6C064D53373238602143 -Mode miso
 .\stm32\WeAct_H743_SPI\diagnose-hardware.ps1 -SerialNumber 35FF6C064D53373238602143 -Mode mosi
 .\stm32\WeAct_H743_SPI\diagnose-hardware.ps1 -SerialNumber 35FF6C064D53373238602143 -Mode echo -Rounds 80
-# Ripristina il normale test eco, compila/carica entrambe le schede e verifica:
+# Restore the normal echo test, fill out/upload both forms, and verify:
 .\stm32\WeAct_H743_SPI\diagnose-hardware.ps1 -SerialNumber 35FF6C064D53373238602143 -RestoreSelfTest
 ```
 
-Il runner imposta MODE nel TOP e nella configurazione C, abilita la matrice,
-e vincola SCK a 80 ns prima della build. Lascia questa configurazione attiva
-finche' non viene richiesto RestoreSelfTest. Tale opzione ripristina la
-modalita' eco normale; frequenza/fronti del test normale sono in spi.c e
-nella funzione probe_gpio. I mismatch sono risultati diagnostici e non
-causano eccezione; timeout, dump incompleti, errori HAL e timing non ammesso
-causano eccezione. Il runner normale rifiuta una configurazione matrice attiva.
+The runner sets `MODE` in both the TOP module and the C configuration,
+enables the matrix, and constrains SCK to an 80 ns period before the build.
+This configuration stays active until `-RestoreSelfTest` is requested; that
+option restores normal echo mode. The normal test's frequency and edge
+settings live in `spi.c` and the `probe_gpio` function. Mismatches are
+recorded as diagnostic, non-fatal findings; timeouts, incomplete dumps, HAL
+errors and illegal timing raise an exception. The normal runner refuses to
+run with an active matrix configuration.
 
-Ogni archivio in `stm32/WeAct_H743_SPI/build/Debug/` contiene result.json,
-matrix.bin, ELF, bitstream, report timing e hash degli artefatti:
+Each archive in `stm32/WeAct_H743_SPI/build/Debug/` contains result.json,
+matrix.bin, the ELF, the bitstream, the timing report and artifact hashes:
 
-- diagnostic-echo-20260909-105509: matrice iniziale, 8 round;
-- diagnostic-miso-20260909-105616: sequenza autonoma;
-- diagnostic-mosi-20260909-105832: CRC bit-seriale;
-- diagnostic-echo-20260909-110023: matrice lunga, 80 round.
+- diagnostic-echo-20260909-105509: initial matrix, 8 rounds;
+- diagnostic-miso-20260909-105616: autonomous sequence;
+- diagnostic-mosi-20260909-105832: bit-serial CRC;
+- diagnostic-echo-20260909-110023: long array, 80 rounds.
 
-Questi archivi sono ignorati da Git. Ogni caso salva fino a 16 errori con
-round, lunghezza, indice e byte precedente/successivo attesi e ricevuti;
-il valore 256 indica un vicino non presente. I contatori totali non sono
-limitati ai 16 eventi archiviati. Layout RAM verificato con static assert,
-indirizzi letti dai simboli ELF, senza indirizzi SWD fissati nel runner.
+These archives are ignored by Git. Each case saves up to 16 errors with the
+expected and received values, round, length, index and previous/next bytes;
+the value 256 indicates a missing neighbor. Total counters are not limited
+to the 16 archived events. RAM layout is verified with a static assert,
+addresses are read from ELF symbols, and no SWD addresses are hardcoded in
+the runner.
 
-## Inizializzazione dopo caricamento FPGA
+## Initialization after FPGA loading
 
-Esperimenti successivi con lo stesso bitstream eco:
+Follow-up experiments with the same echo bitstream:
 
-- caricamento FPGA + STM32, senza inizializzazione aggiunta: primo GPIO D2 BC;
-- solo upload/reset STM32, FPGA gia' in funzione: tutti i GPIO corretti;
-- CS basso/alto senza clock dopo caricamento FPGA: anomalia invariata;
-- due impulsi SCK lenti con CS sempre alto prima della prima transazione:
-  tutte e tre le prove GPIO corrette e DMA a 12.5 MHz MEDIUM senza errori.
+- FPGA + STM32 load, no added initialization: first GPIO test reads `D2 BC`;
+- STM32 upload/reset only, FPGA already running: all GPIO tests correct;
+- CS toggled low/high without clocking after FPGA load: anomaly unchanged;
+- two slow SCK pulses with CS held high before the first transaction: all
+  three GPIO tests correct, and DMA at 12.5 MHz `MEDIUM` without errors.
 
-Il firmware ora esegue questi due impulsi a slave deselezionato, dopo
-l'attesa iniziale di 100 ms. Non scarta una transazione di dati: nessuno
-slave e' selezionato durante i due impulsi. E' una sequenza di inizializzazione
-verificata sul banco; non costituisce una spiegazione definitiva del
-comportamento interno della FPGA all'avvio. Il runner normale ora richiede
-anche che tutti e tre gli scambi GPIO coincidano con la sequenza attesa.
+The firmware now executes these two pulses with the slave deselected, after
+the initial 100 ms wait. This does not discard a data transaction: no slave
+is selected during the two pulses. It is an initialization sequence
+verified empirically; it does not constitute a definitive explanation of the
+FPGA's internal startup behavior. The normal runner now also requires that
+all three GPIO exchanges match the expected sequence.
 
-Evidenze: diagnose-final-cold.json, diagnose-final-warm.json,
+Evidence: diagnose-final-cold.json, diagnose-final-warm.json,
 diagnose-cs-init.json, diagnose-idle-clocks.json in build/Debug.
 
-Ricontrollo con l'inizializzazione aggiunta:
+Re-checking with the added initialization:
 
-- diagnostic-miso-20260909-110820: prima transazione corretta; MEDIUM senza
-  errori a entrambe le frequenze, 104976 byte per frequenza;
-- diagnostic-mosi-20260909-110856: primo blocco corretto; tutti i 24 blocchi
-  MEDIUM corretti a ciascuna frequenza. VERY_HIGH a 6.25 MHz mostra un blocco
-  con quattro byte di stato errati nella seconda ripetizione, quindi non
-  tutti i difetti VERY_HIGH sono limitati al primo avvio o ai 12.5 MHz.
+- diagnostic-miso-20260909-110820: first transaction now succeeds; `MEDIUM`
+  without errors at both frequencies, 104976 bytes per frequency;
+- diagnostic-mosi-20260909-110856: first block fixed; all 24 blocks correct
+  at `MEDIUM` for each frequency. `VERY_HIGH` at 6.25 MHz shows a freeze
+  with four bad status bytes in the second repetition, so not all
+  `VERY_HIGH` defects are limited to first boot or to 12.5 MHz.
 
-Il test normale finale usa 12.5 MHz, fronti MEDIUM, MODE=0, matrice disabilitata.
-La verifica normale e' stata ripetuta dopo nuovo caricamento delle due schede.
+The final normal test uses 12.5 MHz, `MEDIUM` edges, `MODE=0`, matrix
+disabled. The normal check was repeated after reloading both boards.

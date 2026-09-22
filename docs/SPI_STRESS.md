@@ -1,104 +1,113 @@
-# Collaudo prolungato SPI e grafica — 9 settembre 2026
+# Extended SPI and graphics testing, as of September 9th
 
-> Report storico: frequenze e vincoli sotto sono quelli delle prove del 9 settembre.
-> Stato corrente: [GRAPHICS_COMMANDS.md](GRAPHICS_COMMANDS.md) e
-> [RIPRESA.md](RIPRESA.md). Per ripetere lo stress abilitare GPIO probe,
-> 240 round eco e test grafici; l'avvio normale non li abilita.
+> Current status: [GRAPHICS_COMMANDS.md](GRAPHICS_COMMANDS.md) and
+> [RIPRESA.md](RIPRESA.md). To repeat the stress test, enable the GPIO
+> probe, 240 echo rounds and the graphics tests; normal startup does not
+> enable them.
 
-## Esito
+## Result
 
-La qualifica prolungata **non passa a 25 MHz**: l'eco DMA passa, ma il flusso
-grafico presenta errori intermittenti. Configurazione finale **12.5 MHz MEDIUM**,
-prescaler 16 in C e CubeMX. SDC conservato a 40 ns, piu' restrittivo del clock
-master effettivo; lo stesso bitstream serve al confronto fra frequenze.
+Extended qualification **does not pass at 25 MHz**: the DMA echo passes, but
+graphics traffic shows intermittent errors. Final configuration **12.5 MHz
+MEDIUM**, prescaler 16 in C and CubeMX. The SDC is set to 40 ns, more
+restrictive than the actual master clock; the same bitstream is used for
+comparing frequencies.
 
-A 12.5 MHz, con firmware finale e risposte registrate, tre esecuzioni PASS:
-caricamento STM32, solo reset STM32, ricaricamento FPGA seguito da reset STM32.
-Ogni esecuzione verifica:
+At 12.5 MHz, with the final firmware, three PASS runs were recorded: STM32
+load, STM32 reset only, and FPGA reload followed by STM32 reset. Each run
+checks:
 
-- 1200 trasferimenti eco DMA, 1049760 byte, zero mismatch e HAL error;
-- tutte e tre le prove GPIO corrette;
-- 512 rettangoli, 354528 pixel attivi e 30035 pacchetti grafici;
-- stato stress 2, fase errore LCD 0, demo inviata correttamente.
+- 1200 DMA echo transfers, 1049760 bytes, zero mismatches and zero HAL errors;
+- all three GPIO tests correct;
+- 512 rectangles, 354528 active pixels and 30035 graphics packets;
+- stress state 2, LCD error phase 0, demo drawn successfully.
 
-Somma delle tre esecuzioni finali: 3149280 byte eco, 1536 rettangoli,
-1063584 pixel attivi e 90105 pacchetti grafici. Non e' stata effettuata una
-rilettura PSRAM dei pixel: i controlli grafici verificano eco e accettazione
-SPI, mentre il banco simulato verifica dati, maschere e indirizzi PSRAM.
-La prova di ricaricamento non e' uno spegnimento/riaccensione delle alimentazioni.
+Sum of the three final runs: 3149280 echo bytes, 1536 rectangles, 1063584
+active pixels and 90105 graphics packets. No PSRAM pixel readback was
+performed in any of them: the hardware graphics checks verify SPI echo and
+acceptance, while the simulated bench verifies data, masks and PSRAM
+addresses. The reload test is not a power-supply off/on cycle.
 
-## Cosa ha rivelato il test a 25 MHz
+## What the 25 MHz test revealed
 
-Con il firmware grafico HAL in polling, errore iniziale al rettangolo di indice
-172 (indici da zero). Aggiunta diagnostica del primo errore, si osserva indice
-70 con risposta finale 5A anziche' AC, senza HAL error. Una guardia CS di 1 us
-non risolve: fallimento a indice 126 con la stessa risposta.
+With HAL graphics firmware in polling mode, the first error occurred at
+rectangle index 172 (indices from zero). After adding diagnostics for the
+first error, the observed index was 70, with a final response of 5A instead
+of AC, and no HAL error. A 1 us CS guard does not fix it: failure at index
+126 with the same response.
 
-A 12.5 MHz lo stesso test polling passa. Registrare direttamente la risposta
-nel dominio SCK migliora il percorso verso TX ma non elimina da solo il difetto:
-a 25 MHz il polling fallisce anche con il nuovo bitstream (indice 46).
+At 12.5 MHz the same polling test passes. Registering the response directly
+in the SCK domain improves the path to TX but does not eliminate the defect
+by itself: at 25 MHz, polling still fails even with the new bitstream (index
+46).
 
-Portando il traffico grafico su DMA, una prova a 25 MHz completa tutti i 512
-rettangoli; dopo ricaricamento FPGA, pero', fallisce a indice 275, nella query
-B7 00: arriva A5 invece di C3/00. Il test lungo eco passa anche in questa prova.
-Quindi ne' il primo PASS DMA ne' la chiusura timing qualificano il collegamento
-grafico prolungato a 25 MHz. La causa fisica/RTL/periferica resta da isolare;
-i risultati non dimostrano che DMA risolva il problema o che sia solo cablaggio.
-LVGL non e' stato integrato: la condizione concordata del PASS a 25 MHz manca.
+Moving graphics traffic to DMA, a 25 MHz test completes all 512 rectangles;
+after an FPGA reload, however, it fails at index 275, on the `B7 00` poll: A5
+arrives instead of C3/00. The long echo test also passes in this run.
+Therefore neither this first DMA PASS nor the earlier timing closure qualify
+prolonged graphics traffic at 25 MHz. The physical/RTL/peripheral cause
+remains to be isolated; the results do not prove that DMA solves the
+problem, nor that it is only a wiring issue. LVGL has not been integrated:
+the agreed condition for a 25 MHz PASS is still missing.
 
-## Modifiche conservate
+## Changes retained
 
-`SPI_SELFTEST_ROUNDS` in spi_diag_config.h controlla la durata dell'eco; il
-runner ricava i conteggi attesi dalla configurazione. Il valore predefinito e'
-ora 8, sceso da 240 il 10 settembre 2026 perche' l'eco lunga ritardava di nove
-secondi la comparsa del testo a ogni avvio. `-RequireStress` pretende pero'
-oltre 1.000.000 di byte controllati, cioe' almeno 229 round: prima di quella
-qualifica va riportato a 240 e il firmware ricompilato. Il runner lo verifica
-ora in anticipo e lo dice, invece di fallire alla fine sul totale. Il primo byte B7 viene
-sostituito con 37 nel pattern eco per non attivare il parser grafico.
+`SPI_SELFTEST_ROUNDS` in spi_diag_config.h controls the echo duration; the
+runner reads the expected counts from the configuration. The default value
+is now 8, down from 240 as of September 10, 2026, because the long echo
+delayed the text appearing at each startup by nine seconds. `-RequireStress`,
+however, demands over 1,000,000 bytes checked, i.e. at least 229 rounds:
+before that qualification the value must be brought back to 240 and the
+firmware recompiled. The runner now checks this in advance and reports it,
+instead of failing at the end on the total count. The echo pattern's first
+byte, `B7`, is replaced with `37` so it doesn't trigger the graphics parser.
 
-`LCD_Stress_Run()` varia larghezza 1..67, altezza 1..40, posizione e pixel,
-forzando regolarmente i quattro angoli e coordinate non allineate. Si ferma
-al primo errore, senza retry che possano nasconderlo. `g_lcd_stress` conserva
-stato, rettangoli/pixel/pacchetti, tempo e indice del rettangolo fallito.
-`g_lcd_error` conserva fase, indirizzo, indice byte, atteso, ricevuto e HAL error.
+`LCD_Stress_Run()` varies width 1..67, height 1..40, position and pixels,
+regularly forcing the four corners and non-aligned coordinates. It stops at
+the first mismatch, without a retry that could hide it. `g_lcd_stress` holds
+status, rectangle/pixel/packet counts, elapsed time and the index of the
+failed rectangle. `g_lcd_error` holds phase, address, byte index, expected
+value, received value and HAL error.
 
-`SPI_Exchange_DMA()` riusa buffer allineati in SRAM D2 e callback del self-test,
-con gestione cache e timeout; il chiamante possiede CS e attende la conclusione.
-Non supporta trasferimenti concorrenti. Il firmware grafico usa guardie CS di
-1 us basate sul contatore DWT, senza cambiare la frequenza SCK durante i pacchetti.
-La demo viene inviata prima e dopo lo stress; il pannello conserva i rettangoli
-del test, sovrapposti, insieme al rettangolo RGB finale.
+`SPI_Exchange_DMA()` reuses the aligned buffers in SRAM D2 and the self-test
+callbacks, with cache and timeout management; the caller owns CS and waits
+for completion. It does not support concurrent transfers. The graphics
+firmware uses 1 us CS guards based on the DWT counter, without changing the
+SCK frequency during packets. The demo is sent before and after the stress
+test; the panel retains the test's rectangles, overlaid, together with the
+final RGB rectangle.
 
-La FPGA registra la risposta successiva sul fronte che completa il byte RX,
-eliminando il mux combinazionale index/status verso il registro TX. Protocollo
-invariato, suite SPI/framebuffer PASS. Build finale a 40 ns: gate timing PASS,
-quattro endpoint di calibrazione PSRAM ammessi, worst -0.669 ns, nessuna
-violazione hold/recovery/removal e nessuna nuova eccezione.
+The FPGA now registers the next response on the edge that completes the RX
+byte, eliminating the combinational index/status mux feeding the TX
+register. Protocol unchanged, SPI/framebuffer suite PASS. Final build at 40
+ns: gate timing PASS, four allowed PSRAM calibration endpoints, worst slack
+-0.669 ns, no hold/recovery/removal violations and no new exceptions.
 
-## Riproduzione
+## Reproduction
 
-Dopo la modifica per l'avvio nero uniforme, abilitare prima `LCD_BOOT_TESTS=1`
-in Core/Inc/spi_diag_config.h, poi ricompilare/caricare con il comando seguente.
-Al termine riportarlo a 0 e ricaricare STM32 per mantenere lo sfondo uniforme.
+Now that the boot screen is solid black, enable `LCD_BOOT_TESTS=1` first in
+Core/Inc/spi_diag_config.h, then rebuild/flash with the following command.
+When finished, set it back to 0 and reload the STM32 to keep the boot
+background uniform.
 
 
 ```powershell
-# Build/upload e prova completa nella configurazione corrente (SPI ordinaria 9,375 MHz):
+# Build/upload and full test in the current configuration (standard SPI at 9.375 MHz):
 ./stm32/WeAct_H743_SPI/test-hardware.ps1 -RequireGraphics -RequireStress -TimeoutSeconds 120 -SerialNumber 35FF6C064D53373238602143
-# Solo lettura quando firmware/ELF coincidono:
+# Read-only when the firmware and ELF match:
 ./stm32/WeAct_H743_SPI/test-hardware.ps1 -ReadOnly -RequireGraphics -RequireStress -TimeoutSeconds 120 -SerialNumber 35FF6C064D53373238602143
 ```
 
-Per ripetere dopo reset STM32, usare il pulsante reset o CubeProgrammer -rst,
-poi il comando ReadOnly. Per il ricaricamento usare program_tang_nano_sram.ps1,
-resettare STM32 e leggere di nuovo. I risultati vengono salvati nel JSON hardware;
-la sola lettura non avvia un nuovo test e non verifica da sola la corrispondenza ELF.
+To repeat after an STM32 reset, use the reset button or CubeProgrammer's
+`-rst`, then run the ReadOnly command. To repeat after a reload, use
+program_tang_nano_sram.ps1, reset the STM32 and read again. Results are
+saved to the hardware JSON; ReadOnly does not trigger a new test and does
+not check for ELF matching on its own.
 
-Archivi sotto `stm32/WeAct_H743_SPI/build/Debug/` (ignorati da Git):
+Archives under `stm32/WeAct_H743_SPI/build/Debug/` (ignored by Git):
 `stress-first-fail.json`, `stress-commit-fail.json`, `stress-guard-25-fail.json`,
 `stress-guard-12m5-pass.json`, `stress-registered-status-fail.json`,
 `stress-dma25-warm-pass.json`, `stress-dma25-reload-fail.json`,
 `stress-dma12m5-upload-pass.json`, `stress-dma12m5-reset-pass.json`,
-`stress-dma12m5-reload-pass.json`. L'archivio `stress-final-12m5` contiene ELF,
-bitstream, report timing, metadati e le tre prove finali.
+`stress-dma12m5-reload-pass.json`. The `stress-final-12m5` archive contains
+ELF, bitstream, timing report, metadata and the three final tests.
